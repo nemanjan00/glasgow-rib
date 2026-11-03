@@ -6,8 +6,11 @@ also writing their own host software (CPS), so this applet is the PHY for that, 
 RSS/DOSBox bridge.
 
 Read first: `README.md` (applet), `CONNECTION.md` (GM600 wiring), `PROTOCOL.md` (GM600 SBEP
-protocol, reverse engineered from DPS), `FIRMWARE.md` (GM600 firmware static analysis: CPU/memory
-map, flash banking, the SBEP dispatch table, and answers to several PROTOCOL.md open questions).
+protocol, reverse engineered from DPS and confirmed on a radio), `CODEPLUG.md` (the 640-byte
+codeplug decode: block layout, channel/PL/identity fields, per-block `0xFF−sum` checksums, options
+status), `FREQ_ENCODING.md` (stored↔frequency formula, solved), `FIRMWARE.md` (GM600 firmware
+static analysis: CPU/memory map, flash banking, SBEP dispatch). Host-side tools and the DPS capture
+rig are in `tools/`.
 
 ## Repo conventions
 
@@ -88,6 +91,12 @@ pass.
 the radio ACKs `10` with `50`, then resets, and after the reset it answers `23 01` (serial) and
 `13`. Transcript and details are in `PROTOCOL.md` → "Confirmed on a GM600".
 
+**Read and write both confirmed live**: a standalone host client (`tools/sbep_write.py`) wrote the
+codeplug (every `17` → `84`) and read it back; `tools/sbep_client.py` reads. The codeplug is
+decoded in `CODEPLUG.md` (channels, PL, identity, per-block `0xFF−sum` checksums); the frequency
+formula is in `FREQ_ENCODING.md`. Per-channel option bits (Power/Inhibit/Monitor/Data) are the main
+thing still unbound — they're in a separate personality structure, not the channel record.
+
 - The applet must use `from glasgow.support import logging`. Current Glasgow pipes call
   `logger.trace()`, and a stdlib logger crashes at startup.
 - The V1 `analyzer` applet gave a false "line low" capture once. Use `control-gpio` (e.g.
@@ -95,18 +104,22 @@ the radio ACKs `10` with `50`, then resets, and after the reset it answers `23 0
 
 ## Next steps
 
-1. **Codeplug: solved.** It's the 640-byte CPU EEPROM, `0x0D80`–`0x0FFF`, read with 20 × 32-byte
-   `11` reads, and dumped (`docs/…-alignment-0D80.bin`). DPS runs under QEMU with its COM port
-   bridged to the applet `socket`; read and write sessions are captured in `~/captures/`. See
-   `PROTOCOL.md` → "Reading and writing a radio" and `DUMP_SEQUENCE.md`. Decoding is in the
-   motorola-cps repo.
-2. Still open on the radio: time the reset after `10`; what `20`/`22` do (capture them from DPS,
+1. **Codeplug: read + write solved and decoded.** 640-byte CPU EEPROM `0x0D80`–`0x0FFF`, read with
+   20 × 32-byte `11` reads, written with `17` blocks over `0x0E13`–`0x0FFB`. DPS runs under QEMU
+   bridged to the applet `socket` (rig in `tools/README.md`); read/write sessions captured in
+   `~/captures/`. See `PROTOCOL.md`, `CODEPLUG.md`, `FREQ_ENCODING.md`, `DUMP_SEQUENCE.md`. Fuller
+   RE write-ups are also in the motorola-cps repo.
+2. **Bind the per-channel option bits** (Tx Power/Inhibit/Monitor/Data): located to a separate
+   personality structure (`~0x0F33`), not bit-mapped. Needs DPS-generated contrast (a real display —
+   headless mouse/grid-combo editing doesn't work) or the conventional-personality field table in
+   `WDPS_NP.EXE`. Also undecoded: the **MPT1327 trunking network block** (`~0x0E13`–`0x0F32`).
+3. Still open on the radio: time the reset after `10`; what `20`/`22` do (capture them from DPS,
    don't guess). The owner may be using Glasgow for DPS sessions: check before running anything
    on it.
-3. Possible: timestamped events from the gateware (byte, BUSY edge, collision, framing error),
+4. Possible: timestamped events from the gateware (byte, BUSY edge, collision, framing error),
    for a better sniffer. Today `sniff` timestamps come from the host and are only accurate to
    a few ms.
-4. `motorola-cps` integration (the owner's JS CPS for CM/CP Commercial Series radios,
+5. `motorola-cps` integration (the owner's JS CPS for CM/CP Commercial Series radios,
    `git@github.com:nemanjan00/motorola-cps.git`):
    - Same frame format as the GM600 (`F0|len`, op, data, `0xFF − sum` checksum), but a different
      command set.
