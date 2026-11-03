@@ -185,9 +185,10 @@ another.
 **Write confirmed live (2026-11-03):** a standalone host client (`tools/sbep_write.py`) replayed
 this `17`-write stream straight through the applet socket — every `17` returned `84` (OK), and a
 read-back showed the bytes landed. The radio writes whatever it is told: it `84`s each block
-**regardless of codeplug validity**. DPS validates only on *read* (per-block `0xFF−sum` checksums
-and field constraints), so a host that writes the radio must compute those checksums itself for a
-later DPS read to accept it. See [CODEPLUG.md](CODEPLUG.md) and [tools/](tools/).
+**regardless of codeplug validity**. DPS validates only on *read* (per-block checksums and field
+constraints), so a host that writes the radio must reproduce those checksums for a later DPS read to
+accept it — the checksum is additive per block, but its exact target/boundaries aren't pinned yet.
+See [CODEPLUG.md](CODEPLUG.md) and [tools/](tools/).
 
 DPS has no "leave programming mode" command. The radio drops out on a timeout or a power cycle.
 
@@ -250,10 +251,10 @@ First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
   | `8000`–`DAFF` | fixed firmware (`Copyright 1992, Motorola, Inc.`, `R03.03.21`), vectors at `FFD6` |
 
 - The alignment block starts `02 50 7F EA 4E B4 02 09 "807IYA0903CG" …`. Bytes 6–7 are the
-  `02 09` that `23 00` returns, so the ID queries read from this EEPROM. The whole 640 bytes sum to
-  `0xB0`, not `0xFF`, because the checksum is **per block, not over the image**: each of DPS's
-  Radio / Network / Personality blocks is a `0xFF−sum` checksum (its bytes sum to `0xFF`), proven by
-  write-probe — see [CODEPLUG.md](CODEPLUG.md).
+  `02 09` that `23 00` returns, so the ID queries read from this EEPROM. DPS checks **per-block**
+  checksums (Radio / Network / Personality), not one over the image; write-probes show the scheme is
+  additive but its exact target/boundaries/checksum-byte are not yet established — see
+  [CODEPLUG.md](CODEPLUG.md).
 - The board only has a 256 KB flash (U0102), a 32 KB "hybrid" SRAM (U0103, probably
   battery-backed) and the CPU EEPROM. The codeplug is the CPU EEPROM (see "Reading and writing a
   radio"); I first assumed a separate 2 KB personality region behind paging, which was wrong.

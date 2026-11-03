@@ -28,16 +28,21 @@ patching a few bytes, so one session writes a complete, valid-framed codeplug wi
 change. Modes:
 
 - *(default)* dry run — parse + print, send nothing.
-- `--restore` — replay the stream unmodified → returns the radio to the captured baseline. This is
-  the safe undo; always finish a probe session with it.
+- `--restore` — replay the stream unmodified → returns the radio to the **captured (post-DPS)
+  baseline**, which is the safe undo for a probe session. Note it is *not* the factory original:
+  DPS's captured write had already cleared `0x0FF5`–`0x0FFB` (`20 00 00 00 00 11 DC` → `FF`), so
+  replaying it keeps those `FF`. The factory bytes live only in the pre-write dumps (see
+  [../CODEPLUG.md](../CODEPLUG.md)).
 - `--write` — send the patched stream. `PROBE_SET=<name>` picks the patch table (see the top of the
   file). Each `17` is checked for an `84` (OK) reply.
 
-How the probes stay valid: the personality block uses a `0xFF−sum` checksum (see
-[../CODEPLUG.md](../CODEPLUG.md)), so a changed byte must be balanced by an equal, opposite change
-to **another byte in the same block** (the probe sets do this with a spare byte or a Tx-PL index),
-keeping the block sum ≡ `0xFF`. A non-zero net delta is rejected by DPS on read with a block
-checksum error; off-step frequencies or an Inhibit-with-PL combo are rejected as invalid values.
+How the probes stay valid: each block has an **additive** checksum (see
+[../CODEPLUG.md](../CODEPLUG.md)), so a changed byte is balanced by an equal, opposite change to
+**another byte in the same block** (the probe sets do this with a spare byte or a Tx-PL index),
+leaving the block's sum unchanged. This works *only* because the net change is zero — it does not
+reproduce the actual checksum, so it can't be used to write an arbitrary (net-nonzero) change. A
+non-zero net delta is rejected by DPS on read with a block checksum error; off-step frequencies or
+an Inhibit-with-PL combo are rejected as invalid values.
 
 The patch addresses in `sbep_write.py` are specific to this radio's layout and its captured
 `sniff-write.log`; adapt both for another radio/codeplug.

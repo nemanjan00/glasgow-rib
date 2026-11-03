@@ -40,25 +40,43 @@ This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`; record at `0x0F83` has Tx `0x
 - **Serial:** ASCII `807IYA0903CG` at `0x0D88` (also returned by `23 01`).
 - **Transmit timeout:** enabled + duration 10 s (GUI), stored in the personality block.
 
-## Per-block checksums — `sum ≡ 0xFF` (0xFF−sum)
+## Per-block checksum — additive, but exact scheme NOT established
 
-Each block carries its own checksum so that **the block's bytes sum to `0xFF` (mod 256)** — the
-classic `cks = 0xFF − sum(rest)` scheme. DPS validates each on read and rejects the whole read on
-mismatch, with a block-specific message: `Radio / Network / Personality Data Checksum Failure`.
+DPS validates the read with per-block checksums and rejects the whole read on a mismatch, with a
+block-specific message: `Radio / Network / Personality Data Checksum Failure`. Write-probes
+established only this much:
 
-Proven by write-probe:
-- A **net-zero** change inside the personality block (e.g. `+1` on one byte, `−1` on another)
-  **passes** the personality checksum → confirms the sum model and that both bytes are in-block.
-- A **non-zero** delta fails with the matching block's error. This localized the blocks: byte
-  `0x0F06` is in the **Network** block; the channel region (`0x0F6D`–`0x0F74` at least) is in the
-  **Personality** block.
+- The checksum is **additive**: a **net-zero** change inside a block (e.g. `+1` on one byte, `−1`
+  on another) **passes**; any **non-zero** net delta **fails** with that block's error. This also
+  localized the checksum domains — byte `0x0F06` is in the **Network** block; the channel region
+  (`0x0F6D`–`0x0F74`) is in the **Personality** block.
+- Additivity is **all it proves.** It does **not** establish the target constant, the exact block
+  boundaries, or where the checksum byte lives — a net-zero change passes for *any* target and *any*
+  boundaries. **Correction (caught by an independent pre-write dump):** the earlier "each block sums
+  to `0xFF`" claim here was wrong. Summing the ranges in the layout table gives Radio `0xD1`,
+  Network `0xDD`, Personality `0x06` — none is `0xFF`, no two-way split of `0x0E13`–`0x0FFB` makes
+  each half sum to `0xFF`, and the Personality sum isn't even invariant across the DPS write
+  (`0x06` → `0xF2`, see the trailing-field note below), so these boundaries aren't right either.
 - The radio **writes whatever bytes it is told** — every `17` returns `84` (OK) regardless of
-  codeplug validity. Validation happens in DPS on *read*, not in the radio on write. So a host must
-  compute the per-block `0xFF−sum` checksums itself for the radio to be programmable by DPS
-  afterwards (the radio itself will run a bad-checksum codeplug, but DPS won't re-read it).
+  codeplug validity; DPS validates on *read*, not the radio on write.
 
-(The raw 640 bytes summing to `0xB0`, noted in PROTOCOL.md, is just because the checksum is
-*per-block*, not over the whole image.)
+**So `tools/sbep_write.py`'s balancing trick works only because a net-zero change never alters a
+block's sum.** A host writing a *genuinely modified* codeplug must first find the real checksum
+byte(s) and formula (target constant + boundaries + where the stored checksum is) — **still
+unknown.** This is the next thing to nail down before arbitrary native writes are safe for a later
+DPS read. (The raw 640 bytes summing to `0xB0` is just because the checksum is per-block.)
+
+## DPS clears a 7-byte trailing field on write
+
+DPS's captured write changed exactly **7 bytes** beyond re-writing the data: `0x0FF5`–`0x0FFB`,
+from `20 00 00 00 00 11 DC` in the factory image to `FF FF FF FF FF FF FF`. Likely a
+programming-history / flag / counter field (`11 DC` looks like a value, not padding). Consequences:
+
+- `tools/sbep_write.py --restore` replays DPS's captured write, so it restores the **post-DPS**
+  state (`FF` here) — **not** the factory original.
+- The factory bytes survive only in the **pre-write dumps** (`native-eeprom.bin`, and the lab's
+  `docs/gm600-807IYA0903-2026-11-03-alignment-0D80.bin`) — keep them.
+- What those 7 bytes encode is not yet known; worth decoding.
 
 ## Per-channel options — located, not yet bit-bound
 
@@ -84,7 +102,8 @@ frequencies must sit on the channel step grid (off-step → "Personality data is
 
 ## How much is reversed
 
-- Read/write wire protocol + container (block map, `0xFF−sum` checksums): **~90–95 %**, proven live.
+- Read/write wire protocol: **~90–95 %**, proven live. Container (block map, checksums): partial —
+  additive per-block checksum shown, but target/boundaries/checksum-byte not yet pinned.
 - Conventional channel programming (freq, PL, channel table, identity, timeout): **~90–95 %**.
 - Whole-codeplug field content: **~50–60 %** — the undecoded **MPT1327 trunking network block** is
   the biggest remaining chunk, followed by the per-channel option bits and the factory
