@@ -6,7 +6,8 @@ also writing their own host software (CPS), so this applet is the PHY for that, 
 RSS/DOSBox bridge.
 
 Read first: `README.md` (applet), `CONNECTION.md` (GM600 wiring), `PROTOCOL.md` (GM600 SBEP
-protocol, reverse engineered from DPS).
+protocol, reverse engineered from DPS), `FIRMWARE.md` (GM600 firmware static analysis: CPU/memory
+map, flash banking, the SBEP dispatch table, and answers to several PROTOCOL.md open questions).
 
 ## Repo conventions
 
