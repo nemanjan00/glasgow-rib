@@ -79,8 +79,10 @@ From Python (`glasgow repl rib …` or your own app), via the applet's `RIBInter
 
 ```python
 iface = applet.rib_iface
-echo = await iface.transfer(bytes([0x05, 0x01, 0x00, 0x1f, 0x9a]))  # write + read back the echo
-reply = await iface.read(5)
+frame = bytes.fromhex("F1 10 FE")
+echo = await iface.transfer(frame, timeout=0.5)  # write + read back the echo
+if echo != frame: ...                            # collision (short echo or wrong bytes): retry
+ack = await iface.read(1)                        # 50 = ACK, 60 = NAK
 await iface.get_busy()
 ```
 

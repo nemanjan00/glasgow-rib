@@ -93,8 +93,10 @@ assert encode(0x05) == b"\x50"
 
 1. Send the whole frame in **one** write, so the applet puts it on the wire with no gaps
    between bytes.
-2. Read back exactly `len(frame)` bytes of echo and compare them with what you sent. A mismatch
-   means a collision: retry.
+2. Read back `len(frame)` bytes of echo and compare them with what you sent. A mismatch
+   means a collision: retry. Use a timeout here (DPS uses `(n_data + 100) * 5` ms): on a
+   collision the applet stops sending and drops the rest of the frame, so fewer bytes come
+   back. `iface.transfer(frame, timeout=…)` does this and returns whatever echo arrived.
 3. Wait up to **200 ms** for the ACK byte `50`. `60` is a NAK.
 4. If the command returns data, a second frame follows the ACK. `86` is the error opcode.
 

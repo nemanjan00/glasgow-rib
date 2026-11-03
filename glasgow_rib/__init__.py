@@ -362,12 +362,29 @@ class RIBInterface:
     async def flush(self):
         await self._pipe.flush()
 
-    async def transfer(self, data: Buffer) -> memoryview:
+    async def transfer(self, data: Buffer, *, timeout: float | None = None) -> memoryview:
         """Transmits ``data`` and returns its echo as read back from the bus. A mismatch between
         the two means another device was talking at the same time (a collision).
+
+        On a collision the gateware stops transmitting and discards the rest of the burst, so
+        fewer than ``len(data)`` bytes come back. With ``timeout`` (in seconds), whatever arrived
+        by then is returned, which then fails the comparison; without it, this waits forever.
         """
         await self.write(data, flush=True)
-        return await self.read(len(data), flush=False)
+        if timeout is None:
+            return await self.read(len(data), flush=False)
+
+        echo = bytearray()
+        deadline = asyncio.get_running_loop().time() + timeout
+        try:
+            # One byte at a time, so nothing past the echo (i.e. the reply) is consumed.
+            while len(echo) < len(data):
+                remaining = deadline - asyncio.get_running_loop().time()
+                echo += await asyncio.wait_for(self._pipe.recv(1), max(remaining, 0))
+        except TimeoutError:
+            self._log("echo timeout, got %d of %d bytes", len(echo), len(data))
+        self._log("rx echo=<%s>", dump_hex(echo))
+        return memoryview(echo)
 
     async def monitor(self, *, interval=1.0):
         """Logs receive errors."""
