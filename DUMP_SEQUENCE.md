@@ -89,11 +89,15 @@ which is a different encoding from the `.per` file. So scanning the dump with th
 (probe-1 follow-up) cannot locate it — wrong encoding.
 
 What this means for the plan:
-- Dumping candidate regions is still worth doing — the most likely home for RW codeplug data is the
-  battery-backed external SRAM (`1080`–`3FFF`, inferred) and the EEPROM (`0D80`–`0FFF`, already
-  readable) — but the bytes will be **packed**, not channel-readable.
-- To turn a raw dump into channels we need the **packed-layout map (NP seg54)** reversed. That is a
-  no-radio static-RE task and is now the critical missing piece, not more wire probing.
+- **No new radio read is needed to get the bytes.** The candidate regions — external SRAM
+  (`1080`–`3FFF`, inferred) and EEPROM (`0D80`–`0FFF`) — are already fully in the 64 KB dump. A
+  re-read would only show which bytes are live. The remaining work is **decoding**.
+- **"Packed somewhere in `1080`–`3FFF`" is a hypothesis, not shown.** What is *proven* is only "no
+  flat `.per` layout anywhere". `1080`–`3FFF` is clearly live working RAM (e.g. the self-referential
+  record table at `0x2000`). If the reversed packed layout (NP seg54) matches nothing in the dump,
+  **paging via some unseen command is back on the table** and a wire test is needed after all.
+- To turn a raw dump into channels we need the **packed-layout map (NP seg54)** reversed and then
+  tested against the dump. That is a no-radio static-RE task and is now the critical path.
 
 On the agent's second question — where DPS gets the region addresses: **not** from the `0x13`/`82`
 reply. `82 00 20 00` is a hardcoded constant block size (proven in FIRMWARE.md), not addresses. The
