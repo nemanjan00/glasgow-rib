@@ -173,9 +173,10 @@ Read:
 Write (as captured; no `19` was sent):
 
 1. A full read as above, then `23` ×2 and `13`.
-2. **`17` writes covering `0x0E13`–`0x0FFB` only**: 16 × 32 bytes from `0x0E13`, then 2 bytes at
-   `0x0FF3` and 7 bytes at `0x0FF5`. `0x0D80`–`0x0E12` (serial, identity) is never written.
-3. `13`, then `10` at the end (presumably to restart the radio on the new codeplug).
+2. **`17` writes covering `0x0E13`–`0x0FFB` only**: 15 × 32 bytes from `0x0E13`, then 2 bytes at
+   `0x0FF3`. `0x0D80`–`0x0E12` (serial, identity) and `0x0FFC`–`0x0FFF` are never written.
+3. `13`, then 7 bytes at `0x0FF5`, then `10` at the end (presumably to restart the radio on the
+   new codeplug).
 
 Each `17` is answered by an `84`/`85` result frame. Before writing, DPS checks that the radio's
 serial number matches the loaded data, so a codeplug read from one radio can't be written to
