@@ -86,29 +86,13 @@ With the radio **on**:
 
 ## Running the applet
 
-The applet is not registered with Glasgow yet. Add it to the `glasgow.applet` entry points
-(for example in Glasgow's `software/pyproject.toml`), then reinstall Glasgow in this venv:
-
-```toml
-[project.entry-points."glasgow.applet"]
-rib = "glasgow_rib:RIBApplet"
-```
-
-Then:
+See [README.md](README.md#install) for installing and running the applet. For the GM600, keep
+the default baud rate (9600, the only one the 600 Series uses) and leave `--busy` off. Start
+with `sniff` to check the wiring before transmitting anything:
 
 ```sh
-# Watch the bus without transmitting; good first check
 glasgow run rib -V 5 --bus A0 sniff
-
-# Expose the bus as a pseudo-terminal (for DOSBox-X directserial, 86Box, or your own CPS)
-glasgow run rib -V 5 --bus A0 pty
-
-# Expose the bus as a TCP socket
-glasgow run rib -V 5 --bus A0 socket tcp:localhost:2323
 ```
-
-The default baud rate, 9600, is the only one the 600 Series uses. Leave `--busy` off: the
-GM600 has no BUSY line.
 
 ## Alternative: control head connector J0101
 

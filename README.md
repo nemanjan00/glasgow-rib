@@ -28,17 +28,12 @@ banks run at 5 V, so no level shifter is needed.
 
 ## GM600 wiring
 
-From the GM600 UHF service manual (controller schematic 8402626Y07):
+Connect BUS+ to accessory connector J0400 pin 6 and ground to pin 7, set the Glasgow I/O voltage
+to 5 V, and leave `--busy` off (the GM600 has no BUSY line). [CONNECTION.md](CONNECTION.md) has
+the full pinout, the circuit behind pin 6, meter checks before connecting, and the control head
+connector alternative.
 
-| Signal | Where |
-|---|---|
-| BUS+ | accessory connector J0400 pin 6 (`SCI_DATA_IN`), or control head connector J0101 pin 15 |
-| GND | J0400 pin 7 |
-
-The GM600 has no BUSY line, so leave `--busy` off. J0400 pin 8 (`SCI_DATA_OUT`) runs through
-Q0421, which is marked not fitted (NU) on this board revision, so use pin 6. The pull-up on the
-J0400 side (R0429) is also NU. If edges look slow on a scope, add 4.7 kΩ from BUS+ to 5 V; the
-Glasgow's internal pull-up is weak.
+The programming protocol (SBEP framing, checksums, commands) is in [PROTOCOL.md](PROTOCOL.md).
 
 ## Install
 
