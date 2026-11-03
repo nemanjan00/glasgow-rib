@@ -70,6 +70,37 @@ The authoritative answer is one **live DPS "Read Radio" capture** through the ap
 `pty` under 86Box): it shows the exact region addresses and whether `0x21` is used. The DPS master
 read order (10 main regions, then record sets) is documented in the motorola-cps repo.
 
+## Offline analysis of the 64 KB dump (2026-11-03, no radio)
+
+Searched `docs/gm600-807IYA0903-2026-11-03-cpu64k.bin` with the DPS `.per`/`.rad` field map
+(frequencies are plain LE32 Hz; serial is ASCII; tuning grid references 375.000 MHz and band edges
+403.625–469.625 MHz). Three independent negatives:
+
+- The band-edge / reference calibration frequencies are **not present** as plain LE32 Hz anywhere.
+- There is **no regular flat-Hz channel grid** — only code/data coincidences in the 400–475 MHz
+  byte window, no paired Rx/Tx table with a sane step.
+- The serial `807IYA0903` appears **only** at `0x0D88` (the EEPROM). A flat `.per` image would
+  repeat it (serial is ASCII at `.per` 0x4C0); it does not.
+
+**Conclusion: the radio does not hold a flat `.per`-format codeplug anywhere in the readable
+64 KB.** It stores the codeplug in the **packed on-air format** (the field map's NP seg54
+bit-position layout: WDPS_NP.EXE file `0x9B9E0`, 59×14-byte records, unpacker at file `0x795B4`),
+which is a different encoding from the `.per` file. So scanning the dump with the `.per` field map
+(probe-1 follow-up) cannot locate it — wrong encoding.
+
+What this means for the plan:
+- Dumping candidate regions is still worth doing — the most likely home for RW codeplug data is the
+  battery-backed external SRAM (`1080`–`3FFF`, inferred) and the EEPROM (`0D80`–`0FFF`, already
+  readable) — but the bytes will be **packed**, not channel-readable.
+- To turn a raw dump into channels we need the **packed-layout map (NP seg54)** reversed. That is a
+  no-radio static-RE task and is now the critical missing piece, not more wire probing.
+
+On the agent's second question — where DPS gets the region addresses: **not** from the `0x13`/`82`
+reply. `82 00 20 00` is a hardcoded constant block size (proven in FIRMWARE.md), not addresses. The
+region addresses are codeplug-relative offsets held in DPS static (relocated) data, e.g. the
+`0x4C5/0x4E1/0x4FD` offsets the DPS RE already found — offsets into the codeplug image, combined
+with a base, not values readable from any radio reply.
+
 ## Do NOT send (not read-only — can detune or brick)
 
 - `0x17` write, `0x20`/`0x22` tuning/softpot writes, `0x19`.
