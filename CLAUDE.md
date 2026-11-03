@@ -95,14 +95,14 @@ the radio ACKs `10` with `50`, then resets, and after the reset it answers `23 0
 
 ## Next steps
 
-1. **Dump the codeplug (personality).** It is not in the 64 KB `11` view: it's paged in, most
-   likely by `21`. The `21` values have to come from DPS. Another agent is reversing
-   `WDPS_DP.EXE` statically, because the owner has nothing to run DPS on. Once the read sequence
-   is known, run it read-only and check each region's checksum. Don't guess `21` values on the
-   radio.
-2. Still open on the radio (read-only): time the reset after `10`, and the meaning of the `82`
-   reply. The `80` header and the `23` indexes are settled. Don't send `17`, `20`, `22` or `19`.
-   The alignment block (`0D80`–`0FFF`) is already dumped; see `PROTOCOL.md`.
+1. **Codeplug: solved.** It's the 640-byte CPU EEPROM, `0x0D80`–`0x0FFF`, read with 20 × 32-byte
+   `11` reads, and dumped (`docs/…-alignment-0D80.bin`). DPS runs under QEMU with its COM port
+   bridged to the applet `socket`; read and write sessions are captured in `~/captures/`. See
+   `PROTOCOL.md` → "Reading and writing a radio" and `DUMP_SEQUENCE.md`. Decoding is in the
+   motorola-cps repo.
+2. Still open on the radio: time the reset after `10`; what `20`/`22` do (capture them from DPS,
+   don't guess). The owner may be using Glasgow for DPS sessions: check before running anything
+   on it.
 3. Possible: timestamped events from the gateware (byte, BUSY edge, collision, framing error),
    for a better sniffer. Today `sniff` timestamps come from the host and are only accurate to
    a few ms.

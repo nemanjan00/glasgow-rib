@@ -154,29 +154,45 @@ ACK                        50
 NAK                        60
 ```
 
-## Reading a radio (what DPS does)
+## Reading and writing a radio (what DPS does, captured on a GM600)
 
-1. `10`: enter programming mode, up to 3 tries.
-2. `23 01`: read the ID string at index 1 (probably the serial number).
-3. `13`: ask the largest block size the radio accepts.
-4. For each memory region: optionally `21` to preset the address, then a loop of `11` reads.
-   - Chunk size = `clamp(min(total / 20, radio_max), 0x20, 0x100)`.
-   - The address goes up by one chunk on each read.
-5. Read the **0x280-byte alignment block at radio address `0xD80`**.
-6. Check each region's checksum (`0xFF − sum`, the same scheme as the files).
+Captured on 2026-11-03: real DPS (`WDPS_DP.EXE`) under QEMU, through the applet, against a real
+GM600. Logs in `~/captures/` (`sniff-readall.log`, `sniff-write.log`); not in git.
+
+**The whole GM600 codeplug is the 640-byte CPU EEPROM at `0x0D80`–`0x0FFF`.** There is no
+separate personality region, no paging and no `21`. DPS builds its `0x7F1`-byte `.per` file
+from these 640 bytes.
+
+Read:
+
+1. `10` to enter programming mode. The radio ACKs and resets; then it answers without another `10`.
+2. `23` ID queries, `13`.
+3. **20 × `11` reads of 32 bytes, `0x0D80`, `0x0DA0` … `0x0FE0`.** The captured data matches a
+   dump made earlier with this applet's own `11` reads byte for byte.
+
+Write (as captured; no `19` was sent):
+
+1. A full read as above, then `23` ×2 and `13`.
+2. **`17` writes covering `0x0E13`–`0x0FFB` only**: 16 × 32 bytes from `0x0E13`, then 2 bytes at
+   `0x0FF3` and 7 bytes at `0x0FF5`. `0x0D80`–`0x0E12` (serial, identity) is never written.
+3. `13`, then `10` at the end (presumably to restart the radio on the new codeplug).
+
+Each `17` is answered by an `84`/`85` result frame. Before writing, DPS checks that the radio's
+serial number matches the loaded data, so a codeplug read from one radio can't be written to
+another.
 
 DPS has no "leave programming mode" command. The radio drops out on a timeout or a power cycle.
 
-Writing works the same way, with `17` blocks, each answered by an `84`/`85` result frame.
-Before writing, DPS checks that the radio's serial number matches the one in the loaded data,
-so a codeplug read from one radio can't be written to another.
+Frequency fields are big-endian 16-bit: `f = 375.000 MHz + (v & 0x7FFF) × (bit 15 ? 6.25 : 5 kHz)`.
+Checked against the dump: `0x0DDA`–`0x0DE7` holds seven words decoding to 403.625, 418.625,
+431.625, 439.625, 450.625, 460.625 and 469.625 MHz (the band-edge and tuning grid).
 
 ## Memory layout
 
 | What | Size | Notes |
 |---|---|---|
-| Personality region | `0x7F1` bytes (new format) / `0x799` bytes (old format) | Same contents as the `.per` file body |
-| Alignment block | `0x280` bytes at `0xD80` | Also stored at offset `0xD80` in archive files |
+| Codeplug (all of it) | `0x280` bytes at `0xD80`, the CPU EEPROM | Read 20 × 32 bytes; writable part `0x0E13`–`0x0FFB` |
+| `.per` file | `0x7F1` bytes (new format) / `0x799` bytes (old format) | A DPS file format, built from the 640 bytes; not a radio region |
 
 The `.net`, `.per` and `.rad` file formats (a repeating 7-byte XOR key
 `5D 29 EA 64 B3 7F 1C`) and the field offsets are documented separately in the Motorola RE
@@ -230,10 +246,8 @@ First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
   sum to `0xFF` (they sum to `0xB0`), so DPS's region checksum covers a sub-range or uses
   another scheme.
 - The board only has a 256 KB flash (U0102), a 32 KB "hybrid" SRAM (U0103, probably
-  battery-backed) and the CPU EEPROM. No 2 KB personality region shows up in the 64 KB view,
-  so it's behind paging, probably selected with `21`. A checksum scan of the dump for
-  `0x7F1`/`0x799`-byte regions closing to `0xFF` finds only chance-level hits. Don't guess `21`
-  values: get them from DPS.
+  battery-backed) and the CPU EEPROM. The codeplug is the CPU EEPROM (see "Reading and writing a
+  radio"); I first assumed a separate 2 KB personality region behind paging, which was wrong.
 
 ## Other traffic on BUS+
 
@@ -248,19 +262,17 @@ BUS+ activity while pressing buttons. Keep the parser robust anyway:
 
 ## Open questions
 
-- Is the 3-byte header in an `80` reply `addr_hi addr_mid addr_lo` or `len addr_hi addr_mid`?
 - Which `23` index returns the model and which the radio info? (Index 1 is the serial.)
 - How long the reset after `10` takes, and whether the radio needs anything before it accepts
   commands again.
 - What the `82` reply bytes mean.
-- What `21` presets, and where the personality lives (flash or SRAM page).
+- What `21` does. DPS doesn't send it to a GM600.
 - What exactly do `20`, `22` and `19` do?
 - Does the radio enforce its own limit on the gap between received bytes? DPS allows 121 ms on
   its side.
 - Where pins 6, 7 and 14 physically sit on the J0400 face. The wiring works, but the
   layout isn't recorded yet.
 
-Two ways to settle these: reverse `WDPS_DP.EXE` statically (in progress; the codeplug read
-sequence and its `21` values are the priority), or run it in Windows 3.11 under 86Box with COM1
-on the applet's `pty` and capture one full read and write session. There is currently no machine
-set up to run DPS, so the static route comes first.
+DPS runs under QEMU with its COM port bridged to the applet's `socket` (via `socat`), so more
+of these can be settled by capturing DPS sessions. The `20`/`22` tuning commands are the
+interesting remaining ones.
