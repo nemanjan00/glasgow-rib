@@ -206,8 +206,28 @@ First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
   handles it with its 21 ms wait.
 - Without 9 V on HOOK, `F1 10 FE` gets only its echo, and no ACK.
 - `8B` replies repeat the index before the string and have no NUL terminator.
-- `82` carries 3 data bytes (`00 20 00`), not 2. Either 0x0020 (32 bytes) plus a trailing byte,
-  or a leading byte plus 0x2000.
+- `82` carries 3 data bytes (`00 20 00`), not 2. What they mean is open: 64-byte reads work,
+  so it isn't a 32-byte limit.
+- `23` indexes: 0 → `02 09` (binary, maybe a model code), 1 → `807IYA0903` (serial), 3 →
+  `R03.03.21` (firmware version), 4 → `02.03` (probably the codeplug version). 3 and 4 end
+  in a NUL; 1 doesn't.
+- `11` reads the **CPU's 64 KB logical address space**: the top address byte is ignored and
+  reads wrap every 64 KB. The `80` reply header is the 3-byte address as sent.
+- Reads of up to 64 bytes work. A 128-byte read is refused with a bare `80` in place of the ACK.
+- Memory map seen through `11` (68HC11K1):
+
+  | Range | Contents |
+  |---|---|
+  | `0000`–`03FF` | registers and RAM (changes between reads) |
+  | `0D80`–`0FFF` | CPU internal EEPROM, 640 bytes = the "alignment block": serial `807IYA0903CG`, tuning |
+  | `1000`–`67FF` | code-like data; `1000` changes between reads |
+  | `6800`–`7FFF`, `DB00`–`FFBF` | `FF` |
+  | `8000`–`DAFF` | firmware (`Copyright 1992, Motorola, Inc.`, `R03.03.21`), vectors at `FFD6` |
+
+- The board only has a 256 KB flash (U0102), a 32 KB "hybrid" SRAM (U0103, probably
+  battery-backed) and the CPU EEPROM. No 2 KB personality region shows up in the 64 KB view,
+  so it's behind paging, probably selected with `21`. Don't guess `21` values: get them from
+  DPS.
 
 ## Other traffic on BUS+
 
@@ -226,7 +246,8 @@ BUS+ activity while pressing buttons. Keep the parser robust anyway:
 - Which `23` index returns the model and which the radio info? (Index 1 is the serial.)
 - How long the reset after `10` takes, and whether the radio needs anything before it accepts
   commands again.
-- Which bytes of the `82` reply are the block size.
+- What the `82` reply bytes mean.
+- What `21` presets, and where the personality lives (flash or SRAM page).
 - What exactly do `20`, `22` and `19` do?
 - Does the radio enforce its own limit on the gap between received bytes? DPS allows 121 ms on
   its side.
