@@ -190,7 +190,7 @@ already readable with plain `11` reads.
 
 The `11` dump is the CPU's 64 KB *logical* view, so it contains **only the flash bank that was
 mapped at `4000`–`7FFF` when it was read** (bank `04`), plus the fixed `8000`+ region, RAM and the
-EEPROM. The other eleven banks — including the query-reply formatter and, almost certainly, the
+EEPROM. The other ten banks — including the query-reply formatter and, almost certainly, the
 personality codec — are not here.
 
 To get the rest you either:

@@ -214,20 +214,26 @@ First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
 - `11` reads the **CPU's 64 KB logical address space**: the top address byte is ignored and
   reads wrap every 64 KB. The `80` reply header is the 3-byte address as sent.
 - Reads of up to 64 bytes work. A 128-byte read is refused with a bare `80` in place of the ACK.
-- Memory map seen through `11` (68HC11K1):
+- Memory map seen through `11` (summary; [FIRMWARE.md](FIRMWARE.md) has the full map and how it
+  was derived):
 
   | Range | Contents |
   |---|---|
-  | `0000`–`03FF` | registers and RAM (changes between reads) |
-  | `0D80`–`0FFF` | CPU internal EEPROM, 640 bytes = the "alignment block": serial `807IYA0903CG`, tuning |
-  | `1000`–`67FF` | code-like data; `1000` changes between reads |
-  | `6800`–`7FFF`, `DB00`–`FFBF` | `FF` |
-  | `8000`–`DAFF` | firmware (`Copyright 1992, Motorola, Inc.`, `R03.03.21`), vectors at `FFD6` |
+  | `0000`–`02FF` | internal RAM (changes between reads) |
+  | `0D80`–`0FFF` | CPU internal EEPROM, 640 bytes = the "alignment block" |
+  | `1000`–`107F` | CPU register block (bank select `0x1058`, SCI data `0x1077`); live, changes between reads |
+  | `4000`–`7FFF` | banked 16 KB flash window: shows whichever bank is mapped in at the time |
+  | `8000`–`DAFF` | fixed firmware (`Copyright 1992, Motorola, Inc.`, `R03.03.21`), vectors at `FFD6` |
 
+- The alignment block starts `02 50 7F EA 4E B4 02 09 "807IYA0903CG" …`. Bytes 6–7 are the
+  `02 09` that `23 00` returns, so the ID queries read from this EEPROM. Its 640 bytes do **not**
+  sum to `0xFF` (they sum to `0xB0`), so DPS's region checksum covers a sub-range or uses
+  another scheme.
 - The board only has a 256 KB flash (U0102), a 32 KB "hybrid" SRAM (U0103, probably
   battery-backed) and the CPU EEPROM. No 2 KB personality region shows up in the 64 KB view,
-  so it's behind paging, probably selected with `21`. Don't guess `21` values: get them from
-  DPS.
+  so it's behind paging, probably selected with `21`. A checksum scan of the dump for
+  `0x7F1`/`0x799`-byte regions closing to `0xFF` finds only chance-level hits. Don't guess `21`
+  values: get them from DPS.
 
 ## Other traffic on BUS+
 
@@ -254,6 +260,7 @@ BUS+ activity while pressing buttons. Keep the parser robust anyway:
 - Where pins 6, 7 and 14 physically sit on the J0400 face. The wiring works, but the
   layout isn't recorded yet.
 
-The quickest way to settle all of these: run the real `WDPS_DP.EXE` in Windows 3.11 under
-86Box, point its COM1 at the applet's `pty`, and capture one full read and write session (or
-watch with `sniff`). Then make your CPS reproduce that session byte for byte.
+Two ways to settle these: reverse `WDPS_DP.EXE` statically (in progress; the codeplug read
+sequence and its `21` values are the priority), or run it in Windows 3.11 under 86Box with COM1
+on the applet's `pty` and capture one full read and write session. There is currently no machine
+set up to run DPS, so the static route comes first.

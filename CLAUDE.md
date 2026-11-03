@@ -95,11 +95,14 @@ the radio ACKs `10` with `50`, then resets, and after the reset it answers `23 0
 
 ## Next steps
 
-1. Read-only bring-up with a radio: time the reset after `10`; try `23` indexes 0, 3 and 4;
-   work out the `82` block-size bytes; read one small `11` block and work out the `80` header.
-   Don't send `17`, `20`, `22` or `19`.
-2. Capture a real DPS session (WDPS_DP.EXE under 86Box with COM1 → applet `pty`) to answer the
-   rest of the open questions in `PROTOCOL.md`, including how DPS handles the reset after `10`.
+1. **Dump the codeplug (personality).** It is not in the 64 KB `11` view: it's paged in, most
+   likely by `21`. The `21` values have to come from DPS. Another agent is reversing
+   `WDPS_DP.EXE` statically, because the owner has nothing to run DPS on. Once the read sequence
+   is known, run it read-only and check each region's checksum. Don't guess `21` values on the
+   radio.
+2. Still open on the radio (read-only): time the reset after `10`, and the meaning of the `82`
+   reply. The `80` header and the `23` indexes are settled. Don't send `17`, `20`, `22` or `19`.
+   The alignment block (`0D80`–`0FFF`) is already dumped; see `PROTOCOL.md`.
 3. Possible: timestamped events from the gateware (byte, BUSY edge, collision, framing error),
    for a better sniffer. Today `sniff` timestamps come from the host and are only accurate to
    a few ms.
