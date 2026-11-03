@@ -9,7 +9,9 @@ How to pull a codeplug (and other memory) off a GM600 over BUS+ with the applet.
 >   it directly with 20× `0x11` reads of 32 bytes — **no `0x21`, no page-select, no separate
 >   `0x7F1` personality region** on this model. The "runtime base address" below never mattered
 >   for the GM600; the codeplug was in the readable space all along.
-> - **Write path:** `0x10` (enter) → `0x19` (mode) → `0x17` write-blocks → `0x84` OK.
+> - **Write path:** `23`/`23`/`13` (queries) → **`0x17` write-blocks** (32-byte, each → `0x84` OK)
+>   → a final `0x10`. **No `0x19`.** Writes cover only **`0x0E13`–`0x0FFF`**; the lower part
+>   `0x0D80`–`0x0E12` (serial + alignment) is read-only and not rewritten.
 > - **Native frequency encoding:** `f = 375.000 MHz + (BE16 & 0x7FFF) × (bit15 ? 6.25 : 5 kHz)`.
 > - A reference radio decoded fully (channels + identity). Full write-up and the Kaitai spec are
 >   in the motorola-cps repo (`LIVE_CAPTURE.md`, `CODEPLUG_BITMAP.md`, `gm600_codeplug.ksy`).
