@@ -49,9 +49,10 @@ out.
 ## GM600 wiring
 
 Connect BUS+ to accessory connector J0400 pin 6 and ground to pin 7, set the Glasgow I/O voltage
-to 5 V, and leave `--busy` off (the GM600 has no BUSY line). [CONNECTION.md](CONNECTION.md) has
-the full pinout, the circuit behind pin 6, meter checks before connecting, and the control head
-connector alternative.
+to 5 V, and leave `--busy` off (the GM600 has no BUSY line). **Put about 9 V on pin 14 (HOOK)
+from a separate supply.** Without it the radio never answers. [CONNECTION.md](CONNECTION.md) has
+the full pinout, the circuit behind pins 6 and 14, meter checks before connecting, and the control
+head connector alternative.
 
 The programming protocol (SBEP framing, checksums, commands) is in [PROTOCOL.md](PROTOCOL.md).
 

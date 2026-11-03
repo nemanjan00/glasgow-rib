@@ -57,33 +57,47 @@ export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 - **No IN flush:** the FX2 sends a short packet 125 µs after the last byte, which is fast enough
   at 9600 baud.
 
-## GM600 hardware facts (from the schematic, not yet checked on a radio)
+## GM600 hardware facts (schematic; the first three are confirmed on a radio)
 
 - J0400 (rear 16-pin accessory connector): **pin 6 = BUS+** (through R0422, 270 Ω), **pin 7 =
   GND**. Pin 8 SCI_DATA_OUT is dead (Q0421 not fitted). Pin 13 ANALOG_GND/SW_B+ may carry
   battery voltage.
-- BUS+ is also on control head connector J0101 pin 15.
+- **HOOK_RSS (J0400-14) needs about 9 V for programming** (lab PSU at 9 V, current limit set, draws
+  about 1 mA). Above about 5.7 V, VR0102 (5.1 V zener) → Q0105 fires the CPU IRQ and, through
+  Q0122, enables the radio's BUS+ transmitter. Without it the radio receives but never answers.
+  Never wire HOOK to Glasgow. Keep it under 12 V (14 V zener VR0415).
+- The control head is **not** on BUS+: it uses SPI (J0101 SPI_CLCK_BUF/SPI_DATA_BUF/LCD_CE_BUF/
+  LED_CE) and analog key ladders. BUS+ is silent in normal use, so `sniff` on an idle radio shows
+  nothing. BUS+ only passes through J0101-15.
+- BUS+ pull-up is R0130, 10 kΩ.
 - **There is no BUSY line.** Don't use `--busy`.
-- HOOK_RSS (J0400-14) is an ordinary 5 V input with a 4.7 kΩ pull-up. Unlike CM radios, the
-  GM600 needs no 9.3 V on HOOK to enter programming mode. Leave it open.
 - Physical pin layout: probably 2×8 with odd/even rows, pins 1 and 2 at the same end (from a
   GM300/Maxtrac diagram). Not confirmed for the GM600; go by the moulded numbers.
-- Only wires are needed: no MAX232, LM311, diode or 9 V supply. Those parts in DIY RIBs exist
-  for RS-232 levels or to make a push-pull TX behave like open drain.
+- Only wires plus the 9 V HOOK supply are needed: no MAX232, LM311 or diode. Those parts in DIY
+  RIBs exist for RS-232 levels or to make a push-pull TX behave like open drain.
 
 ## Status
 
-Done and pushed: applet with pty, socket and sniff operations; BUSY modes (none, manual, auto,
-with setup/hold); collision abort; transfer timeout; docs. 7 simulation tests and 2 synthesis
-tests pass. **Nothing has been tested on real hardware yet.**
+Done: applet with pty, socket and sniff operations; BUSY modes (none, manual, auto, with
+setup/hold); collision abort; transfer timeout; docs. 7 simulation tests and 2 synthesis tests
+pass.
+
+**Working on a real GM600 (2026-11-03)**, Glasgow revC3: TX/RX and echo are fine at 9600 baud,
+the radio ACKs `10` with `50`, then resets, and after the reset it answers `23 01` (serial) and
+`13`. Transcript and details are in `PROTOCOL.md` → "Confirmed on a GM600".
+
+- The applet must use `from glasgow.support import logging`. Current Glasgow pipes call
+  `logger.trace()`, and a stdlib logger crashes at startup.
+- The V1 `analyzer` applet gave a false "line low" capture once. Use `control-gpio` (e.g.
+  `A0=L A0`) to read a static level.
 
 ## Next steps
 
-1. With a radio: meter checks from `CONNECTION.md`, then `glasgow run rib -V 5 --bus A0 sniff`.
-   You should see control head traffic.
+1. Read-only bring-up with a radio: time the reset after `10`; try `23` indexes 0, 3 and 4;
+   work out the `82` block-size bytes; read one small `11` block and work out the `80` header.
+   Don't send `17`, `20`, `22` or `19`.
 2. Capture a real DPS session (WDPS_DP.EXE under 86Box with COM1 → applet `pty`) to answer the
-   open questions in `PROTOCOL.md`: whether ACK is `50` or `05`, the `80` reply header, and the
-   `23` query indexes.
+   rest of the open questions in `PROTOCOL.md`, including how DPS handles the reset after `10`.
 3. Possible: timestamped events from the gateware (byte, BUSY edge, collision, framing error),
    for a better sniffer. Today `sniff` timestamps come from the host and are only accurate to
    a few ms.
@@ -94,7 +108,8 @@ tests pass. **Nothing has been tested on real hardware yet.**
    - Its `esbep.js` sends byte by byte and waits for each echo. That clashes with the 10-bit idle
      rule, so add a "write whole frame, then read the echo" mode.
    - It only parses short frames; GM600 block reads need the `FF` 16-bit-length form.
-   - It expects ACK/NAK as `05`/`06`; `PROTOCOL.md` says `50`/`60`. Unresolved.
+   - It expects ACK/NAK as `05`/`06`. The GM600 sends `50` (confirmed on a radio); CM is
+     unknown.
    - Its transports are WebSerial and Node serialport. WebSerial can't open a pty, so the web app
      needs a WebSocket transport to `glasgow run rib … socket`.
    - CM radios need HOOK at 9.3 V through a resistor to enter programming mode.

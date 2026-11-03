@@ -4,13 +4,15 @@ Host-side protocol for programming 600 Series radios (GM600 / GP600, MPT1327 tru
 the BUS+ line, through the `glasgow_rib` applet (`socket` or `pty` mode).
 
 Everything here was reverse engineered from Motorola's DPS (`WDPS_DP.EXE`, R00.03.02, a 16-bit
-Windows 3.1 program). It has **not yet been checked against a real radio**. The open questions
-are listed at the end.
+Windows 3.1 program). Parts of it are now confirmed on a real GM600; see
+[Confirmed on a GM600](#confirmed-on-a-gm600). The open questions are listed at the end.
 
 ## Physical layer
 
 - 9600 baud, 8N1, no flow control. DPS never uses any other baud rate.
 - One wire, BUS+, shared by both sides (half duplex, open drain). The GM600 has no BUSY line.
+- **HOOK (J0400-14) must be at about 9 V**, or the radio never transmits on BUS+. See
+  [CONNECTION.md](CONNECTION.md#hook-programming-enable).
 - **Every byte you send comes back to you as an echo.** DPS reads back the echo after each
   frame and compares it with what it sent. The applet passes the echo through, so your code
   must too.
@@ -127,11 +129,11 @@ DPS's receive function returns these status codes:
 
 | Op | What it does | Request data | Reply |
 |---|---|---|---|
-| `10` | Enter programming mode | none | ACK |
-| `13` | Ask the largest block size the radio accepts | none | ACK, then `82` frame: big-endian 16-bit size |
+| `10` | Enter programming mode | none | ACK, then **the radio resets** (confirmed) |
+| `13` | Ask the largest block size the radio accepts | none | ACK, then `82` frame with 3 data bytes (confirmed: `00 20 00`); which two are the size is open |
 | `11` | Read a block | `len a23-16 a15-8 a7-0` (24-bit address) | ACK, then `80` frame: 3 header bytes + `len` data bytes |
 | `17` | Write a block | `a23-16 a15-8 a7-0 data…` | ACK, then `84` (OK) or `85` (failed) |
-| `23` | Read an ID string | `[index]`: 0, 1, 3 and 4 are used; 1 is read at connect | ACK, then `8B` frame: NUL-terminated string of up to 13 characters |
+| `23` | Read an ID string | `[index]`: 0, 1, 3 and 4 are used; 1 is read at connect | ACK, then `8B` frame: the index byte, then the ASCII string (confirmed for index 1: the serial number, no NUL) |
 | `21` | Set a 16-bit value (address or register preset) | `00 hi lo` | ACK |
 | `20` | Read or write a parameter (softpots, tuning) | read `[param, 00]`; write `[param, 01\|02, value…]` (1–3 value bytes) | read: ACK, then `8A` frame with the value; write: ACK |
 | `22` | Two-byte parameter write (tuning) | `b1 b2` | ACK |
@@ -180,33 +182,56 @@ The `.net`, `.per` and `.rad` file formats (a repeating 7-byte XOR key
 `5D 29 EA 64 B3 7F 1C`) and the field offsets are documented separately in the Motorola RE
 project (`docs/DPS_EMEA_600SERIES_R00.03.02/FILE_FORMAT.md` and `FIELD_MAP.md`).
 
-## Watch out for other traffic on BUS+
+## Confirmed on a GM600
 
-The GM-series service manual (GM340 family, in `docs/gm-manual.txt`) shows the radio talking to
-its control head over the same BUS+ line. Expect the same on the GM600:
+First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
 
-- The radio sends LED and backlight state to the control head, and asks it for key presses.
-- The control head ignores CPS/tuner traffic.
+```
+> F1 10 FE                       enter programming mode
+< 50                             ACK, 1.3 ms after the echo; then the radio resets
+  (radio reboots: 23/13 sent right after, even 21 ms after the ACK, get no reply)
 
-So your parser must not assume every received byte is a reply to you:
+  after the reboot, without sending 10 again:
+> F2 23 01 E9                    read ID string 1
+< 50  FC 8B 01 38 30 37 49 59 41 30 39 30 33 29
+         8B  01  "807IYA0903"  cks         -> index 1 is the serial number
+> F1 13 FB                       max block size
+< 50  F4 82 00 20 00 69
+```
+
+- ACK is `50`, not `05`. Both reply checksums are valid.
+- `10` makes the radio reset. After the reset it answers commands with no further `10`, so
+  the reset looks like the way into programming mode. Wait for the radio to come back up
+  before the next command. How long that takes hasn't been measured, and nobody knows how DPS
+  handles it with its 21 ms wait.
+- Without 9 V on HOOK, `F1 10 FE` gets only its echo, and no ACK.
+- `8B` replies repeat the index before the string and have no NUL terminator.
+- `82` carries 3 data bytes (`00 20 00`), not 2. Either 0x0020 (32 bytes) plus a trailing byte,
+  or a leading byte plus 0x2000.
+
+## Other traffic on BUS+
+
+On the GM600, BUS+ carries nothing in normal use: the control head talks to the CPU over SPI
+and analog key lines, not BUS+ (controller schematic, J0101). This was confirmed on a radio: no
+BUS+ activity while pressing buttons. Keep the parser robust anyway:
 
 - Resync on frame boundaries using the checksum, and ignore frames that aren't the reply you
   expect.
 - The applet only starts sending once the line has been idle for 10 bit times, and drops a
   frame if it detects a collision. Retry when the echo doesn't match.
 
-I couldn't confirm this for the GM600 specifically: the GM600 manual in `docs/` only contains
-board layouts and parts lists.
-
 ## Open questions
 
 - Is the 3-byte header in an `80` reply `addr_hi addr_mid addr_lo` or `len addr_hi addr_mid`?
-- Which `23` index returns the model, which the serial number, and which the radio info?
+- Which `23` index returns the model and which the radio info? (Index 1 is the serial.)
+- How long the reset after `10` takes, and whether the radio needs anything before it accepts
+  commands again.
+- Which bytes of the `82` reply are the block size.
 - What exactly do `20`, `22` and `19` do?
 - Does the radio enforce its own limit on the gap between received bytes? DPS allows 121 ms on
   its side.
-- Which pin carries BUS+ on the accessory connector (J0400) and the control head connector
-  (J0101)? It needs confirming on hardware.
+- Where pins 6, 7 and 14 physically sit on the J0400 face. The wiring works, but the
+  layout isn't recorded yet.
 
 The quickest way to settle all of these: run the real `WDPS_DP.EXE` in Windows 3.11 under
 86Box, point its COM1 at the applet's `pty`, and capture one full read and write session (or
