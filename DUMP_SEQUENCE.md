@@ -10,7 +10,7 @@ How to pull a codeplug (and other memory) off a GM600 over BUS+ with the applet.
 >   `0x7F1` personality region** on this model. The "runtime base address" below never mattered
 >   for the GM600; the codeplug was in the readable space all along.
 > - **Write path:** `23`/`23`/`13` (queries) → **`0x17` write-blocks** (32-byte, each → `0x84` OK)
->   → a final `0x10`. **No `0x19`.** Writes cover only **`0x0E13`–`0x0FFF`**; the lower part
+>   → a final `0x10`. **No `0x19`.** Writes cover only **`0x0E13`–`0x0FFB`** (last two blocks are 7 B @`0x0FF5` and 2 B @`0x0FF3`, not 32; `0x0FFC`–`0x0FFF` unwritten); the lower part
 >   `0x0D80`–`0x0E12` (serial + alignment) is read-only and not rewritten.
 > - **Native frequency encoding:** `f = 375.000 MHz + (BE16 & 0x7FFF) × (bit15 ? 6.25 : 5 kHz)`.
 > - A reference radio decoded fully (channels + identity). Full write-up and the Kaitai spec are
