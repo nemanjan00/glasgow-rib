@@ -1,0 +1,19 @@
+[project]
+name = "glasgow-rib"
+version = "0.1.0"
+description = "Glasgow applet: half-duplex open-drain UART with BUSY line for Motorola SB9600/SBEP radios (RIB replacement)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "glasgow",
+]
+
+[project.entry-points."glasgow.applet"]
+rib = "glasgow_rib:RIBApplet"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["glasgow_rib"]
