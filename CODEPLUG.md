@@ -27,7 +27,7 @@ Terminated by the first record whose **Tx word = `0xFFFF`**.
 | +2 | Tx freq | BE16, same formula; `0xFFFF` = end-of-table | confirmed |
 | +4 | Tx PL | tone-list index, 0 = none (ch4 = `0x13` = 19 = 123.0 Hz) | confirmed |
 | +5 | Rx PL | tone-list index, 0 = none | confirmed |
-| +6 | options | `0x08` default; **bit4 (`0x10`) = Monitor** (confirmed); bit3 always set | partly bound |
+| +6 | options | bitfield (see table below): bit0 Data, bits2:1 Inhibit, bit3 Power, bit4 Monitor | bound |
 
 Frequency formula detail and per-channel proof: [FREQ_ENCODING.md](FREQ_ENCODING.md). PL/TPL tone
 index table: motorola-cps `docs/.../FIELD_HELP_REFERENCE.md`.
@@ -81,19 +81,21 @@ programming-history / flag / counter field (`11 DC` looks like a value, not padd
 ## Per-channel options — in the `+6` byte (contrast-confirmed)
 
 The GUI (Edit → Conventional Personality) exposes per-channel **Tx Power, Tx Inhibit, Rx PL, Tx PL,
-Monitor, Data**. Rx/Tx PL are the `+4/+5` bytes. The booleans are bit-packed in the **`+6` byte**
-(default `0x08`), proven by a clean DPS write-contrast:
+Monitor, Data**. Rx/Tx PL are the `+4/+5` bytes; the rest are bit-packed in the **`+6` options
+byte** (default `0x08`), each bound by a DPS write-contrast (set the option, Write Radio, diff):
 
-- Set **ch1 Monitor = Yes** in DPS, Write Radio, read back, diff vs baseline → exactly two bytes
-  changed: **`0x0F6D` (ch1 `+6`) `08 → 18`** and the checksum byte `0x0FF4` (below). So
-  **Monitor = `+6` bit4 (`0x10`)**, Yes=1.
-- bit3 (`0x08`) is always set (clearing it → "Personality data is invalid"). Tx Power / Tx Inhibit /
-  Data occupy other `+6` bits — not yet individually bound (same contrast method: toggle one in DPS,
-  diff). Some raw bit patterns are rejected by DPS validation (**Tx Inhibit is incompatible with Tx
-  PL**; and frequencies must stay on the step grid).
+| `+6` bit | mask | field | values |
+|---|---|---|---|
+| 0 | `0x01` | **Data** | 1 = Yes |
+| 2:1 | `0x06` | **Tx Inhibit** | 0 Disabled, 1 On BUSY (bit1), 2 Unless PL (bit2, needs Tx PL) |
+| 3 | `0x08` | **Tx Power** | 1 = High, 0 = Low |
+| 4 | `0x10` | **Monitor** | 1 = Yes |
+| 7:5 | `0xE0` | unknown | not yet bound |
 
-This supersedes an earlier note here that guessed `+6` was "not options / a separate `0x0F33`
-table" — that was wrong; `+6` is the options byte.
+Default `0x08` = Power High, everything else off. Evidence (each = a 1-write contrast): Monitor=Yes
+→ `+6 08→18`; Power=Low → `08→00`; Data=Yes → `08→09`; Tx Inhibit=On BUSY → `08→0A`. "Unless PL" is
+rejected unless Tx PL is set (so bit2 pairs with a tone). This supersedes an earlier wrong note that
+`+6` was "not options / a separate `0x0F33` table".
 
 ## Personality checksum byte @ `0x0FF4` (additive)
 
