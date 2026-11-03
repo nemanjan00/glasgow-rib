@@ -49,8 +49,10 @@
     <text x="100" y="410" font-weight="bold" fill="#b9770e">ANALOG_GND / SW_B+</text>
     <text x="330" y="410" font-weight="bold" fill="#b9770e">NOT ground: may carry B+</text>
 
-    <rect x="0" y="420" width="540" height="30" fill="#ffffff"/>
-    <text x="40" y="440" text-anchor="middle">14</text><text x="100" y="440">HOOK</text>
+    <rect x="0" y="420" width="540" height="30" fill="#e8f4ea" stroke="#2e7d32" stroke-width="2"/>
+    <text x="40" y="440" text-anchor="middle" font-weight="bold" fill="#2e7d32">14</text>
+    <text x="100" y="440" font-weight="bold" fill="#2e7d32">HOOK_RSS</text>
+    <text x="330" y="440" font-weight="bold" fill="#2e7d32">9 V lab PSU, NOT Glasgow</text>
     <rect x="0" y="450" width="540" height="30" fill="#fafafa"/>
     <text x="40" y="470" text-anchor="middle">15</text><text x="100" y="470">RSSI</text>
     <rect x="0" y="480" width="540" height="30" fill="#ffffff"/>

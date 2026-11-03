@@ -13,6 +13,16 @@
   <rect x="180" y="287" width="50" height="26" fill="#ffffff" stroke="#2a4d8f"/>
   <text x="205" y="305" text-anchor="middle" font-weight="bold">GND</text>
 
+  <!-- HOOK supply -->
+  <rect x="30" y="20" width="200" height="64" rx="8" fill="#e8f4ea" stroke="#2e7d32" stroke-width="2"/>
+  <text x="130" y="44" text-anchor="middle" font-weight="bold" fill="#2e7d32">Lab PSU 9 V</text>
+  <text x="130" y="62" text-anchor="middle" font-size="12">current limit ~20 mA, draws ~1 mA</text>
+  <text x="130" y="77" text-anchor="middle" font-size="12">− to pin 7 (common GND)</text>
+  <line x1="230" y1="50" x2="330" y2="50" stroke="#2e7d32" stroke-width="3"/>
+  <line x1="330" y1="50" x2="330" y2="105" stroke="#2e7d32" stroke-width="3"/>
+  <line x1="330" y1="105" x2="425" y2="105" stroke="#2e7d32" stroke-width="3"/>
+  <text x="340" y="98" font-size="12" fill="#2e7d32" font-weight="bold">HOOK +9 V</text>
+
   <!-- wires to connector -->
   <line x1="230" y1="220" x2="410" y2="220" stroke="#c0392b" stroke-width="3"/>
   <line x1="230" y1="300" x2="410" y2="300" stroke="#222" stroke-width="3"/>
@@ -27,6 +37,8 @@
   <text x="455" y="225" text-anchor="middle" font-weight="bold">pin 6</text>
   <rect x="425" y="287" width="60" height="26" fill="#e3e3e3" stroke="#222" stroke-width="2"/>
   <text x="455" y="305" text-anchor="middle" font-weight="bold">pin 7</text>
+  <rect x="425" y="92" width="60" height="26" fill="#e8f4ea" stroke="#2e7d32" stroke-width="2"/>
+  <text x="455" y="110" text-anchor="middle" font-weight="bold" fill="#2e7d32">pin 14</text>
   <rect x="425" y="137" width="60" height="26" fill="#fff4d6" stroke="#b9770e" stroke-width="2" stroke-dasharray="4 3"/>
   <text x="455" y="155" text-anchor="middle" font-weight="bold" fill="#b9770e">pin 13</text>
   <text x="400" y="155" text-anchor="end" font-size="12" fill="#b9770e">SW B+, leave open</text>
@@ -37,6 +49,13 @@
   <!-- Radio internals -->
   <rect x="530" y="40" width="410" height="440" rx="10" fill="none" stroke="#888" stroke-dasharray="6 4"/>
   <text x="735" y="62" text-anchor="middle" fill="#666">inside the radio (GM600 UHF controller schematic)</text>
+
+  <!-- pin 14 -->
+  <line x1="485" y1="105" x2="545" y2="105" stroke="#2e7d32" stroke-width="2"/>
+  <rect x="545" y="78" width="225" height="64" rx="4" fill="#e8f4ea" stroke="#2e7d32" stroke-width="2"/>
+  <text x="657" y="96" text-anchor="middle" font-weight="bold" fill="#2e7d32">HOOK_RSS</text>
+  <text x="657" y="113" text-anchor="middle" font-size="11">4.7 kΩ pull-up to 5 V, 5.1 V zener</text>
+  <text x="657" y="128" text-anchor="middle" font-size="11">above ~5.7 V the radio can transmit</text>
 
   <!-- pin 6 line -->
   <line x1="500" y1="220" x2="640" y2="220" stroke="#c0392b" stroke-width="2"/>
@@ -82,8 +101,8 @@
   <line x1="790" y1="330" x2="820" y2="330" stroke="#c0392b" stroke-width="2"/>
   <rect x="820" y="300" width="105" height="60" rx="4" fill="#f3eefb" stroke="#6a3d9a" stroke-width="2"/>
   <text x="872" y="324" text-anchor="middle" font-weight="bold" fill="#6a3d9a">J0101-15</text>
-  <text x="872" y="342" text-anchor="middle" font-size="12">control head</text>
-  <text x="872" y="355" text-anchor="middle" font-size="11" fill="#555">also on BUS+</text>
+  <text x="872" y="342" text-anchor="middle" font-size="12">passes through</text>
+  <text x="872" y="355" text-anchor="middle" font-size="11" fill="#555">(head uses SPI)</text>
 
   <!-- notes -->
   <text x="555" y="410" font-size="12" fill="#333">R0429 (4.7 kΩ pull-up) and Q0422 on this pin are not fitted (NU):</text>
