@@ -47,6 +47,23 @@ an Inhibit-with-PL combo are rejected as invalid values.
 The patch addresses in `sbep_write.py` are specific to this radio's layout and its captured
 `sniff-write.log`; adapt both for another radio/codeplug.
 
+## `dump_codeplug.py` — full read-back
+
+Reads all 640 B (`0x0D80`–`0x0FFF`) via `0x11` and writes a .bin. Diff two dumps (baseline vs a
+DPS-written change) to bind fields: `cmp`/Python diff shows exactly which native bytes a GUI option
+moved. This is how Monitor was bound (ch1 Monitor=Yes → only `0x0F6D 08→18` and checksum `0x0FF4`
+changed). Reply header is `FF 80 00 24 <ah><am><al>` then 32 data bytes (the `00` after `24` is the
+high address byte — a classic off-by-one trap).
+
+## `mouse_ctl.py` — closed-loop headless mouse (now working)
+
+Drives the guest cursor via the QEMU monitor: `find` locates it by diffing framebuffers after a
+nudge (masking the blinking caret), `move`/`click`/`dbl` converge to a target. Two things made it
+reliable: (1) `WIN.INI [windows] MouseSpeed=0` in the guest (disables acceleration → ~1:1 relative
+motion); (2) **pacing** monitor commands (QEMU's HMP silently drops bursts of piped lines — send
+one per ~60 ms). With both, `click X Y` lands within a couple of px. This is what finally let us
+toggle DPS grid combos (open Monitor dropdown, click "Yes") headlessly.
+
 ## Capture rig (driving real DPS headless through the applet)
 
 To capture the exact DPS read/write protocol or to generate codeplug contrast, run the 16-bit
@@ -73,8 +90,9 @@ bridged, stop the bridge first (free `2324`), run the script, then restart the b
 they survive your SSH session; a bare `nohup`'d QEMU is killed by `systemd` session cleanup on
 logout.
 
-**Headless limits:** the guest Win3.11 mouse does not track injected motion (QEMU-monitor
-`mouse_move` and VNC absolute pointer both leave the cursor at 0,0), and the Conventional
-Personality grid combos ignore injected keystrokes (the dropdown opens but the selection never
-sticks). Menu/dialog keyboard nav works; editing a per-channel option to generate contrast needs a
-real interactive display.
+**Headless input (solved):** keyboard menu/dialog nav works via `sendkey`. The mouse works too once
+you (1) set `MouseSpeed=0` in the guest `WIN.INI` and (2) **pace** monitor commands (~60 ms apart —
+HMP drops bursts). Grid combos won't change via injected *keystrokes*, but a real mouse *click*
+(`mouse_ctl.py`) does. So per-channel options can be edited headlessly to generate write-contrast.
+(Earlier notes that the mouse was "dead at 0,0" were a mis-diagnosis: a two-QEMU-instance mixup plus
+un-paced commands.)

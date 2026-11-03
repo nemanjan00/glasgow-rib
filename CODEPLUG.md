@@ -27,7 +27,7 @@ Terminated by the first record whose **Tx word = `0xFFFF`**.
 | +2 | Tx freq | BE16, same formula; `0xFFFF` = end-of-table | confirmed |
 | +4 | Tx PL | tone-list index, 0 = none (ch4 = `0x13` = 19 = 123.0 Hz) | confirmed |
 | +5 | Rx PL | tone-list index, 0 = none | confirmed |
-| +6 | marker | **constant `0x08`** on every channel — structural, *not* options | confirmed |
+| +6 | options | `0x08` default; **bit4 (`0x10`) = Monitor** (confirmed); bit3 always set | partly bound |
 
 Frequency formula detail and per-channel proof: [FREQ_ENCODING.md](FREQ_ENCODING.md). PL/TPL tone
 index table: motorola-cps `docs/.../FIELD_HELP_REFERENCE.md`.
@@ -61,10 +61,10 @@ established only this much:
   codeplug validity; DPS validates on *read*, not the radio on write.
 
 **So `tools/sbep_write.py`'s balancing trick works only because a net-zero change never alters a
-block's sum.** A host writing a *genuinely modified* codeplug must first find the real checksum
-byte(s) and formula (target constant + boundaries + where the stored checksum is) — **still
-unknown.** This is the next thing to nail down before arbitrary native writes are safe for a later
-DPS read. (The raw 640 bytes summing to `0xB0` is just because the checksum is per-block.)
+block's sum.** For the PERSONALITY block the stored checksum byte is now found — radio `0x0FF4`,
+additive (see "Personality checksum byte" below), so a genuinely modified personality is writable
+by recomputing it. The NETWORK and RADIO blocks' checksum bytes/ranges are still unlocated. (The raw
+640 bytes summing to `0xB0` is just because the checksum is per-block.)
 
 ## DPS clears a 7-byte trailing field on write
 
@@ -78,27 +78,31 @@ programming-history / flag / counter field (`11 DC` looks like a value, not padd
   `docs/gm600-807IYA0903-2026-11-03-alignment-0D80.bin`) — keep them.
 - What those 7 bytes encode is not yet known; worth decoding.
 
-## Per-channel options — located, not yet bit-bound
+## Per-channel options — in the `+6` byte (contrast-confirmed)
 
 The GUI (Edit → Conventional Personality) exposes per-channel **Tx Power, Tx Inhibit, Rx PL, Tx PL,
-Monitor, Data**. Rx/Tx PL are the `+4/+5` bytes above. The other four booleans are **not in the
-7-byte channel record**:
+Monitor, Data**. Rx/Tx PL are the `+4/+5` bytes. The booleans are bit-packed in the **`+6` byte**
+(default `0x08`), proven by a clean DPS write-contrast:
 
-- `+6` is a constant `0x08` on every channel despite differing freq/PL, so it is neither a
-  per-channel checksum (would vary) nor an options byte at default.
-- Writing `+6 = 0x08|bit` → DPS "**invalid values: Conventional Personality**"; clearing bit3
-  (`0x07`) → "**Personality data is invalid**". So `0x08` is a required value, not a free bitfield.
+- Set **ch1 Monitor = Yes** in DPS, Write Radio, read back, diff vs baseline → exactly two bytes
+  changed: **`0x0F6D` (ch1 `+6`) `08 → 18`** and the checksum byte `0x0FF4` (below). So
+  **Monitor = `+6` bit4 (`0x10`)**, Yes=1.
+- bit3 (`0x08`) is always set (clearing it → "Personality data is invalid"). Tx Power / Tx Inhibit /
+  Data occupy other `+6` bits — not yet individually bound (same contrast method: toggle one in DPS,
+  diff). Some raw bit patterns are rejected by DPS validation (**Tx Inhibit is incompatible with Tx
+  PL**; and frequencies must stay on the step grid).
 
-They live in a **separate per-channel structure in the personality block** — most likely the run of
-**13 × `00 00 00 80` 4-byte entries at `0x0F33`–`0x0F66`** (one per possible channel, default
-option word, flag `0x80`), which precedes the freq table. Binding the exact Power/Inhibit/Monitor/
-Data bits there needs DPS-generated contrast (a modified codeplug DPS writes, which needs a real
-display — the headless VM's mouse is dead and its grid combos ignore injected keys) **or** the
-conventional-personality field-descriptor table in `WDPS_NP.EXE` (the analogue of the decoded
-network-block table at NP `0x9B9E0` / IDA `dseg54`). **Not yet done.**
+This supersedes an earlier note here that guessed `+6` was "not options / a separate `0x0F33`
+table" — that was wrong; `+6` is the options byte.
 
-Validation constraints seen while probing: **Tx Inhibit is incompatible with Tx PL**, and
-frequencies must sit on the channel step grid (off-step → "Personality data is invalid").
+## Personality checksum byte @ `0x0FF4` (additive)
+
+The same Monitor contrast moved **`0x0FF4`: `E6 → F6`** — i.e. the data went up `+0x10` and this
+byte went up `+0x10`. So the personality checksum is **additive, stored (not `0xFF−sum`), low byte
+of a running sum, at radio `0x0FF4`**. The summed range includes the channel region and ends before
+`0x0FF4`; candidate extent `~0x0F1D–0x0FE0` (sums to `0xE6` on baseline) — not yet pinned exactly.
+A host writing a modified personality must recompute this byte (`+= Σ of its data-byte deltas`).
+(The Network block has its own checksum — changing `0x0F06` broke `Network Data Checksum Failure`.)
 
 ## How much is reversed
 
