@@ -53,10 +53,13 @@ FIRMWARE.md and the DPS static RE **disagree**, and only the radio can settle it
 
 Both can't be fully true. Probe to decide (all read-only):
 
-1. **Does the top address byte matter?** Read the same `a_mid/a_lo` with `a_hi = 00`, then `01`,
-   `02`, … If the data differs, `0x11` really uses the full 24-bit address and the codeplug may
-   sit above 64 KB — contradicting the "top byte ignored" finding (which may only hold for low
-   ranges). If it's identical, the top byte is ignored and the codeplug must be paged.
+1. **Does the top address byte matter? Answered on the radio (2026-11-03): no.** A 4 KB-step
+   sweep with `a_hi` = `00`–`0F` returned identical data everywhere except the live RAM and
+   register rows. 16-byte reads at `0x8000`, `0x4000` and `0x2000` with `a_hi` = `10`, `20`, …
+   `F0` were byte-identical to `a_hi = 00`. Nothing above 64 KB is reachable with `0x11`. So
+   either DPS's direct-addressed codeplug regions are **inside the 64 KB dump we already have**
+   (`docs/gm600-807IYA0903-2026-11-03-cpu64k.bin`; check offline against the field map, e.g.
+   SRAM at `1080`–`3FFF`), or something DPS sends pages them in first.
 2. **Is `0x21` needed first?** Try a candidate codeplug read with and without a preceding
    `F4 21 00 hi lo`. If `0x21` changes what a later `0x11` returns, paging is via `0x21`.
 3. **Find the personality.** It is `0x7F1` bytes (new) / `0x799` (old) = the `.per` body. Look for
