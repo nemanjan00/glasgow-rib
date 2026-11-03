@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="960" height="520" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <title>Glasgow RIB to GM600 J0400 wiring</title>
+  <rect width="960" height="520" fill="#ffffff"/>
+
+  <!-- Glasgow -->
+  <rect x="30" y="110" width="200" height="230" rx="10" fill="#eef3fb" stroke="#2a4d8f" stroke-width="2"/>
+  <text x="130" y="140" text-anchor="middle" font-weight="bold" font-size="16" fill="#2a4d8f">Glasgow</text>
+  <text x="130" y="160" text-anchor="middle" fill="#2a4d8f">port A, VIO = 5 V</text>
+  <text x="130" y="178" text-anchor="middle" font-size="12" fill="#555">applet: rib</text>
+  <rect x="180" y="207" width="50" height="26" fill="#ffffff" stroke="#2a4d8f"/>
+  <text x="205" y="225" text-anchor="middle" font-weight="bold">A0</text>
+  <text x="170" y="225" text-anchor="end" font-size="12">BUS (open drain)</text>
+  <rect x="180" y="287" width="50" height="26" fill="#ffffff" stroke="#2a4d8f"/>
+  <text x="205" y="305" text-anchor="middle" font-weight="bold">GND</text>
+
+  <!-- wires to connector -->
+  <line x1="230" y1="220" x2="410" y2="220" stroke="#c0392b" stroke-width="3"/>
+  <line x1="230" y1="300" x2="410" y2="300" stroke="#222" stroke-width="3"/>
+  <text x="320" y="210" text-anchor="middle" fill="#c0392b" font-weight="bold">BUS+</text>
+  <text x="320" y="290" text-anchor="middle">GND</text>
+
+  <!-- J0400 -->
+  <rect x="410" y="80" width="90" height="300" rx="6" fill="#f4f4f4" stroke="#333" stroke-width="2"/>
+  <text x="455" y="70" text-anchor="middle" font-weight="bold">J0400</text>
+  <text x="455" y="398" text-anchor="middle" font-size="12" fill="#555">rear accessory, 16 pin</text>
+  <rect x="425" y="207" width="60" height="26" fill="#fde2df" stroke="#c0392b" stroke-width="2"/>
+  <text x="455" y="225" text-anchor="middle" font-weight="bold">pin 6</text>
+  <rect x="425" y="287" width="60" height="26" fill="#e3e3e3" stroke="#222" stroke-width="2"/>
+  <text x="455" y="305" text-anchor="middle" font-weight="bold">pin 7</text>
+  <rect x="425" y="137" width="60" height="26" fill="#fff4d6" stroke="#b9770e" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="455" y="155" text-anchor="middle" font-weight="bold" fill="#b9770e">pin 13</text>
+  <text x="400" y="155" text-anchor="end" font-size="12" fill="#b9770e">SW B+, leave open</text>
+  <rect x="425" y="330" width="60" height="26" fill="#ffffff" stroke="#999" stroke-dasharray="4 3"/>
+  <text x="455" y="348" text-anchor="middle" fill="#999">pin 8</text>
+  <text x="400" y="348" text-anchor="end" font-size="12" fill="#999">SCI_DATA_OUT, leave open</text>
+
+  <!-- Radio internals -->
+  <rect x="530" y="40" width="410" height="440" rx="10" fill="none" stroke="#888" stroke-dasharray="6 4"/>
+  <text x="735" y="62" text-anchor="middle" fill="#666">inside the radio (GM600 UHF controller schematic)</text>
+
+  <!-- pin 6 line -->
+  <line x1="500" y1="220" x2="640" y2="220" stroke="#c0392b" stroke-width="2"/>
+  <circle cx="580" cy="220" r="4" fill="#c0392b"/>
+  <!-- C0422 -->
+  <line x1="580" y1="220" x2="580" y2="262" stroke="#333" stroke-width="2"/>
+  <line x1="565" y1="262" x2="595" y2="262" stroke="#333" stroke-width="3"/>
+  <line x1="565" y1="270" x2="595" y2="270" stroke="#333" stroke-width="3"/>
+  <line x1="580" y1="270" x2="580" y2="300" stroke="#333" stroke-width="2"/>
+  <text x="560" y="250" text-anchor="end" font-size="12">C0422</text>
+  <text x="560" y="264" text-anchor="end" font-size="12">470 pF</text>
+  <!-- VR0422 zener -->
+  <circle cx="620" cy="220" r="4" fill="#c0392b"/>
+  <line x1="620" y1="220" x2="620" y2="250" stroke="#333" stroke-width="2"/>
+  <polygon points="610,268 630,268 620,252" fill="#333"/>
+  <line x1="608" y1="252" x2="632" y2="252" stroke="#333" stroke-width="2"/>
+  <line x1="620" y1="268" x2="620" y2="300" stroke="#333" stroke-width="2"/>
+  <text x="638" y="262" font-size="12">VR0422 14 V</text>
+  <!-- ground bar -->
+  <line x1="500" y1="300" x2="640" y2="300" stroke="#222" stroke-width="2"/>
+  <line x1="565" y1="312" x2="635" y2="312" stroke="#222" stroke-width="2"/>
+  <line x1="575" y1="320" x2="625" y2="320" stroke="#222" stroke-width="2"/>
+  <line x1="590" y1="328" x2="610" y2="328" stroke="#222" stroke-width="2"/>
+  <line x1="600" y1="300" x2="600" y2="312" stroke="#222" stroke-width="2"/>
+
+  <!-- R0422 -->
+  <polyline points="640,220 652,220 657,210 667,230 677,210 687,230 697,210 707,230 712,220 724,220" fill="none" stroke="#333" stroke-width="2"/>
+  <text x="682" y="198" text-anchor="middle" font-size="12">R0422 270 Ω</text>
+  <line x1="724" y1="220" x2="790" y2="220" stroke="#c0392b" stroke-width="2"/>
+  <circle cx="790" cy="220" r="5" fill="#c0392b"/>
+  <text x="790" y="244" text-anchor="middle" font-weight="bold" fill="#c0392b">BUS+</text>
+
+  <!-- to CPU -->
+  <line x1="790" y1="220" x2="790" y2="130" stroke="#c0392b" stroke-width="2"/>
+  <line x1="790" y1="130" x2="820" y2="130" stroke="#c0392b" stroke-width="2"/>
+  <rect x="820" y="100" width="105" height="60" rx="4" fill="#eef7ee" stroke="#2e7d32" stroke-width="2"/>
+  <text x="872" y="124" text-anchor="middle" font-weight="bold" fill="#2e7d32">68HC11</text>
+  <text x="872" y="142" text-anchor="middle" font-size="12">SCI RX + TX</text>
+  <text x="872" y="155" text-anchor="middle" font-size="11" fill="#555">tied together</text>
+
+  <!-- to control head -->
+  <line x1="790" y1="220" x2="790" y2="330" stroke="#c0392b" stroke-width="2"/>
+  <line x1="790" y1="330" x2="820" y2="330" stroke="#c0392b" stroke-width="2"/>
+  <rect x="820" y="300" width="105" height="60" rx="4" fill="#f3eefb" stroke="#6a3d9a" stroke-width="2"/>
+  <text x="872" y="324" text-anchor="middle" font-weight="bold" fill="#6a3d9a">J0101-15</text>
+  <text x="872" y="342" text-anchor="middle" font-size="12">control head</text>
+  <text x="872" y="355" text-anchor="middle" font-size="11" fill="#555">also on BUS+</text>
+
+  <!-- notes -->
+  <text x="555" y="410" font-size="12" fill="#333">R0429 (4.7 kΩ pull-up) and Q0422 on this pin are not fitted (NU):</text>
+  <text x="555" y="428" font-size="12" fill="#333">the idle-high level comes from the radio's own BUS+ pull-up.</text>
+  <text x="555" y="452" font-size="12" fill="#333">Pulling pin 6 low pulls BUS+ low through 270 Ω.</text>
+</svg>
