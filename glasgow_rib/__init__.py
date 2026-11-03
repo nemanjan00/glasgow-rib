@@ -2,13 +2,13 @@ from collections.abc import Buffer
 import os
 import sys
 import time
-import logging
 import asyncio
 from amaranth import *
 from amaranth.lib import io, wiring, stream
 from amaranth.lib.cdc import FFSynchronizer
 from amaranth.lib.wiring import In, Out
 
+from glasgow.support import logging
 from glasgow.support.logging import dump_hex
 from glasgow.support.endpoint import ServerEndpoint
 from glasgow.abstract import AbstractAssembly, GlasgowPin
