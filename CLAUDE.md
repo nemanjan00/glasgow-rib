@@ -12,8 +12,9 @@ protocol, reverse engineered from DPS).
 
 - Commit on `master`; the remote branch is `main`. Push with `git push origin master:main`.
   Don't switch branches and don't change git config.
-- The remote is SSH: `git@github.com:nemanjan00/glasgow-rib.git`. HTTPS failed with 403
-  because the stored credentials belong to a different account.
+- The remote uses the deploy-key alias: `git@github.com-glasgow-rib:nemanjan00/glasgow-rib.git`
+  (key `~/.ssh/glasgow-rib_deploy`). Plain `git@github.com:` picks up another repo's deploy key
+  and is refused; HTTPS has no credentials.
 - `docs/` is gitignored and holds local reference material only (see below).
 - JavaScript work (e.g. in `motorola-cps`) goes through the `/implement-js` skill.
 
