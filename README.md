@@ -29,11 +29,12 @@ banks run at 5 V, so no level shifter is needed.
 ## Supported radios
 
 The applet speaks the **single-wire** variant of the bus: BUS+ only, plus BUSY if the radio has
-one. Nothing has been tested against a radio yet, so this is what should work from the
-schematics and RIB documentation, not a tested list.
+one.
 
-- **Should work (BUS+ only):** GM600 (the target), and the radios that RIBless cables are sold
-  for: GM300 / GM338, Maxtrac, GTX, Radius mobiles, GP300 / GP350. Most of these don't use BUSY.
+- **Tested: GM600.** Reads, writes and a full DPS read/write session (DPS under QEMU through
+  `socket`) on a real radio, with a Glasgow revC3 on J0400 pins 6 and 7 and 9 V on HOOK. See
+  [PROTOCOL.md](PROTOCOL.md) and [tools/](tools/).
+- **Should work (BUS+ only), untested:** the radios that RIBless cables are sold for: GM300 / GM338, Maxtrac, GTX, Radius mobiles, GP300 / GP350. Most of these don't use BUSY.
 - **Not supported: differential BUS+ / BUS− radios.** These are the Systems 9000 family: Syntor
   X9000 / X9000E, Spectra, Spectra II and Astro Spectra. They use both BUS+ and BUS− at the
   radio. The RIB handles the pair (homebrew RIBs use an LM311 comparator for it), and for
@@ -91,7 +92,8 @@ Every byte written in one `write()` is one burst on the bus. Send one message pe
 
 ## Limitations
 
-- The applet has not been tested against a radio yet. The tests are simulation only.
+- Only the GM600 has been tested on hardware. That radio has no BUSY line, so the BUSY handling
+  (`--busy`, the auto/manual modes, setup/hold, polarity) has only been tested in simulation.
 - A pty carries no modem control lines. RSS versions that toggle DTR and expect BUSY back on
   RI/CTS won't see it. The applet targets a native host app that uses this API, not running RSS
   unmodified.
