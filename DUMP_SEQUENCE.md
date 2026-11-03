@@ -3,6 +3,20 @@
 How to pull a codeplug (and other memory) off a GM600 over BUS+ with the applet. Companion to
 [PROTOCOL.md](PROTOCOL.md) (wire framing) and [FIRMWARE.md](FIRMWARE.md) (radio internals).
 
+> **RESOLVED by a live DPS capture (2026-11-03).** We ran real DPS against a real GM600 through
+> the applet and captured a full Read and Write. Findings:
+> - **The GM600 codeplug is the resident 640-byte internal EEPROM, `0x0D80`–`0x0FFF`.** DPS reads
+>   it directly with 20× `0x11` reads of 32 bytes — **no `0x21`, no page-select, no separate
+>   `0x7F1` personality region** on this model. The "runtime base address" below never mattered
+>   for the GM600; the codeplug was in the readable space all along.
+> - **Write path:** `0x10` (enter) → `0x19` (mode) → `0x17` write-blocks → `0x84` OK.
+> - **Native frequency encoding:** `f = 375.000 MHz + (BE16 & 0x7FFF) × (bit15 ? 6.25 : 5 kHz)`.
+> - A reference radio decoded fully (channels + identity). Full write-up and the Kaitai spec are
+>   in the motorola-cps repo (`LIVE_CAPTURE.md`, `CODEPLUG_BITMAP.md`, `gm600_codeplug.ksy`).
+>
+> The read-only probe plan below is kept for other radios/variants, but for the GM600 just read
+> `0x0D80`–`0x0FFF` directly.
+
 The frame formats and the DPS read order below are **byte-confirmed by reversing the GM600 DPS
 Dealer Programmer** (`WDPS_DP.EXE`). What is **not** known statically is where the codeplug
 regions actually live — DPS keeps those addresses in runtime objects, not in code. So this doc
