@@ -26,6 +26,26 @@ banks run at 5 V, so no level shifter is needed.
   - `manual`: driven from a register.
   - `none`: not driven.
 
+## Supported radios
+
+The applet speaks the **single-wire** variant of the bus: BUS+ only, plus BUSY if the radio has
+one. Nothing has been tested against a radio yet, so this is what should work from the
+schematics and RIB documentation, not a tested list.
+
+- **Should work (BUS+ only):** GM600 (the target), and the radios that RIBless cables are sold
+  for: GM300 / GM338, Maxtrac, GTX, Radius mobiles, GP300 / GP350. Most of these don't use BUSY.
+- **Not supported: differential BUS+ / BUS− radios.** These are the Systems 9000 family: Syntor
+  X9000 / X9000E, Spectra, Spectra II and Astro Spectra. They use both BUS+ and BUS− at the
+  radio. The RIB handles the pair (homebrew RIBs use an LM311 comparator for it), and for
+  BUS+-only radios a jumper in the cable's DB-25 shell stands in for BUS−. This applet has no
+  BUS− pin.
+- **Check the service manual first:** for other SB9600 radios (MCS2000, MTS2000, Astro 25 /
+  XTL), see whether the programming port carries BUS− as well as BUS+.
+
+Supporting the differential radios would take a second pin driving BUS− as the inverse of BUS+,
+and the radio's BUS− voltage levels have to be checked first. Nothing in the gateware rules it
+out.
+
 ## GM600 wiring
 
 Connect BUS+ to accessory connector J0400 pin 6 and ground to pin 7, set the Glasgow I/O voltage
