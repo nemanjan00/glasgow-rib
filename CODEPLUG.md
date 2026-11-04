@@ -120,8 +120,10 @@ The same Monitor contrast moved **`0x0FF4`: `E6 → F6`** — i.e. the data went
 byte went up `+0x10`. So the personality checksum is **additive, stored (not `0xFF−sum`), low byte
 of a running sum, at radio `0x0FF4`**. The summed range includes the channel region and ends before
 `0x0FF4`; **not yet pinned exactly.** On baseline, inclusive `0x0F1D–0x0FE0` sums to `0xE5` (≠ the
-stored `0xE6`); ending one byte earlier, `0x0F1D–0x0FDF`, sums to exactly `0xE6` — suggestive that the
-end boundary is `0x0FDF`, but unconfirmed.
+stored `0xE6`); ending one byte earlier, `0x0F1D–0x0FDF`, sums to exactly `0xE6`. That's a **weak** hint though:
+`0x0FE0–0x0FF3` is all `0xFF`, so every cut point in that run shifts the sum by 1 (mod 256) — the
+checksum alone can't distinguish boundaries inside the padding, and `0x0FDF` is just one candidate.
+To settle it: contrast-write one byte just inside vs just outside `0x0FDF` and see which moves `0x0FF4`.
 A host writing a modified personality must recompute this byte (`+= Σ of its data-byte deltas`).
 (The Network block has its own checksum — changing `0x0F06` broke `Network Data Checksum Failure`.)
 
