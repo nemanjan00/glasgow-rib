@@ -19,12 +19,14 @@ DPS's write touches only `0x0E13`–`0x0FFB`; `0x0D80`–`0x0E12` (serial + alig
 
 ## Channel table — `0x0F67`, 7-byte records
 
-Terminated by the first record whose **Tx word = `0xFFFF`**.
+**Fixed 4 entries on the GM600** (`0x0F67`–`0x0F82`). There is **no reliable terminator**: `0x0F83`
+begins the Shortform Dialling buffer, whose `0xF`-nibble padding merely *looks* like a `0xFFFF`
+end-marker (a coincidence that breaks as soon as a dial string grows).
 
 | +off | field | encoding | status |
 |---|---|---|---|
 | +0 | Rx freq | BE16, `375.000 MHz + (v&0x7FFF)×(bit15?6.25:5 kHz)` | confirmed |
-| +2 | Tx freq | BE16, same formula; `0xFFFF` = end-of-table | confirmed |
+| +2 | Tx freq | BE16, same formula (`==Rx` for simplex) | confirmed |
 | +4 | Tx PL | tone-list index, 0 = none (ch4 = `0x13` = 19 = 123.0 Hz) | confirmed |
 | +5 | Rx PL | tone-list index, 0 = none | confirmed |
 | +6 | options | bitfield (see table below): bit0 Data, bits2:1 Inhibit, bit3 Power, bit4 Monitor | bound |
@@ -32,7 +34,8 @@ Terminated by the first record whose **Tx word = `0xFFFF`**.
 Frequency formula detail and per-channel proof: [FREQ_ENCODING.md](FREQ_ENCODING.md). PL/TPL tone
 index table: motorola-cps `docs/.../FIELD_HELP_REFERENCE.md`.
 
-This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`; record at `0x0F83` has Tx `0xFFFF` (end).
+This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`; `0x0F83` onward is the Shortform buffer — its
+`FF` padding is not a channel terminator (earlier "Tx=0xFFFF end" reading corrected).
 
 ## Other decoded fields
 
@@ -116,7 +119,9 @@ rejected unless Tx PL is set (so bit2 pairs with a tone). This supersedes an ear
 The same Monitor contrast moved **`0x0FF4`: `E6 → F6`** — i.e. the data went up `+0x10` and this
 byte went up `+0x10`. So the personality checksum is **additive, stored (not `0xFF−sum`), low byte
 of a running sum, at radio `0x0FF4`**. The summed range includes the channel region and ends before
-`0x0FF4`; candidate extent `~0x0F1D–0x0FE0` (sums to `0xE6` on baseline) — not yet pinned exactly.
+`0x0FF4`; **not yet pinned exactly.** On baseline, inclusive `0x0F1D–0x0FE0` sums to `0xE5` (≠ the
+stored `0xE6`); ending one byte earlier, `0x0F1D–0x0FDF`, sums to exactly `0xE6` — suggestive that the
+end boundary is `0x0FDF`, but unconfirmed.
 A host writing a modified personality must recompute this byte (`+= Σ of its data-byte deltas`).
 (The Network block has its own checksum — changing `0x0F06` broke `Network Data Checksum Failure`.)
 
