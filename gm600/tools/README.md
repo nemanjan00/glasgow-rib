@@ -95,5 +95,6 @@ logout.
 you (1) set `MouseSpeed=0` in the guest `WIN.INI` and (2) **pace** monitor commands (~60 ms apart —
 HMP drops bursts). Grid combos won't change via injected *keystrokes*, but a real mouse *click*
 (`mouse_ctl.py`) does. So per-channel options can be edited headlessly to generate write-contrast.
-(Earlier notes that the mouse was "dead at 0,0" were a mis-diagnosis: a two-QEMU-instance mixup plus
-un-paced commands.)
+
+If the guest cursor seems stuck at 0,0, check for two QEMU instances running at once (commands go
+to the wrong one) and for unpaced monitor commands. Both looked exactly like a dead mouse.

@@ -8,6 +8,10 @@ are radio addresses. Ground truth: a live DPS "Read Radio" of serial `807IYA0903
 
 ## Block layout
 
+<p align="center">
+  <img src="assets/codeplug-map.svg" alt="The 640-byte GM600 codeplug, by block and decode status" width="100%">
+</p>
+
 | Range | Block | R/W | Contents |
 |---|---|---|---|
 | `0x0D80`–`0x0E12` | Radio / alignment | **read-only** (never rewritten) | serial `807IYA0903CG` (ASCII @ `0x0D88`), band-cal / tuning-grid words (@ `0x0DDA`), softpot |
@@ -41,8 +45,8 @@ Frequency formula detail and per-channel proof: [FREQ_ENCODING.md](FREQ_ENCODING
 index table: the `pl_tone` enum in [gm600_codeplug.ksy](gm600_codeplug.ksy) (source: motorola-cps
 `docs/.../FIELD_HELP_REFERENCE.md`).
 
-This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`; `0x0F83` onward is the Shortform buffer — its
-`FF` padding is not a channel terminator (earlier "Tx=0xFFFF end" reading corrected).
+This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`. `0x0F83` onward is the Shortform buffer: its
+`FF` padding reads like a `0xFFFF` Tx word, but it is not a channel terminator.
 
 ## Other decoded fields
 
@@ -60,32 +64,34 @@ Full table: motorola-cps `docs/DPS_EMEA_600SERIES_R00.03.02/FIELD_DICTIONARY.md`
 is editable in `WDPS_DP.EXE` (which also does Read/Write Radio), so the proven GUI-edit→write→dump→diff
 method applies to it just as it did to the personality options.
 
-## Per-block checksum — additive, but exact scheme NOT established
+## Checksums
 
-DPS validates the read with per-block checksums and rejects the whole read on a mismatch, with a
-block-specific message: `Radio / Network / Personality Data Checksum Failure`. Write-probes
-established only this much:
+DPS checks one checksum per block when it reads the radio, and rejects the whole read on a
+mismatch with a block-specific message: `Radio / Network / Personality Data Checksum Failure`.
+The radio itself checks nothing: every `17` gets `84` (OK) whatever the data.
 
-- The checksum is **additive**: a **net-zero** change inside a block (e.g. `+1` on one byte, `−1`
-  on another) **passes**; any **non-zero** net delta **fails** with that block's error. This also
-  localized the checksum domains — byte `0x0F06` is in the **Network** block; the channel region
-  (`0x0F6D`–`0x0F74`) is in the **Personality** block.
-- Additivity is **all it proves.** It does **not** establish the target constant, the exact block
-  boundaries, or where the checksum byte lives — a net-zero change passes for *any* target and *any*
-  boundaries. **Correction (caught by an independent pre-write dump):** the earlier "each block sums
-  to `0xFF`" claim here was wrong. Summing the ranges of the earlier layout (`0x0D80`–`0x0E12`,
-  `0x0E13`–`0x0F32`, `0x0F33`–`0x0FFB`) gives Radio `0xD1`, Network `0xDD`, Personality `0x06` —
-  none is `0xFF`, no two-way split of `0x0E13`–`0x0FFB` makes
-  each half sum to `0xFF`, and the Personality sum isn't even invariant across the DPS write
-  (`0x06` → `0xF2`, see the trailing-field note below), so these boundaries aren't right either.
-- The radio **writes whatever bytes it is told** — every `17` returns `84` (OK) regardless of
-  codeplug validity; DPS validates on *read*, not the radio on write.
+- **Additive.** A net-zero change inside a block (`+1` on one byte, `−1` on another) passes; any
+  non-zero net change fails with that block's message. Changing `0x0F06` gives `Network Data
+  Checksum Failure`, so it's in the Network block; the channel region `0x0F6D`–`0x0F74` is in the
+  Personality block.
+- **A net-zero test proves additivity and nothing more.** It passes for any target value and any
+  block boundaries, so it can't locate either.
+- **Not "sum to `0xFF`".** Measured on the reference radio's pre-write dump: `0x0D80`–`0x0E12`
+  sums to `0xD1`, `0x0E13`–`0x0F32` to `0xDD`, `0x0F33`–`0x0FFB` to `0x06`. No split of
+  `0x0E13`–`0x0FFB` into two ranges gives two `0xFF` sums, and the whole image sums to `0xB0`.
+  The `0x0F33`–`0x0FFB` sum also changes across a DPS write (`0x06` → `0xF2`, because DPS blanks
+  `0x0FF5`–`0x0FFB`), so a personality range ending at `0x0FFB` can't be right.
+- **Personality checksum byte: `0x0FF4`**, the stored low byte of a running sum. Setting Monitor
+  on channel 1 raised its data byte by `0x10` and `0x0FF4` by the same amount (`E6 → F6`). The
+  summed range is **not pinned**. It covers the channel table and ends before `0x0FF4`. On the
+  reference radio `0x0F1D`–`0x0FE0` sums to `0xE5` and `0x0F1D`–`0x0FDF` to exactly `0xE6`, but
+  `0x0FE0`–`0x0FF3` is all `FF`, so every cut point in that run shifts the sum by 1 and the sum
+  alone can't place the end. A contrast write just inside and just outside
+  `0x0FDF` would settle it.
+- **Network and Radio checksum bytes: not located.**
 
-**So `tools/sbep_write.py`'s balancing trick works only because a net-zero change never alters a
-block's sum.** For the PERSONALITY block the stored checksum byte is now found — radio `0x0FF4`,
-additive (see "Personality checksum byte" below), so a genuinely modified personality is writable
-by recomputing it. The NETWORK and RADIO blocks' checksum bytes/ranges are still unlocated. (The raw
-640 bytes summing to `0xB0` is just because the checksum is per-block.)
+To write a modified personality, add the net change of its data bytes to `0x0FF4`. Keep the
+Network and Radio blocks' sums unchanged (that is what `tools/sbep_write.py`'s balancing does).
 
 ## DPS clears a 7-byte trailing field on write
 
@@ -119,26 +125,13 @@ byte** (default `0x08`), each bound by a DPS write-contrast (set the option, Wri
 
 Default `0x08` = Power High, everything else off. Evidence (each = a 1-write contrast): Monitor=Yes
 → `+6 08→18`; Power=Low → `08→00`; Data=Yes → `08→09`; Tx Inhibit=On BUSY → `08→0A`. "Unless PL" is
-rejected unless Tx PL is set (so bit2 pairs with a tone). This supersedes an earlier wrong note that
-`+6` was "not options / a separate `0x0F33` table".
-
-## Personality checksum byte @ `0x0FF4` (additive)
-
-The same Monitor contrast moved **`0x0FF4`: `E6 → F6`** — i.e. the data went up `+0x10` and this
-byte went up `+0x10`. So the personality checksum is **additive, stored (not `0xFF−sum`), low byte
-of a running sum, at radio `0x0FF4`**. The summed range includes the channel region and ends before
-`0x0FF4`; **not yet pinned exactly.** On baseline, inclusive `0x0F1D–0x0FE0` sums to `0xE5` (≠ the
-stored `0xE6`); ending one byte earlier, `0x0F1D–0x0FDF`, sums to exactly `0xE6`. That's a **weak** hint though:
-`0x0FE0–0x0FF3` is all `0xFF`, so every cut point in that run shifts the sum by 1 (mod 256) — the
-checksum alone can't distinguish boundaries inside the padding, and `0x0FDF` is just one candidate.
-To settle it: contrast-write one byte just inside vs just outside `0x0FDF` and see which moves `0x0FF4`.
-A host writing a modified personality must recompute this byte (`+= Σ of its data-byte deltas`).
-(The Network block has its own checksum — changing `0x0F06` broke `Network Data Checksum Failure`.)
+rejected unless Tx PL is set (so bit2 pairs with a tone).
 
 ## How much is reversed
 
 - Read/write wire protocol: **~90–95 %**, proven live. Container (block map, checksums): partial —
-  additive per-block checksum shown, but target/boundaries/checksum-byte not yet pinned.
+  additive per-block checksums; only the personality checksum byte is located, and its range isn't
+  pinned.
 - Conventional channel programming (freq, PL, channel table, identity, timeout, per-channel option
   bits): **~90–95 %** — the meaningful programmable surface, byte-bound.
 - **MPT1327 trunking network block (`0x0E13`–`0x0F07`): out of scope.** Its fields are fully

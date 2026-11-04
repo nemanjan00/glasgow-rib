@@ -158,6 +158,10 @@ NAK                        60
 
 ## Reading and writing a radio (what DPS does, captured on a GM600)
 
+<p align="center">
+  <img src="assets/dps-session.svg" alt="DPS read and write sessions with a GM600, as captured through the applet" width="100%">
+</p>
+
 Captured on 2026-11-03: real DPS (`WDPS_DP.EXE`) under QEMU, through the applet, against a real
 GM600. Logs in `~/captures/` (`sniff-readall.log`, `sniff-write.log`); not in git.
 
@@ -259,7 +263,7 @@ First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
   [CODEPLUG.md](CODEPLUG.md).
 - The board only has a 256 KB flash (U0102), a 32 KB "hybrid" SRAM (U0103, probably
   battery-backed) and the CPU EEPROM. The codeplug is the CPU EEPROM (see "Reading and writing a
-  radio"). An early theory of a separate 2 KB personality region behind paging was wrong.
+  radio"); nothing needs paging in.
 
 ## Other traffic on BUS+
 

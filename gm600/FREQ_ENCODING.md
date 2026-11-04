@@ -1,9 +1,7 @@
-# GM600 frequency encoding — SOLVED (live DPS capture, 2026-11-03)
+# GM600 frequency encoding
 
-> **This supersedes the earlier "NOT derivable / 0x0F67 is alignment data" conclusion.** A live
-> DPS "Read Radio" of a real GM600 (serial `807IYA0903`, model M08RHF4CK3) proved that `0x0F67`
-> **is** the channel table and gave the exact formula, confirmed on all four channels against
-> DPS's own decode and the on-screen MHz values.
+Proven from a live DPS "Read Radio" of a real GM600 (serial `807IYA0903`, model M08RHF4CK3): the
+formula below matches DPS's own decode and on-screen MHz values on all four channels.
 
 ## The formula
 
@@ -30,18 +28,18 @@ e.g. ch1: `0xAC6B & 0x7FFF = 0x2C6B = 11371`, bit15 set → `375.000 + 11371 × 
 The same formula decodes the **band-edge / tuning grid** words at `0x0DDA`–`0x0DE7`
 (403.625 … 469.625 MHz), so it is consistent across the tuning block and the channel table.
 
-## Why the 64 KB-dump search missed it (recorded so nobody repeats the dead end)
+## Pitfalls
 
-The earlier pass searched the dump for `value = freq / step` — a **pure scaling from 0 Hz** — in
-every step and width, and found nothing systematic. It couldn't: the encoding is **375 MHz +
-offset**, with a per-word step-select bit, so a channel word never equals `freq/step`. `0xAC6B`
-only looked like "441 MHz" under a band-incompatible ×10 kHz reading; under the real
-`375 + offset` formula it is 446.06875 MHz, squarely in the radio's band. **`0x0F67` is the channel
-table, not alignment/softpot data** — the opposite of the earlier conclusion.
-
-The synth/PLL reference constant still isn't located in the mapped firmware (it's likely in an
-unmapped flash bank), but that no longer matters: the stored↔frequency formula is proven from the
-radio's own data, which is what a host needs.
+- A stored word is an **offset above 375 MHz**, not `frequency / step` from 0 Hz. Searching a dump
+  for `freq / step`, in any step size and width, finds nothing systematic.
+- Beware coincidences: `0xAC6B` reads as "441 MHz" under a ×10 kHz scaling, which is in band but
+  wrong. Under the real formula it is 446.06875 MHz. `0x0F67` is the channel table, not
+  alignment or softpot data.
+- Frequencies on both grids (every multiple of 25 kHz) are stored with the **5 kHz** step, as DPS
+  writes them (ch4 above). An encoder should try 5 kHz first and fall back to 6.25 kHz.
+- The synthesizer's own reference constant isn't located in the mapped firmware (it is probably in
+  a flash bank not in the 64 KB dump). A host doesn't need it: the formula is proven from the
+  radio's own data.
 
 ## Full codeplug decode
 

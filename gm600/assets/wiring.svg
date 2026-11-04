@@ -1,5 +1,37 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="960" height="520" font-family="Helvetica, Arial, sans-serif" font-size="14">
   <title>Glasgow RIB to GM600 J0400 wiring</title>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      text:not([fill]) { fill: #e6edf3; }
+      [fill="#ffffff"] { fill: #0d1117; }
+      [fill="#f4f4f4"] { fill: #161b22; }
+      [fill="#e3e3e3"] { fill: #30363d; }
+      [fill="#fde2df"] { fill: #3d1416; }
+      [fill="#fff4d6"] { fill: #3b2e0a; }
+      [fill="#e8f4ea"] { fill: #0f2a19; }
+      [fill="#eef3fb"] { fill: #10223f; }
+      [fill="#eef7ee"] { fill: #0f2a19; }
+      [fill="#f3eefb"] { fill: #271a3b; }
+      [fill="#c0392b"] { fill: #ff7b72; }
+      [fill="#2e7d32"] { fill: #3fb950; }
+      [fill="#b9770e"] { fill: #d29922; }
+      [fill="#2a4d8f"] { fill: #8fb5ef; }
+      [fill="#6a3d9a"] { fill: #d2a8ff; }
+      [fill="#555"] { fill: #9198a1; }
+      [fill="#666"] { fill: #9198a1; }
+      [fill="#999"] { fill: #6e7681; }
+      [fill="#333"] { fill: #c9d1d9; }
+      [stroke="#c0392b"] { stroke: #ff7b72; }
+      [stroke="#2e7d32"] { stroke: #3fb950; }
+      [stroke="#b9770e"] { stroke: #d29922; }
+      [stroke="#2a4d8f"] { stroke: #6c9ce6; }
+      [stroke="#6a3d9a"] { stroke: #d2a8ff; }
+      [stroke="#333"] { stroke: #c9d1d9; }
+      [stroke="#222"] { stroke: #c9d1d9; }
+      [stroke="#888"] { stroke: #6e7681; }
+      [stroke="#999"] { stroke: #6e7681; }
+    }
+  </style>
   <rect width="960" height="520" fill="#ffffff"/>
 
   <!-- Glasgow -->

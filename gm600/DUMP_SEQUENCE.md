@@ -1,139 +1,112 @@
-# GM600 codeplug dump sequence (for radio bring-up)
+# GM600 codeplug dump sequence and reversing notes
 
-How to pull a codeplug (and other memory) off a GM600 over BUS+ with the applet. Companion to
-[PROTOCOL.md](PROTOCOL.md) (wire framing) and [FIRMWARE.md](FIRMWARE.md) (radio internals).
+How to pull the codeplug (and other memory) off a GM600 over BUS+, and the methods and DPS
+binary references used to find it, for future reversing of this and other radios. Companion to
+[PROTOCOL.md](PROTOCOL.md) (wire framing), [CODEPLUG.md](CODEPLUG.md) (decode) and
+[FIRMWARE.md](FIRMWARE.md) (radio internals).
 
-> **RESOLVED by a live DPS capture (2026-11-03).** We ran real DPS against a real GM600 through
-> the applet and captured a full Read and Write. Findings:
-> - **The GM600 codeplug is the resident 640-byte internal EEPROM, `0x0D80`–`0x0FFF`.** DPS reads
->   it directly with 20× `0x11` reads of 32 bytes — **no `0x21`, no page-select, no separate
->   `0x7F1` personality region** on this model. The "runtime base address" below never mattered
->   for the GM600; the codeplug was in the readable space all along.
-> - **Write path:** `23`/`23`/`13` (queries) → **`0x17` write-blocks** (32-byte, each → `0x84` OK)
->   → a final `0x10`. **No `0x19`.** Writes cover only **`0x0E13`–`0x0FFB`** (last two blocks are 7 B @`0x0FF5` and 2 B @`0x0FF3`, not 32; `0x0FFC`–`0x0FFF` unwritten); the lower part
->   `0x0D80`–`0x0E12` (serial + alignment) is read-only and not rewritten.
-> - **Native frequency encoding:** `f = 375.000 MHz + (BE16 & 0x7FFF) × (bit15 ? 6.25 : 5 kHz)`.
-> - A reference radio decoded fully (channels + identity): [CODEPLUG.md](CODEPLUG.md) and the
->   Kaitai spec [gm600_codeplug.ksy](gm600_codeplug.ksy). The live-capture write-up is in the
->   motorola-cps repo (`LIVE_CAPTURE.md`, `CODEPLUG_BITMAP.md`).
->
-> For the GM600, just read `0x0D80`–`0x0FFF` directly (`tools/dump_codeplug.py`). The
-> [history section](#history-how-the-codeplug-was-found-superseded) records how it was found and
-> is kept for other radios and variants; its conclusions about the GM600 were wrong.
+## Summary
+
+- **The GM600 codeplug is the 640-byte internal EEPROM, `0x0D80`–`0x0FFF`.** DPS reads it with
+  20 × 32-byte `0x11` reads: no `0x21`, no page select. There is no separate `0x7F1`-byte
+  personality region in the radio; `0x7F1` is the size of DPS's `.per` file.
+- **Write path** (live DPS capture): `23`/`23`/`13` (queries) → `0x17` write blocks (15 × 32 bytes,
+  then 2 bytes at `0x0FF3`, a `13`, then 7 bytes at `0x0FF5`; each → `0x84` OK) → a final `0x10`.
+  No `0x19`. Writes cover only `0x0E13`–`0x0FFB`; `0x0D80`–`0x0E12` (serial and alignment) and
+  `0x0FFC`–`0x0FFF` are never written.
+- **Frequency encoding:** `f = 375.000 MHz + (BE16 & 0x7FFF) × (bit15 ? 6.25 : 5 kHz)`
+  ([FREQ_ENCODING.md](FREQ_ENCODING.md)).
+- Decode: [CODEPLUG.md](CODEPLUG.md) and [gm600_codeplug.ksy](gm600_codeplug.ksy). The live-capture
+  write-up is in the motorola-cps repo (`LIVE_CAPTURE.md`, `CODEPLUG_BITMAP.md`).
 
 ## Prerequisite
 
-**9 V on HOOK (J0400-14)** or the radio never transmits on BUS+ (see CONNECTION.md). No BUSY line.
+**9 V on HOOK (J0400-14)** or the radio never transmits on BUS+ (see
+[CONNECTION.md](CONNECTION.md)). No BUSY line.
 
 ## Frames (confirmed)
 
 | Purpose | Send | Reply |
 |---|---|---|
-| Enter programming | `F1 10 FE` | ACK `50`, then **the radio resets** — wait for it to reboot before the next command |
-| Read ID string | `F2 23 <idx> <cks>` | ACK, then `8B <idx> <ascii…>`; idx `0`=model code, `1`=serial, `3`=fw ver, `4`=cp ver |
-| Max block size | `F1 13 FB` | ACK, then `82 00 20 00 ..` — a **constant**, not a real ceiling (FIRMWARE.md); 64-byte reads work |
+| Enter programming | `F1 10 FE` | ACK `50`, then **the radio resets**; wait for it to reboot before the next command |
+| Read ID string | `F2 23 <idx> <cks>` | ACK, then `8B <idx> <ascii…>`; idx `0` = model code, `1` = serial, `3` = firmware version, `4` = codeplug version |
+| Max block size | `F1 13 FB` | ACK, then `82 00 20 00`: a **constant** in the firmware, not a real ceiling ([FIRMWARE.md](FIRMWARE.md)); 64-byte reads work |
 | Read block | `F5 11 <len> <a_hi> <a_mid> <a_lo> <cks>` | ACK, then `80 <a_hi> <a_mid> <a_lo> <data…>` |
-| Set address | `F4 21 00 <hi> <lo> <cks>` | ACK — **not seen on the codeplug read path in DPS** |
+| Set address | `F4 21 00 <hi> <lo> <cks>` | ACK. **Not used by DPS with a GM600** |
 
-- `0x11` address is **24-bit big-endian** after the length byte. `len` ≤ `0x40` (64) works; `0x80`
-  (128) is refused (a bare `80` instead of the ACK).
-- `0x80` read reply echoes the 3 address bytes as sent, then the data (confirmed, FIRMWARE.md).
+- The `0x11` address is sent as 24-bit big-endian after the length byte, but the radio uses only
+  the low 16 bits (see below). `len` ≤ `0x40` (64) works; `0x80` (128) is refused with a bare `80`
+  in place of the ACK.
+- The `0x80` read reply echoes the 3 address bytes as sent, then the data (confirmed in
+  [FIRMWARE.md](FIRMWARE.md)).
 
-## Dumpable right now (read-only, safe)
+## Dumping
 
-1. `F1 10 FE`, wait for the reset/reboot.
-2. `F2 23 00/01/03/04` — identity (model, serial, fw, cp version).
-3. `F1 13 FB` — max block.
-4. **Alignment block / internal EEPROM:** `0x11` reads over `0x000D80`–`0x000FFF` (640 bytes) in
-   ≤64-byte chunks, advancing the address by the chunk size. No paging needed — this range is the
-   68HC11 internal EEPROM and is always in the default map. Holds the serial (`807IYA0903CG`) and
-   tuning. **Confirmed present and readable.**
-5. **Full logical image:** `0x11` sweep of `0x000000`–`0x00FFFF` (a_hi = `00`) in ≤64-byte chunks.
-   The radio reads its 64 KB CPU space; the top address byte is ignored and reads wrap every 64 KB.
-   This captures RAM, I/O registers, the EEPROM, the fixed firmware bank and whichever flash bank
-   is currently mapped. See the FIRMWARE.md memory map for what each range is.
+1. `F1 10 FE`, then wait for the reset and reboot.
+2. `F2 23 00/01/03/04`: identity (model code, serial, firmware, codeplug version).
+3. `F1 13 FB`: max block size (constant).
+4. **Codeplug:** `0x11` reads over `0x0D80`–`0x0FFF` (640 bytes) in chunks of up to 64 bytes. This
+   is the 68HC11's internal EEPROM, always in the memory map. `tools/dump_codeplug.py` does this
+   with 32-byte reads and checks every reply.
+5. **Full logical image (optional):** a `0x11` sweep of `0x0000`–`0xFFFF` in chunks of up to 64 bytes.
+   This captures RAM, the register block, the EEPROM, the fixed firmware and whichever flash bank
+   is mapped at `0x4000` at the time ([FIRMWARE.md](FIRMWARE.md) has the map). It takes about
+   2 minutes at 9600 baud.
 
-## History: how the codeplug was found (superseded)
+## Probe methods (read-only, reusable on other radios and variants)
 
-Everything below was written **before** the DPS capture and is kept as a record. Its working
-theory (codeplug paged in from SRAM or flash, or packed somewhere in RAM) turned out to be wrong:
-the codeplug is the EEPROM at `0x0D80`–`0x0FFF`. The probe that showed `11` ignores the top
-address byte is still valid.
+These were used to locate the GM600 codeplug before a DPS capture was available. They're worth
+repeating on any radio whose memory layout is unknown.
 
-The frame formats and the DPS read order were byte-confirmed by reversing `WDPS_DP.EXE`, but
-statically it wasn't clear where the codeplug regions live, because DPS keeps those addresses in
-runtime objects. (Full DPS static-RE provenance: motorola-cps repo,
-`docs/DPS_EMEA_600SERIES_R00.03.02/DUMP_SEQUENCE.md`.)
+1. **Does the top address byte matter?** Read the same `a_mid/a_lo` with `a_hi = 00`, then `01`,
+   `02`, … and compare. **GM600 result (2026-11-03): it doesn't.** A 4 KB-step sweep with `a_hi` =
+   `00`–`0F` returned identical data everywhere except the live RAM and register rows, and 16-byte
+   reads at `0x8000`, `0x4000` and `0x2000` with `a_hi` = `10`, `20`, … `F0` were byte-identical to
+   `a_hi = 00`. Nothing above 64 KB is reachable with `0x11`.
+2. **Is `0x21` needed first?** Do a read with and without a preceding `F4 21 00 hi lo` and compare.
+   On the GM600 it isn't needed; the capture shows DPS never sends it. Only try this with values
+   taken from a DPS capture, never guessed ones.
+3. **Find structure, not values.** Look for a region with the size and shape the software expects
+   (record tables, checksums, strings such as the serial). Reading twice and diffing separates
+   live RAM and registers from stored data.
 
-### What to resolve on the wire (the point of probing)
+The authoritative answer is a live DPS "Read Radio" capture through the applet. For the GM600 it
+was done under QEMU with COM1 bridged to the applet socket ([tools/README.md](tools/README.md)),
+and showed the exact addresses.
 
-FIRMWARE.md and the DPS static RE **disagree**, and only the radio can settle it:
+## Facts from the 64 KB dump analysis (still valid)
 
-- **FIRMWARE.md:** the personality codeplug is **not** in the default 64 KB map — it is paged, and
-  `0x11` ignores the top address byte (wraps every 64 KB).
-- **DPS static RE:** the codeplug read path uses **direct addressing with no `0x21`**, walking the
-  address upward chunk by chunk.
+From `docs/gm600-807IYA0903-2026-11-03-cpu64k.bin`, checked against the DPS `.per`/`.rad` field
+map. In those files, frequencies are plain LE32 Hz, the serial is ASCII, and the tuning grid uses
+a 375.000 MHz reference with band edges 403.625–469.625 MHz. The radio stores none of it that way:
 
-Both can't be fully true. Probe to decide (all read-only):
+- **Frequencies are not stored as plain Hz.** The band edges (403.625–469.625 MHz) and the
+  375.000 MHz reference don't appear as LE32 Hz anywhere, and there's no flat-Hz channel grid. The
+  real encoding is the 375 MHz offset word ([FREQ_ENCODING.md](FREQ_ENCODING.md)).
+- **The full serial `807IYA0903` appears only at `0x0D88`** (the EEPROM). RAM at `0x02D2` holds a
+  working copy of the start of the EEPROM block, with the serial cut to `807IYA`.
+- **No flat `.per` image exists in the radio.** In a `.per` file the serial is ASCII at offset
+  `0x4C0`; nothing in the 64 KB view matches that layout. The radio stores only the packed
+  640 bytes, and DPS converts between the two.
+- **`0x1080`–`0x3FFF` is live working RAM**, e.g. a self-referential table of 10-byte records at
+  `0x2000` (`20 0C`, `20 16`, `20 20` …), not stored codeplug data.
+- **A checksum scan finds nothing:** windows of `0x7F1` or `0x799` bytes summing to `0xFF` occur
+  only at chance level in the dump.
 
-1. **Does the top address byte matter? Answered on the radio (2026-11-03): no.** A 4 KB-step
-   sweep with `a_hi` = `00`–`0F` returned identical data everywhere except the live RAM and
-   register rows. 16-byte reads at `0x8000`, `0x4000` and `0x2000` with `a_hi` = `10`, `20`, …
-   `F0` were byte-identical to `a_hi = 00`. Nothing above 64 KB is reachable with `0x11`. So
-   either DPS's direct-addressed codeplug regions are **inside the 64 KB dump we already have**
-   (`docs/gm600-807IYA0903-2026-11-03-cpu64k.bin`; check offline against the field map, e.g.
-   SRAM at `1080`–`3FFF`), or something DPS sends pages them in first.
-2. **Is `0x21` needed first?** Try a candidate codeplug read with and without a preceding
-   `F4 21 00 hi lo`. If `0x21` changes what a later `0x11` returns, paging is via `0x21`.
-3. **Find the personality.** It is `0x7F1` bytes (new) / `0x799` (old) = the `.per` body. Look for
-   a 2 KB region that decodes as channel data (frequencies, per the DPS field map). It is not in
-   the default low-64 KB image if FIRMWARE.md is right.
+## DPS references for reversing
 
-The authoritative answer was one **live DPS "Read Radio" capture** through the applet (it was
-done under QEMU; see `tools/README.md`): it showed the exact region addresses and that `0x21` isn't
-used. The DPS master
-read order (10 main regions, then record sets) is documented in the motorola-cps repo.
+- **Packed-layout table:** `WDPS_NP.EXE` holds a bit-position table for the packed network
+  block at file offset `0x9B9E0` (IDA `dseg54`): 59 records of 14 bytes. Its unpacker is at file
+  offset `0x795B4`. This is the place to look when binding the network block's fields.
+- **Region addresses:** DPS keeps codeplug region addresses as codeplug-relative offsets in its
+  static (relocated) data, e.g. `0x4C5`, `0x4E1`, `0x4FD`, combined with a base at run time. They
+  don't come from any radio reply.
+- **Read order:** DPS reads 10 main regions, then record sets. Details and full DPS static-RE
+  provenance: motorola-cps repo, `docs/DPS_EMEA_600SERIES_R00.03.02/DUMP_SEQUENCE.md`.
 
-### Offline analysis of the 64 KB dump (2026-11-03, no radio)
+## Do not send (not read-only: can detune or brick)
 
-Searched `docs/gm600-807IYA0903-2026-11-03-cpu64k.bin` with the DPS `.per`/`.rad` field map
-(frequencies are plain LE32 Hz; serial is ASCII; tuning grid references 375.000 MHz and band edges
-403.625–469.625 MHz). Three independent negatives:
-
-- The band-edge / reference calibration frequencies are **not present** as plain LE32 Hz anywhere.
-- There is **no regular flat-Hz channel grid** — only code/data coincidences in the 400–475 MHz
-  byte window, no paired Rx/Tx table with a sane step.
-- The serial `807IYA0903` appears **only** at `0x0D88` (the EEPROM). A flat `.per` image would
-  repeat it (serial is ASCII at `.per` 0x4C0); it does not.
-
-**Conclusion: the radio does not hold a flat `.per`-format codeplug anywhere in the readable
-64 KB.** It stores the codeplug in the **packed on-air format** (the field map's NP seg54
-bit-position layout: WDPS_NP.EXE file `0x9B9E0`, 59×14-byte records, unpacker at file `0x795B4`),
-which is a different encoding from the `.per` file. So scanning the dump with the `.per` field map
-(probe-1 follow-up) cannot locate it — wrong encoding.
-
-What this means for the plan:
-- **No new radio read is needed to get the bytes.** The candidate regions — external SRAM
-  (`1080`–`3FFF`, inferred) and EEPROM (`0D80`–`0FFF`) — are already fully in the 64 KB dump. A
-  re-read would only show which bytes are live. The remaining work is **decoding**.
-- **"Packed somewhere in `1080`–`3FFF`" is a hypothesis, not shown.** What is *proven* is only "no
-  flat `.per` layout anywhere". `1080`–`3FFF` is clearly live working RAM (e.g. the self-referential
-  record table at `0x2000`). If the reversed packed layout (NP seg54) matches nothing in the dump,
-  **paging via some unseen command is back on the table** and a wire test is needed after all.
-- To turn a raw dump into channels we need the **packed-layout map (NP seg54)** reversed and then
-  tested against the dump. That is a no-radio static-RE task and is now the critical path.
-
-On the agent's second question — where DPS gets the region addresses: **not** from the `0x13`/`82`
-reply. `82 00 20 00` is a hardcoded constant block size (proven in FIRMWARE.md), not addresses. The
-region addresses are codeplug-relative offsets held in DPS static (relocated) data, e.g. the
-`0x4C5/0x4E1/0x4FD` offsets the DPS RE already found — offsets into the codeplug image, combined
-with a base, not values readable from any radio reply.
-
-## Do NOT send (not read-only — can detune or brick)
-
-- `0x17` write, `0x20`/`0x22` tuning/softpot writes, `0x19`.
-- **`0x26`** — jumps the CPU to an address taken from the request (factory backdoor); a wrong
-  value runs garbage with interrupts off. See FIRMWARE.md.
-
-The write path is now confirmed (see [PROTOCOL.md](PROTOCOL.md)), but writes still need a
-pre-write dump and correct checksums ([CODEPLUG.md](CODEPLUG.md)).
+- `0x17` writes without a pre-write dump and correct checksums ([CODEPLUG.md](CODEPLUG.md)).
+- `0x20`/`0x22` tuning and softpot writes, and `0x19`, until captured from DPS.
+- **`0x26`**: jumps the CPU to an address taken from the request (factory backdoor); a wrong value
+  runs garbage with interrupts off. See [FIRMWARE.md](FIRMWARE.md).

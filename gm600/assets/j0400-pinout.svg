@@ -1,5 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 640" width="620" height="640" font-family="Helvetica, Arial, sans-serif" font-size="14">
   <title>GM600 J0400 accessory connector pinout</title>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      text:not([fill]) { fill: #e6edf3; }
+      [fill="#ffffff"] { fill: #0d1117; }
+      [fill="#fafafa"] { fill: #161b22; }
+      [fill="#e3e3e3"] { fill: #30363d; }
+      [fill="#fde2df"] { fill: #3d1416; }
+      [fill="#fff4d6"] { fill: #3b2e0a; }
+      [fill="#e8f4ea"] { fill: #0f2a19; }
+      [fill="#c0392b"] { fill: #ff7b72; }
+      [fill="#2e7d32"] { fill: #3fb950; }
+      [fill="#b9770e"] { fill: #d29922; }
+      [fill="#555"] { fill: #9198a1; }
+      [fill="#777"] { fill: #9198a1; }
+      [stroke="#c0392b"] { stroke: #ff7b72; }
+      [stroke="#2e7d32"] { stroke: #3fb950; }
+      [stroke="#b9770e"] { stroke: #d29922; }
+      [stroke="#333"] { stroke: #c9d1d9; }
+      [stroke="#222"] { stroke: #c9d1d9; }
+    }
+  </style>
   <rect width="620" height="640" fill="#ffffff"/>
   <text x="310" y="34" text-anchor="middle" font-weight="bold" font-size="18">J0400 rear accessory connector (16 pin)</text>
   <text x="310" y="56" text-anchor="middle" font-size="12" fill="#555">Signal names from the GM600 UHF controller schematic, in pin-number order.</text>

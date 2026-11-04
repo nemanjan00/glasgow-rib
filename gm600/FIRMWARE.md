@@ -164,15 +164,12 @@ From the `11` read handler at `4D85` and the `17` write handler at `4CE8`:
 Still open: what `21` does (DPS never sends it to a GM600), and the exact behaviour of `18`,
 `20` and `22`.
 
-## Is the codeplug in the dump? Yes: the internal EEPROM
+## Where the codeplug is: the internal EEPROM
 
 The whole codeplug is the 640-byte internal EEPROM at `0D80`–`0FFF`, and it is in this dump. A
 live DPS read (20 × 32-byte `11` reads of exactly that range) matched it byte for byte. The `.per`
 file DPS saves (`0x7F1` bytes) is DPS's own expanded format, built from those 640 bytes; no such
 region exists in the radio. The decode is in [CODEPLUG.md](CODEPLUG.md).
-
-An earlier version of this section said the codeplug was paged in with `21` from SRAM or flash.
-That was wrong: DPS never sends `21` to a GM600.
 
 `1080`–`3FFF` is RAM with pointer tables and working structures, not the stored codeplug.
 

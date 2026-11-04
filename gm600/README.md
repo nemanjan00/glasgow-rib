@@ -1,32 +1,54 @@
+<p align="center">
+  <img src="../assets/banner.svg" alt="A Motorola GM600 front panel with rib on its display" width="100%">
+</p>
+
 # Motorola GM600
 
 Everything specific to the GM600 (600 Series, MPT1327 trunked mobile): wiring, the programming
 protocol, the codeplug format, firmware notes and host tools. The applet itself is generic; see
 the [top-level README](../README.md).
 
-With a Glasgow and a lab supply you can read and write a GM600 codeplug, with no RIB and no DPS.
-DPS (`WDPS_DP.EXE`) can also run under QEMU with its COM port bridged to the applet.
+**With a Glasgow, three wires and a bench supply you can read and write a GM600's codeplug: no
+RIB, no DPS, no period PC.** Motorola's own Dealer Programmer also runs against the radio through
+the applet, under QEMU.
 
-## Start here
+## What you can do
 
-1. [CONNECTION.md](CONNECTION.md): wiring. BUS+ is J0400 pin 6, GND is pin 7, and **about 9 V on
-   pin 14 (HOOK) from a separate supply**. Without HOOK the radio receives but never answers.
-2. [PROTOCOL.md](PROTOCOL.md): SBEP framing, commands, and the DPS read/write sequence captured
-   from a real radio.
-3. [tools/](tools/): dump the codeplug (`dump_codeplug.py`), read (`sbep_client.py`), write
-   (`sbep_write.py`), and the QEMU + DPS capture rig.
+| | |
+|---|---|
+| 📥 **Back up a radio** | Dump the whole 640-byte codeplug in seconds, every reply checksum-verified |
+| 🔍 **Read it** | Channels, PL tones, MPT identity, timers, power and per-channel options, decoded with a Kaitai spec |
+| ✏️ **Write it** | Proven on a real radio; see the checksum caveats below before writing changed data |
+| 🖥️ **Run the original DPS** | 16-bit Windows 3.1 DPS in QEMU, its COM1 bridged to the applet socket |
+| 🔬 **Reverse further** | Firmware memory map, SBEP dispatch table, DPS binary offsets and probe methods |
 
-## Reference
+## Quick start
+
+1. **Wire it** ([CONNECTION.md](CONNECTION.md)): Glasgow A0 → J0400 pin 6 (BUS+), GND → pin 7, and
+   a bench supply at 9 V (current limit 10–20 mA) → pin 14 (HOOK), its negative to pin 7.
+2. **Start the applet:** `glasgow run rib -V 5 --bus A0 socket tcp:127.0.0.1:2324`
+3. **Dump:** `python3 tools/dump_codeplug.py my-radio.bin`, and keep that first dump.
+4. **Decode:** open the dump with [gm600_codeplug.ksy](gm600_codeplug.ksy) in the
+   [Kaitai Web IDE](https://ide.kaitai.io/).
+
+<p align="center">
+  <img src="assets/codeplug-map.svg" alt="The 640-byte GM600 codeplug, by block and decode status" width="100%">
+</p>
+
+## Docs
 
 | File | Contents |
 |---|---|
+| [CONNECTION.md](CONNECTION.md) | Wiring, the J0400 pinout, what's behind BUS+ and HOOK, meter checks |
+| [PROTOCOL.md](PROTOCOL.md) | SBEP framing and commands, timings, and the DPS read/write sequence captured from a real radio |
 | [CODEPLUG.md](CODEPLUG.md) | The 640-byte codeplug: block map, channel table, PL tones, identity, option bits, checksums |
-| [gm600_codeplug.ksy](gm600_codeplug.ksy) | Kaitai Struct spec for the codeplug (open it with a dump in ide.kaitai.io) |
-| [FREQ_ENCODING.md](FREQ_ENCODING.md) | Stored word ↔ frequency: `375 MHz + (v & 0x7FFF) × (bit 15 ? 6.25 : 5 kHz)` |
-| [DUMP_SEQUENCE.md](DUMP_SEQUENCE.md) | How the codeplug was located, and the read-only probe plan for other variants |
-| [FIRMWARE.md](FIRMWARE.md) | 68HC11 memory map, flash banking, SBEP dispatch table, from a 64 KB dump |
+| [gm600_codeplug.ksy](gm600_codeplug.ksy) | Kaitai Struct spec for the codeplug, with editor write support |
+| [FREQ_ENCODING.md](FREQ_ENCODING.md) | Stored word ↔ frequency: `375 MHz + (v & 0x7FFF) × (bit 15 ? 6.25 : 5 kHz)`, and its pitfalls |
+| [DUMP_SEQUENCE.md](DUMP_SEQUENCE.md) | How to dump, the probe methods used to find the codeplug, and DPS binary references for reversing |
+| [FIRMWARE.md](FIRMWARE.md) | 68HC11 memory map, flash banking, SBEP dispatch table, routes to a full flash dump |
 | [HARDWARE.md](HARDWARE.md) | Accessory connector reference and repeater tap points (COR, PL, flat audio) |
-| [assets/](assets/) | Wiring diagrams used by CONNECTION.md |
+| [tools/](tools/README.md) | `dump_codeplug.py`, `sbep_client.py`, `sbep_write.py`, and the QEMU + DPS capture rig |
+| [assets/](assets/) | Diagrams; `make_diagrams.py` regenerates the codeplug map and session diagrams |
 
 ## Status (2026-11-04)
 
