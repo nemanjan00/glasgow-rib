@@ -132,9 +132,30 @@ A host writing a modified personality must recompute this byte (`+= Σ of its da
   needs a live write-contrast sweep and isn't needed for conventional use.
 - Factory alignment/softpot region (`0x0D80`–`0x0E12`): read-only, enumerated, not byte-bound.
 
+## Radio-wide flags — "Radio Config Byte1" (packed, in the network block)
+
+Three radio-wide settings — **Registration On Power Up**, **De/Pre-emphasis** (RX/TX audio path),
+and **Conventional Mode** — are *view-only* in the Dealer Programmer (WDPS_DP); they are authored in
+the Network Programmer (WDPS_NP) and packed into a **"Radio Config Byte1"** that lives in the network
+block (`0x0E13`–`0x0F07`). Decoded by a live WDPS_NP `.net` write-contrast (change one flag → Save →
+XOR-decode the `.net` → diff; the byte sits at decoded `.net` offset `0x4A0`, `0xE7` in the sample):
+
+| field | Radio Config Byte1 bit | values |
+|---|---|---|
+| Registration On Power Up | bit7 `0x80` (inverted: 1 = disabled) | on / off |
+| Conventional Mode | bits[6:5] `0x60` | 0 Inhibit, 1 Dealer, 2 All, 3 RegioNet43 |
+| De/Pre-emphasis (audio path) | bit4 `0x10` | 0 MPT1327, 1 PAA1382 |
+| bits[3:0] | Short Addr PABX / Tx Timer Clear Down / Ignore LAB / Synch Pattern | not individually bound |
+
+The byte's exact offset *within the radio network block* needs the `.net`→radio merge transform
+(out of scope). Note: for repeater **flat audio** you don't need this flag at all — the accessory
+connector carries flat TX (pin 5) and discriminator RX (pin 11) directly; see [HARDWARE.md](HARDWARE.md).
+
 ## Cross-reference
 
-Full RE write-ups (protocol provenance, `.per`/`.net`/`.rad` file formats, field catalogs,
-model/version matrices, Kaitai spec) are in the Motorola CPS RE project,
-`docs/DPS_EMEA_600SERIES_R00.03.02/` (`LIVE_CAPTURE.md`, `CODEPLUG_BITMAP.md`,
-`gm600_codeplug.ksy`, `FIELD_HELP_REFERENCE.md`, `FILE_FORMAT.md`, `FIELD_MAP.md`).
+- **This repo:** [`gm600_codeplug.ksy`](gm600_codeplug.ksy) — runnable Kaitai spec for the 640-byte
+  dump (open it + a dump in ide.kaitai.io); [HARDWARE.md](HARDWARE.md) — accessory-connector pinout
+  + repeater tap points (COR/PL/flat audio); [FIRMWARE.md](FIRMWARE.md) — CPU/flash/SBEP dispatch.
+- **Motorola CPS RE project** `docs/DPS_EMEA_600SERIES_R00.03.02/` — full write-ups: `CODEPLUG_BITMAP.md`,
+  `FIELD_MAP.md` (incl. the Radio Flags `.net` decode), `FIELD_DICTIONARY.md`, `GUI_DIALOG_MAP.md`,
+  `FIELD_HELP_REFERENCE.md`, `FILE_FORMAT.md`, `ACCESSORY_CONNECTOR.md`, `LIVE_CAPTURE.md`.

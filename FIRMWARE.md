@@ -208,3 +208,24 @@ To get the rest you either:
 - Bank register `0x1058` found from the reset init and the trampoline at `0x87B5`.
 - Reply opcodes confirmed by the immediate loads in each handler (`ldab #$80` at the `11` handler,
   etc.).
+
+## Getting the full flash — two more routes, and the channel-limit question
+
+Beyond the two routes above (read U0102 28F020 with a programmer; bank-walk over BUS+ via `0x1058`):
+
+- **68HC11 bootstrap mode.** The K-series has no BDM (BDM arrived with the HC12/HCS08 generation), so
+  bootstrap is the native debug door: strap the mode pins at reset (`MODA_LIR`/`MODB_VSTBY`, both
+  exposed on U0101) and the mask-ROM loader slurps a 256-byte helper into RAM over the SCI and runs
+  it. That helper can drive `0x1058` and stream every bank out the same BUS+ wire — tool-free.
+- **Passive bus-snoop.** A logic analyzer on the demuxed external bus (`A0..17` + `PC0..7_DATA` + E +
+  R/W, ~28 lines) reconstructs ROM fetches *as executed* — the '11 has no DMA and no instruction
+  cache, so the bus is a faithful execution trace (great for *watching* the codeplug/PL logic run).
+  Complete coverage needs exercising all code paths; for a guaranteed whole image the programmer dump
+  wins.
+
+**>4 conventional channels** (GM600 caps at 4; GP600 does 16; 6/8-channel `M08…CK` models exist) is
+**firmware-gated** — the channel-count limit lives in these flash banks, not the codeplug — so
+settling or lifting it needs the full flash, not a codeplug edit.
+
+For the analog/board side (ASFIC `SQDET`/`PLLIM`/`CHACT`, audio PA enable, flat-audio & repeater
+taps), see [HARDWARE.md](HARDWARE.md).
