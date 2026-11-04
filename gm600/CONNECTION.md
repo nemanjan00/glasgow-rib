@@ -8,6 +8,12 @@ drawing 8402626Y07; crops in `docs/render/`).
 
 ![Where to plug in](assets/gm600-rear.svg)
 
+![A GM600 wired to a Glasgow Digital Interface Explorer on the bench](assets/bench.jpg)
+
+*The real thing: GM600 (rear accessory connector on the right) wired to a Glasgow — port A on
+BUS+ — with a bench supply on the clip leads and HOOK pulled up for programming mode; antenna port
+left empty. No RIB, no serial dongle, no period PC.*
+
 ## Summary
 
 | Glasgow | GM600 rear accessory connector J0400 |
