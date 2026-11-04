@@ -31,9 +31,10 @@ glasgow-rib turns that whole chain into gateware on a Glasgow:
 
 - **No RIB, no RS-232, no level shifter.** Glasgow's I/O runs at 5 V and drives the bus open
   drain, exactly like the radio does. BUS+ and ground are the only signal wires.
-- **The timing lives in the FPGA.** The radio drops a message if its bytes are more than about
-  2 ms apart, which USB can't promise. The gateware waits for an idle bus, sends each message as
-  one gap-free burst, and detects collisions bit by bit.
+- **The timing lives in the FPGA.** A RIB sends each message as one gap-free burst, and USB
+  can't promise that from the host side. The gateware waits for an idle bus, sends each message
+  back to back, and detects collisions bit by bit. (How long a gap the radio itself tolerates
+  hasn't been measured; DPS allows up to 121 ms between bytes it receives.)
 - **Scriptable.** Use it from Python, expose it as a pty or a TCP socket, or write your own CPS
   on top of it.
 - **The original software still works.** Motorola's GM600 Dealer Programmer (16-bit Windows 3.1)
@@ -176,7 +177,11 @@ ack = await iface.read(1)                        # 50 = ACK, 60 = NAK
 await iface.get_busy()
 ```
 
-Every byte written in one `write()` is one burst on the bus. **Send one whole message per call.**
+Bytes written in one `write()` go out as one burst. A burst also stays open for about
+3 bit times after the transmit FIFO runs dry, so a frame that reaches the applet in pieces (from a
+pty or socket) still goes out in one piece. Writes further apart than that each wait for a new
+10-bit idle. **Send one whole message per call, and keep one frame in flight:** after a collision
+the applet discards everything queued until the FIFO has been empty for 13 bit times.
 
 ## Repository layout
 
@@ -184,6 +189,7 @@ Every byte written in one `write()` is one burst on the bus. **Send one whole me
 |---|---|
 | [`glasgow_rib/`](glasgow_rib/) | The applet: gateware, host interface, simulation tests |
 | [`gm600/`](gm600/README.md) | Motorola GM600: wiring, protocol, codeplug, firmware notes, Kaitai spec, tools |
+| [`METHODOLOGY.md`](METHODOLOGY.md) | How the GM600 was reverse engineered, written to carry over to the next radio |
 | [`assets/`](assets/) | Images for this README |
 
 ## Limitations
@@ -199,12 +205,18 @@ Every byte written in one `write()` is one burst on the bus. **Send one whole me
 ## Tests
 
 ```sh
-python -m unittest glasgow_rib.test
+python -m unittest glasgow_rib.test glasgow_rib.test_component     # applet + gateware
+(cd gm600/tools && python3 -m unittest test_tools)                  # GM600 tools, against a mock radio
 ```
 
-Simulation tests cover echo, gap-free bursts, waiting for an idle bus, BUSY in auto mode,
-deferring to an external BUSY, and collision abort. The synthesis tests run when a toolchain is
-available (`glasgow[builtin-toolchain]`).
+- **Applet tests** (`glasgow_rib/test.py`), through the host pipe: echo, gap-free bursts, waiting
+  for an idle bus, BUSY in auto mode, deferring to an external BUSY, and collision abort. The
+  synthesis tests run when a toolchain is available (`glasgow[builtin-toolchain]`).
+- **Component tests** (`glasgow_rib/test_component.py`), cycle-exact: a trickled frame staying in
+  one burst, separate writes waiting for idle, late bytes after a collision being discarded,
+  manual BUSY, active-high BUSY, the BUSY reset mode, and receive framing errors and overflow.
+- **Tool tests** (`gm600/tools/test_tools.py`): the SBEP codec, and the dump, read and write tools
+  against `mock_radio.py`, including aborting a write stream on a failed block.
 
 Reference material (service manuals, schematics) goes in `docs/`, which is gitignored.
 

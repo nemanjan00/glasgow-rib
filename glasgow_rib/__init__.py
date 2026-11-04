@@ -1,6 +1,5 @@
 from collections.abc import Buffer
 import os
-import sys
 import time
 import asyncio
 from amaranth import *
@@ -20,6 +19,14 @@ __all__ = ["RIBComponent", "RIBInterface", "RIBApplet"]
 
 BUSY_MODES = ("none", "manual", "auto")
 
+# A burst stays open this many bit times after the transmit FIFO runs dry, so bytes that trickle in
+# from a pty or socket a little late still join the same burst instead of waiting for a new idle.
+BURST_GAP_BITS = 3
+# After a collision, the rest of the frame is discarded until the FIFO has been empty this long:
+# one byte time (the longest a trickling frame can take to deliver its next byte and still join the
+# burst) plus the continuation window.
+DISCARD_GAP_BITS = 10 + BURST_GAP_BITS
+
 
 class RIBComponent(wiring.Component):
     """Motorola RIB (Radio Interface Box) PHY.
@@ -29,8 +36,10 @@ class RIBComponent(wiring.Component):
     byte to RSS; RSS relies on that echo for its collision checking.
 
     A transmit burst only starts once the line has been idle (and BUSY, if present, inactive) for
-    one packet time (10 bit times). Bytes queued back to back are then sent without gaps, which
-    matters because the radio drops a message whose bytes are more than ~2 ms apart.
+    one packet time (10 bit times). Bytes queued back to back are then sent without gaps, the way
+    a real RIB sends a message. A burst stays open for ``BURST_GAP_BITS`` bit times after the
+    transmit FIFO runs dry, so a frame that reaches the FIFO in pieces (from a pty or socket) still
+    goes out as one burst.
 
     The optional BUSY line (active low and open-drain by default; active high drives high and
     relies on a pull-down) is driven
@@ -41,28 +50,33 @@ class RIBComponent(wiring.Component):
 
     While transmitting, every released (1) bit is checked at mid-bit; if the line reads 0, someone
     else is driving it. The transmitter then releases the bus, discards the rest of the queued
-    burst, counts a collision, and waits for the bus to go idle again.
+    data until the FIFO has been empty for ``DISCARD_GAP_BITS`` bit times, counts a collision, and
+    waits for the bus to go idle again. Everything queued at that point is dropped, including any
+    later frames, so keep one frame in flight at a time.
+
+    ``busy_mode`` resets to ``"auto"`` when a BUSY pin is present, and to ``"none"`` otherwise.
     """
-
-    i_stream:    In(stream.Signature(8))
-    o_stream:    Out(stream.Signature(8))
-
-    bit_cyc:     In(16)
-    busy_mode:   In(2)
-    busy_set:    In(1)
-    busy_setup:  In(8)
-    busy_hold:   In(8)
-    busy_in:     Out(1)
-
-    rx_errors:   Out(16)
-    rx_overflow: Out(16)
-    collisions:  Out(16)
 
     def __init__(self, ports, *, busy_active_high=False):
         self.ports = ports
         self.busy_active_high = busy_active_high
 
-        super().__init__()
+        busy_mode_init = BUSY_MODES.index("auto" if ports.busy is not None else "none")
+        super().__init__({
+            "i_stream":    In(stream.Signature(8)),
+            "o_stream":    Out(stream.Signature(8)),
+
+            "bit_cyc":     In(16),
+            "busy_mode":   In(2, init=busy_mode_init),
+            "busy_set":    In(1),
+            "busy_setup":  In(8),
+            "busy_hold":   In(8),
+            "busy_in":     Out(1),
+
+            "rx_errors":   Out(16),
+            "rx_overflow": Out(16),
+            "collisions":  Out(16),
+        })
 
     def elaborate(self, platform):
         m = Module()
@@ -184,6 +198,7 @@ class RIBComponent(wiring.Component):
         tx_bitno = Signal(range(8))
         tx_shreg = Signal(8)
         in_burst = Signal()
+        gap_bits   = Signal(range(DISCARD_GAP_BITS + 1))
         hold_bits  = Signal(8)
         setup_bits = Signal(8)
 
@@ -199,6 +214,7 @@ class RIBComponent(wiring.Component):
                         tx_o.eq(0),
                         tx_timer.eq(self.bit_cyc - 1),
                         tx_bitno.eq(0),
+                        gap_bits.eq(0),
                     ]
                     m.next = "START"
                 with m.Elif(self.i_stream.valid & bus_idle):
@@ -210,10 +226,15 @@ class RIBComponent(wiring.Component):
                         m.d.sync += setup_bits.eq(0)
                     m.next = "SETUP"
                 with m.Elif(in_burst & ~self.i_stream.valid):
-                    m.d.sync += [
-                        in_burst.eq(0),
-                        hold_bits.eq(self.busy_hold),
-                    ]
+                    # Keep the burst open briefly in case the rest of the frame is still on its way.
+                    with m.If(gap_bits == BURST_GAP_BITS):
+                        m.d.sync += [
+                            in_burst.eq(0),
+                            gap_bits.eq(0),
+                            hold_bits.eq(self.busy_hold),
+                        ]
+                    with m.Elif(tick):
+                        m.d.sync += gap_bits.eq(gap_bits + 1)
 
             with m.State("SETUP"):
                 with m.If(setup_bits == 0):
@@ -260,16 +281,23 @@ class RIBComponent(wiring.Component):
                 m.d.sync += [
                     tx_o.eq(1),
                     in_burst.eq(0),
+                    gap_bits.eq(0),
                     hold_bits.eq(0),
                     self.collisions.eq(self.collisions + 1),
                 ]
                 m.next = "DISCARD"
 
             with m.State("DISCARD"):
-                # Drop whatever is left of the burst the host queued together.
+                # Drop the rest of the frame, including bytes that arrive a little late, until the
+                # FIFO has stayed empty for DISCARD_GAP_BITS bit times.
                 m.d.comb += self.i_stream.ready.eq(1)
-                with m.If(~self.i_stream.valid):
+                with m.If(self.i_stream.valid):
+                    m.d.sync += gap_bits.eq(0)
+                with m.Elif(gap_bits == DISCARD_GAP_BITS):
+                    m.d.sync += gap_bits.eq(0)
                     m.next = "IDLE"
+                with m.Elif(tick):
+                    m.d.sync += gap_bits.eq(gap_bits + 1)
 
         with m.Switch(self.busy_mode):
             with m.Case(BUSY_MODES.index("manual")):
@@ -369,6 +397,11 @@ class RIBInterface:
         On a collision the gateware stops transmitting and discards the rest of the burst, so
         fewer than ``len(data)`` bytes come back. With ``timeout`` (in seconds), whatever arrived
         by then is returned, which then fails the comparison; without it, this waits forever.
+
+        After a collision, the other talker's bytes are still in the receive pipe, and the next
+        :meth:`read` returns them. Drain them or resync on frame boundaries (see
+        ``gm600/PROTOCOL.md``, "Other traffic on BUS+") before retrying. Keep one frame in flight:
+        a collision also discards anything queued behind the aborted frame.
         """
         await self.write(data, flush=True)
         if timeout is None:

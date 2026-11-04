@@ -133,7 +133,7 @@ DPS's receive function returns these status codes:
 | `10` | Enter programming mode | none | ACK, then **the radio resets** (confirmed) |
 | `13` | Ask the largest block size the radio accepts | none | ACK, then `82` frame `00 20 00`: a constant hardcoded in the firmware ([FIRMWARE.md](FIRMWARE.md)), not a real limit; 64-byte reads work |
 | `11` | Read a block | `len a23-16 a15-8 a7-0` (24-bit address) | ACK, then `80` frame: 3 header bytes + `len` data bytes |
-| `17` | Write a block | `a23-16 a15-8 a7-0 data…` | ACK, then `84` (OK) or `85` (failed) |
+| `17` | Write a block | `a23-16 a15-8 a7-0 data…` | ACK, then a result frame `F4 84 a23-16 a15-8 a7-0 cks` (OK, echoing the address; confirmed) or `85` (failed) |
 | `23` | Read an ID string | `[index]`: 0, 1, 3 and 4 are used; 1 is read at connect | ACK, then `8B` frame: the index byte, then the ASCII string (confirmed for index 1: the serial number, no NUL) |
 | `21` | Set a 16-bit value (address or register preset) | `00 hi lo` | ACK |
 | `20` | Read or write a parameter (softpots, tuning) | read `[param, 00]`; write `[param, 01\|02, value…]` (1–3 value bytes) | read: ACK, then `8A` frame with the value; write: ACK |

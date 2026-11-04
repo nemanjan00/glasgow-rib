@@ -23,8 +23,9 @@ Output: enough to speak the wire and read/write the vendor's own files offline.
 ## 2. A RIB-less PHY — Glasgow
 
 Implement the wire protocol as Glasgow gateware, not a bit-banged USB-serial dongle. The timing is
-then deterministic (see the open-drain / echo / atomic-burst notes in [README.md](README.md)),
-which is what makes reads reliable where a jittery cable NAKs. Prove it live by reading the
+then deterministic (see the open-drain / echo / atomic-burst notes in [README.md](README.md)):
+messages go out back to back, collisions are caught in hardware, and nothing depends on host or
+USB timing. Prove it live by reading the
 codeplug and writing it back **unchanged** — a clean round-trip is the first real milestone.
 
 ## 3. Decode fields by write-contrast — the workhorse
@@ -39,8 +40,8 @@ The bytes that moved are that field. Keep the experiment clean:
 
 - **Isolate one variable.** Two edits at once are unreadable.
 - **Filter the noise.** Every write also perturbs save/header metadata and a checksum byte or two;
-  those deltas are not your field. (GM600: a trailing factory field and the personality checksum
-  moved on every write.)
+  those deltas are not your field. (GM600: DPS blanks a trailing factory field on every write,
+  so it changes on the first one, and the personality checksum follows every data change.)
 - **Checksums:** a net-zero edit (one byte +1, another −1) passes any additive checksum, which both
   confirms "additive" and lets you write modified data before you've pinned the checksum.
 

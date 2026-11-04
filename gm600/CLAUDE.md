@@ -43,6 +43,8 @@ in this folder; it indexes the docs and has the current status.
 - The owner may be using Glasgow for DPS sessions (QEMU → `socat` → applet `socket` on
   `127.0.0.1:2324`). Check `ps` for a running `glasgow run rib` before using it, and ask.
 - The applet's `socket` serves one client at a time.
+- Test tool changes against `tools/mock_radio.py` (`cd tools && python3 -m unittest test_tools`)
+  before pointing them at the radio.
 - Capture logs from DPS sessions are in `~/captures/` (not in git).
 
 ## Next steps

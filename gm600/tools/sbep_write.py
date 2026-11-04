@@ -6,18 +6,30 @@ patching the four channel +6 option bytes so one write session binds up to
 4 candidate bits (distinct bit per channel). Fully reversible: --restore
 replays the stream unmodified to return the radio to baseline.
 
+usage: sbep_write.py [--dry | --write | --restore] [CAPTURE_LOG]
+
 Modes:
-  (default)   dry run: parse + print patched frames, send NOTHING
+  --dry       (default) parse + print patched frames, send NOTHING
   --write     send the PATCHED stream (probe)
   --restore   send the UNMODIFIED stream (baseline)
-"""
-import socket, sys, time, re
 
-HOST, PORT = "127.0.0.1", 2324
+CAPTURE_LOG is the socat sniff log of a DPS write session (default: sniff-write.log in the current
+directory). PROBE_SET=<name> picks a patch table below; SBEP_ADDR=host:port the applet socket.
+
+Every frame's echo, ACK and reply are checked, and the stream ABORTS on the first problem (echo
+mismatch, no ACK, or a 17 whose result isn't 84 for the same address), so a failed block is never
+followed by more writes.
+"""
+import os
+import re
+import sys
+import time
+
+from sbep import Radio, SBEPError, ACK, checksum, frame_length
+
 LOG = "sniff-write.log"
 
 # channel +6 byte radio addresses and the probe bit to OR in (default byte = 0x08)
-import os
 # PROBE table selectable via env PROBE_SET; default = checksum-neutral test
 _SETS = {
     # net byte-sum delta == 0 : tests the "block total sum" checksum model
@@ -42,10 +54,10 @@ _SETS = {
     # bits 0,1,2 on ch1/2/3, compensated by lowering ch4 Tx PL tone index (0x13->0x0C, valid tone)
     "bits012p": {0x0F6D: 0x09, 0x0F74: 0x0A, 0x0F7B: 0x0C, 0x0F80: 0x13-7},
 }
-PROBE = _SETS.get(os.environ.get("PROBE_SET", "balanced"))
-
-def cks(b):
-    return (0xFF - (sum(b) & 0xFF)) & 0xFF
+PROBE_SET = os.environ.get("PROBE_SET", "balanced")
+if PROBE_SET not in _SETS:
+    sys.exit("unknown PROBE_SET %r; choose one of: %s" % (PROBE_SET, ", ".join(_SETS)))
+PROBE = _SETS[PROBE_SET]
 
 def parse_sent(path):
     sent = []; cur = None
@@ -61,14 +73,8 @@ def parse_sent(path):
 def split_frames(sent):
     i = 0; frames = []
     while i < len(sent):
-        b = sent[i]
-        if b == 0xFF:
-            op = sent[i+1]; ln = (sent[i+2] << 8) | sent[i+3]
-            total = 4 + (ln - 1) + 1
-            frames.append(sent[i:i+total]); i += total
-        elif (b & 0xF0) == 0xF0:
-            n = b & 0x0F
-            total = 1 + n + 1
+        if (sent[i] & 0xF0) == 0xF0:
+            total = frame_length(sent[i:])
             frames.append(sent[i:i+total]); i += total
         else:
             i += 1
@@ -90,50 +96,46 @@ def patch_frame(fr):
     if not changed:
         return fr, []
     body = bytes(fr[0:7]) + bytes(data)
-    return body + bytes([cks(body)]), changed
+    return body + bytes([checksum(body)]), changed
 
-def recv_all(s, nmin, t=3.0):
-    s.settimeout(0.4); buf = bytearray(); dl = time.time() + t
-    while time.time() < dl:
-        try:
-            d = s.recv(256)
-            if d: buf += d
-            elif len(buf) >= nmin: break
-        except socket.timeout:
-            if len(buf) >= nmin: break
-    return bytes(buf)
+def check(fr, status, op, data):
+    """Returns an error string if the radio's answer to ``fr`` isn't what DPS got, else None."""
+    if status != ACK:
+        return "no ACK (status 0x%02X)" % status
+    sent_op = fr[1]
+    if sent_op == 0x17:
+        if op != 0x84:
+            return "write failed (reply op 0x%02X)" % op
+        if data[:3] != fr[4:7]:
+            return "write result for the wrong address (%s)" % data[:3].hex()
+    return None
 
 def send_stream(frames, label):
-    s = socket.create_connection((HOST, PORT), timeout=5)
     print("== sending %s (%d frames) ==" % (label, len(frames)))
-    ok = 0; bad = 0
-    for k, fr in enumerate(frames):
-        s.settimeout(0.05)
-        try:
-            while True:
-                if not s.recv(256): break
-        except socket.timeout:
-            pass
-        s.settimeout(2.0)
-        s.sendall(fr)
-        rep = recv_all(s, len(fr) + 1)
-        reply = rep[len(fr):]
-        op = fr[1] if (fr[0] == 0xFF or (fr[0] & 0xF0) == 0xF0) and len(fr) > 1 else None
-        tag = "0x%02X" % op if op is not None else "?"
-        # for writes, look for 0x84 (ok) / 0x85 (fail) in reply
-        note = ""
-        if op == 0x17:
-            if 0x84 in reply: note = "WRITE-OK"; ok += 1
-            elif 0x85 in reply: note = "WRITE-FAIL"; bad += 1
-            else: note = "NO-ACK?"; bad += 1
-        print("  [%2d] op=%s tx=%s reply=%s %s" % (k, tag, fr.hex(), reply.hex(), note))
-        time.sleep(0.05)
-    s.close()
-    print("== done: %d write-OK, %d write-fail/noack ==" % (ok, bad))
+    writes = 0
+    with Radio() as radio:
+        for k, fr in enumerate(frames):
+            op = fr[1]
+            # 10 restarts the radio: only a status byte comes back.
+            try:
+                status, rop, data = radio.transact(fr, reply=(op != 0x10))
+            except SBEPError as e:
+                sys.exit("  [%2d] op=0x%02X ABORT: %s" % (k, op, e))
+            err = check(fr, status, rop, data)
+            if err:
+                sys.exit("  [%2d] op=0x%02X tx=%s ABORT: %s" % (k, op, fr.hex(), err))
+            if op == 0x17:
+                writes += 1
+            print("  [%2d] op=0x%02X ok" % (k, op))
+            time.sleep(0.05)
+    print("== done: all %d frames acknowledged, %d writes OK ==" % (len(frames), writes))
 
 def main():
-    mode = sys.argv[1] if len(sys.argv) > 1 else "--dry"
-    sent = parse_sent(LOG)
+    args = sys.argv[1:]
+    mode = args.pop(0) if args and args[0].startswith("--") else "--dry"
+    if mode not in ("--dry", "--write", "--restore"):
+        sys.exit(__doc__)
+    sent = parse_sent(args[0] if args else LOG)
     frames = split_frames(sent)
     patched = []; all_changes = []
     for fr in frames:
@@ -153,10 +155,8 @@ def main():
         return
     if mode == "--write":
         send_stream(patched, "PROBE (patched)")
-    elif mode == "--restore":
-        send_stream(patched, "RESTORE (baseline)")
     else:
-        print("unknown mode", mode)
+        send_stream(patched, "RESTORE (baseline)")
 
 if __name__ == "__main__":
     main()

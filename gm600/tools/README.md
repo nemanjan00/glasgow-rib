@@ -7,25 +7,35 @@ for the applet's echo. Validated on a real GM600 (serial `807IYA0903`), 2026-11-
 Prereqs: 9 V on HOOK (see [../CONNECTION.md](../CONNECTION.md)); the applet listening on `2324`;
 **nothing else connected to `2324`** — it serves one client at a time (see "Capture rig" below).
 
-## `sbep_client.py` — read-only
+## `sbep.py` — shared framing and client
 
-Minimal SBEP client. As shipped it queries the serial (`23 01`) and reads 32 bytes at `0x0F60`
-(the channel region), printing echo + reply. Frame checksum = `(0xFF − sum(bytes)) & 0xFF`;
-short frame `F0|n op data… cks`, long read reply `FF 80 …`. Use it as a library:
+The SBEP codec from [../PROTOCOL.md](../PROTOCOL.md) (`encode`, `decode`, `frame_length`,
+`checksum`) and a `Radio` socket client that every tool uses. `Radio.transact(frame)` sends one
+frame and checks it end to end: the echo must match what was sent (a mismatch means a collision),
+then the status byte (`50` ACK, `60` NAK, bare `80` refused), then the reply frame's checksum. It
+raises `SBEPError` on any problem instead of returning partial data.
 
 ```python
-r = Radio()
-echo, reply = r.xfer(short_frame(0x11, bytes([0x20, 0x00, 0x0F, 0x60])), 4+3+0x20+1+2)  # read 32B @0x0F60
+from sbep import Radio, encode
+with Radio() as r:                         # SBEP_ADDR=host:port, default 127.0.0.1:2324
+    print(r.id_string(1))                  # "807IYA0903"
+    data = r.read_block(0x0F60, 0x20)      # checks the echoed address too
+    status, op, data = r.transact(encode(0x13))
 ```
+
+## `sbep_client.py` — read-only
+
+Queries the serial (`23 01`) and reads 32 bytes at `0x0F60` (the channel region). A starting point
+for your own scripts.
 
 Opcodes confirmed live: `23` ID query, `11` block read, `13` max-block, `10` enter/reset,
 `17` write (→ `84` OK / `85` fail). ACK = `50`.
 
 ## `sbep_write.py` — write-probe (DANGER: writes the radio)
 
-Replays DPS's captured write stream (`sniff-write.log` from a capture) **verbatim**, optionally
-patching a few bytes, so one session writes a complete, valid-framed codeplug with a controlled
-change. Modes:
+Replays DPS's captured write stream (a socat sniff log, default `sniff-write.log` in the current
+directory, or the path given after the mode) **verbatim**, optionally patching a few bytes, so one
+session writes a complete, valid-framed codeplug with a controlled change. Modes:
 
 - *(default)* dry run — parse + print, send nothing.
 - `--restore` — replay the stream unmodified → returns the radio to the **captured (post-DPS)
@@ -34,7 +44,11 @@ change. Modes:
   replaying it keeps those `FF`. The factory bytes live only in the pre-write dumps (see
   [../CODEPLUG.md](../CODEPLUG.md)).
 - `--write` — send the patched stream. `PROBE_SET=<name>` picks the patch table (see the top of the
-  file). Each `17` is checked for an `84` (OK) reply.
+  file); an unknown name is an error.
+
+Every frame is checked like DPS would expect: matching echo, ACK, and for each `17` a result frame
+`84` for the same address. **The stream aborts on the first failure**, so a failed or unanswered
+block is never followed by more writes. Re-run with `--restore` once the cause is fixed.
 
 How the probes stay valid: each block has an **additive** checksum (see
 [../CODEPLUG.md](../CODEPLUG.md)), so a changed byte is balanced by an equal, opposite change to
@@ -55,6 +69,14 @@ moved. This is how Monitor was bound (ch1 Monitor=Yes → only `0x0F6D 08→18` 
 changed). Reply header is `FF 80 00 24 <ah><am><al>` then 32 data bytes and the checksum.
 `00 24` is the 16-bit length; the next byte is the high address byte, which is also `00` here, so
 it's easy to be off by one.
+
+## `mock_radio.py` and `test_tools.py` — no hardware needed
+
+`mock_radio.py` is a fake GM600 behind a fake applet socket: it echoes, ACKs, and answers `23`,
+`13`, `11` (from a 640-byte image), `17` and `10` like the real radio, and refuses reads over
+64 bytes. Run it standalone (`python3 mock_radio.py dump.bin 2399`, then `SBEP_ADDR=127.0.0.1:2399`)
+to try a tool safely. `test_tools.py` uses it to test the codec and every tool, including a write
+stream aborting on a failed block: `python3 -m unittest test_tools`.
 
 ## `mouse_ctl.py` — closed-loop headless mouse (now working)
 

@@ -12,9 +12,8 @@ Read first: `README.md` (the applet, generic). Everything radio-specific lives i
 ## Repo conventions
 
 - Commit on `main` and push with `git push origin main`. Don't switch branches.
-- The remote uses the deploy-key alias: `git@github.com-glasgow-rib:nemanjan00/glasgow-rib.git`
-  (key `~/.ssh/glasgow-rib_deploy`). Plain `git@github.com:` picks up another repo's deploy key
-  and is refused; HTTPS has no credentials.
+- The remote uses the owner's per-project SSH deploy-key alias (set up on their machine; see
+  their global notes). Don't change it to plain `git@github.com:` or HTTPS: those fail.
 - `docs/` is gitignored and holds local reference material only (see below).
 - JavaScript work (e.g. in `motorola-cps`) goes through the `/implement-js` skill.
 
@@ -26,7 +25,8 @@ python3 -m venv .venv
 .venv/bin/pip install --no-deps -e .
 export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 .venv/bin/glasgow run rib --help
-.venv/bin/python -m unittest glasgow_rib.test   # ~45 s simulation, ~15 s synthesis
+.venv/bin/python -m unittest glasgow_rib.test glasgow_rib.test_component   # ~90 s
+(cd gm600/tools && python3 -m unittest test_tools)   # tools vs mock radio, ~2 s
 ```
 
 - Build against current Glasgow main (applet API V2: `GlasgowAppletV2`, `assembly.add_*`). Older
@@ -50,8 +50,17 @@ export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 - **Echo:** everything on the line, our own bytes included, goes to the host. The GM600 DPS and
   the CM CPS both verify the echo.
 - **Atomic bursts:** a burst starts only after 10 bit times of idle (line high, BUSY inactive).
-  Bytes from one `write()` go out back to back. **Send one whole frame per write**; byte-at-a-time
-  writes each wait for the 10-bit idle.
+  Bytes from one `write()` go out back to back, and the burst stays open `BURST_GAP_BITS` (3) bit
+  times after the FIFO runs dry, so a frame that trickles in from a pty or socket stays in one
+  burst. **Send one whole frame per write**; writes further apart each wait for the 10-bit idle.
+- **Discard after a collision:** until the FIFO has been empty for `DISCARD_GAP_BITS` (one byte
+  time plus 3 bits), so the late tail of an aborted frame never goes out on its own. Everything
+  queued is dropped, later frames included: keep one frame in flight.
+- **BUSY mode resets to `auto` when a BUSY pin is configured**, `none` otherwise. The CLI sets it
+  explicitly anyway.
+- **The radio's own inter-byte gap tolerance is unmeasured.** Don't claim a number. In the DPS
+  capture, host bytes reached the socket at most 0.48 ms apart (under one byte time), so DPS's
+  frames went out back to back even before the continuation window existed.
 - **Collisions:** checked at mid-bit on released bits. On a collision the gateware releases the
   line, discards the rest of the queued burst and counts it. `transfer(frame, timeout=…)` then
   returns a short echo, which the caller treats as a mismatch and retries.
