@@ -61,6 +61,7 @@ the applet, under QEMU.
   unchanged are safe; anything else may make DPS reject the radio on the next read.
 - **Not decoded:** the MPT1327 network block (`0x0E13`–`0x0F07`, fields enumerated but not
   byte-bound) and the factory alignment area.
-- **Firmware flashing is a separate, untried problem** (68HC11 bootstrap via MODA/MODB, VPP).
+- **Firmware flashing is a separate, untried problem** (68HC11 bootstrap via MODA/MODB, or writing
+  the flash — a 5 V Atmel AT29C020, so no VPP needed; see [FIRMWARE.md](FIRMWARE.md)).
 - **Keep a pre-write dump.** DPS blanks the factory field at `0x0FF5`–`0x0FFB` on every write, and
   it can't be recovered from the radio afterwards.

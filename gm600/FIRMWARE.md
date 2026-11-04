@@ -44,8 +44,17 @@ page changed between reads.
 
 ### Flash banking
 
-The radio has a 256 KB flash (U0102, 28F020) behind a 64 KB CPU. It is paged into the
+The radio has a 256 KB flash (U0102) behind a 64 KB CPU. It is paged into the
 `4000`–`7FFF` window:
+
+> **The flash is an Atmel AT29C020, not a 28F020.** Seen on this unit: a TSOP-32 marked
+> `AT29C020 12TI`, on board `8402626Y08` (© 1997). The parts list / other board revisions may show a
+> 28F020. **Reading is identical** — both are 256 KB over a standard JEDEC parallel interface, so the
+> BUS+ bank-walk and a programmer dump work unchanged. **Writing differs:** the 28F020 is Intel-style
+> and needs 12 V on VPP; the AT29C020 is **5 V-only**, writes in 256-byte pages behind a
+> software-data-protection unlock — **no VPP to supply**, so flashing is a simpler problem on this unit
+> (still untried). A TSOP-32 adapter on a T48/TL866 reads it; in-circuit reading is awkward (it fights
+> the HC11 on the bus, and a Glasgow lacks pins for 18 address + 8 data + 3 control).
 
 - **Bank select register = `0x1058`.** Writing it changes which 16 KB flash page appears at
   `4000`.
@@ -182,7 +191,7 @@ code, are not here.
 
 To get the rest you either:
 
-- **Read the flash chip** (U0102, 28F020) with a programmer — the complete, reliable route; or
+- **Read the flash chip** (U0102, the AT29C020) with a programmer — the complete, reliable route; or
 - **Dump bank by bank over BUS+**: set `0x1058` to each of `00 04 08 0C 10 14 1C 20 24 28 2C` (0x18 is unused) and read `4000`–`7FFF`.
   Changing `0x1058` needs a register write (`17` to `0x1058`: untested and risky, because the
   firmware itself runs from banked code), the `26` backdoor with a known-good stub, or bootstrap
@@ -199,7 +208,7 @@ To get the rest you either:
 
 ## Getting the full flash — two more routes, and the channel-limit question
 
-Beyond the two routes above (read U0102 28F020 with a programmer; bank-walk over BUS+ via `0x1058`):
+Beyond the two routes above (read U0102 (the AT29C020) with a programmer; bank-walk over BUS+ via `0x1058`):
 
 - **68HC11 bootstrap mode.** The K-series has no BDM (BDM arrived with the HC12/HCS08 generation), so
   bootstrap is the native debug door: strap the mode pins at reset (`MODA_LIR`/`MODB_VSTBY`, both
