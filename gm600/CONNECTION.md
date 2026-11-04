@@ -114,7 +114,7 @@ With the radio **on**:
 
 ## Running the applet
 
-See [README.md](README.md#install) for installing and running the applet. For the GM600, keep
+See [README.md](../README.md#install) for installing and running the applet. For the GM600, keep
 the default baud rate (9600, the only one the 600 Series uses) and leave `--busy` off.
 
 `sniff` shows nothing on an idle radio, so it can't check the wiring. Instead, with HOOK at 9 V,

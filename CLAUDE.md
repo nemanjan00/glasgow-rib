@@ -5,17 +5,13 @@ UART on BUS+, with an optional BUSY line. The first target radio is the **GM600*
 also writing their own host software (CPS), so this applet is the PHY for that, not mainly an
 RSS/DOSBox bridge.
 
-Read first: `README.md` (applet), `CONNECTION.md` (GM600 wiring), `PROTOCOL.md` (GM600 SBEP
-protocol, reverse engineered from DPS and confirmed on a radio), `CODEPLUG.md` (the 640-byte
-codeplug decode: block layout, channel/PL/identity fields, per-block `0xFF−sum` checksums, options
-status), `FREQ_ENCODING.md` (stored↔frequency formula, solved), `FIRMWARE.md` (GM600 firmware
-static analysis: CPU/memory map, flash banking, SBEP dispatch). Host-side tools and the DPS capture
-rig are in `tools/`.
+Read first: `README.md` (the applet, generic). Everything radio-specific lives in its own folder:
+**`gm600/`** for the GM600 (wiring, protocol, codeplug, firmware, tools), with its own
+`gm600/CLAUDE.md`. Keep radio-specific facts out of the top level; add a new folder per radio.
 
 ## Repo conventions
 
-- Commit on `master`; the remote branch is `main`. Push with `git push origin master:main`.
-  Don't switch branches and don't change git config.
+- Commit on `main` and push with `git push origin main`. Don't switch branches.
 - The remote uses the deploy-key alias: `git@github.com-glasgow-rib:nemanjan00/glasgow-rib.git`
   (key `~/.ssh/glasgow-rib_deploy`). Plain `git@github.com:` picks up another repo's deploy key
   and is refused; HTTPS has no credentials.
@@ -62,40 +58,12 @@ export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 - **No IN flush:** the FX2 sends a short packet 125 µs after the last byte, which is fast enough
   at 9600 baud.
 
-## GM600 hardware facts (schematic; the first three are confirmed on a radio)
-
-- J0400 (rear 16-pin accessory connector): **pin 6 = BUS+** (through R0422, 270 Ω), **pin 7 =
-  GND**. Pin 8 SCI_DATA_OUT is dead (Q0421 not fitted). Pin 13 ANALOG_GND/SW_B+ may carry
-  battery voltage.
-- **HOOK_RSS (J0400-14) needs about 9 V for programming** (lab PSU at 9 V, current limit set, draws
-  about 1 mA). Above about 5.7 V, VR0102 (5.1 V zener) → Q0105 fires the CPU IRQ and, through
-  Q0122, enables the radio's BUS+ transmitter. Without it the radio receives but never answers.
-  Never wire HOOK to Glasgow. Keep it under 12 V (14 V zener VR0415).
-- The control head is **not** on BUS+: it uses SPI (J0101 SPI_CLCK_BUF/SPI_DATA_BUF/LCD_CE_BUF/
-  LED_CE) and analog key ladders. BUS+ is silent in normal use, so `sniff` on an idle radio shows
-  nothing. BUS+ only passes through J0101-15.
-- BUS+ pull-up is R0130, 10 kΩ.
-- **There is no BUSY line.** Don't use `--busy`.
-- Physical pin layout: probably 2×8 with odd/even rows, pins 1 and 2 at the same end (from a
-  GM300/Maxtrac diagram). Not confirmed for the GM600; go by the moulded numbers.
-- Only wires plus the 9 V HOOK supply are needed: no MAX232, LM311 or diode. Those parts in DIY
-  RIBs exist for RS-232 levels or to make a push-pull TX behave like open drain.
-
 ## Status
 
 Done: applet with pty, socket and sniff operations; BUSY modes (none, manual, auto, with
-setup/hold); collision abort; transfer timeout; docs. 7 simulation tests and 2 synthesis tests
-pass.
-
-**Working on a real GM600 (2026-11-03)**, Glasgow revC3: TX/RX and echo are fine at 9600 baud,
-the radio ACKs `10` with `50`, then resets, and after the reset it answers `23 01` (serial) and
-`13`. Transcript and details are in `PROTOCOL.md` → "Confirmed on a GM600".
-
-**Read and write both confirmed live**: a standalone host client (`tools/sbep_write.py`) wrote the
-codeplug (every `17` → `84`) and read it back; `tools/sbep_client.py` reads. The codeplug is
-decoded in `CODEPLUG.md` (channels, PL, identity, per-block `0xFF−sum` checksums); the frequency
-formula is in `FREQ_ENCODING.md`. Per-channel option bits (Power/Inhibit/Monitor/Data) are the main
-thing still unbound — they're in a separate personality structure, not the channel record.
+setup/hold); collision abort; transfer timeout. 7 simulation tests and 2 synthesis tests pass.
+**Tested on a real radio: GM600** (Glasgow revC3, 9600 baud, read and write); see
+`gm600/README.md`. BUSY handling is still simulation-only, because the GM600 has no BUSY line.
 
 - The applet must use `from glasgow.support import logging`. Current Glasgow pipes call
   `logger.trace()`, and a stdlib logger crashes at startup.
@@ -104,44 +72,27 @@ thing still unbound — they're in a separate personality structure, not the cha
 
 ## Next steps
 
-1. **Codeplug: read + write solved and decoded.** 640-byte CPU EEPROM `0x0D80`–`0x0FFF`, read with
-   20 × 32-byte `11` reads, written with `17` blocks over `0x0E13`–`0x0FFB`. DPS runs under QEMU
-   bridged to the applet `socket` (rig in `tools/README.md`); read/write sessions captured in
-   `~/captures/`. See `PROTOCOL.md`, `CODEPLUG.md`, `FREQ_ENCODING.md`, `DUMP_SEQUENCE.md`. Fuller
-   RE write-ups are also in the motorola-cps repo.
-2. **Bind the per-channel option bits** (Tx Power/Inhibit/Monitor/Data): located to a separate
-   personality structure (`~0x0F33`), not bit-mapped. Needs DPS-generated contrast (a real display —
-   headless mouse/grid-combo editing doesn't work) or the conventional-personality field table in
-   `WDPS_NP.EXE`. Also undecoded: the **MPT1327 trunking network block** (`~0x0E13`–`0x0F32`).
-3. Still open on the radio: time the reset after `10`; what `20`/`22` do (capture them from DPS,
-   don't guess). The owner may be using Glasgow for DPS sessions: check before running anything
-   on it.
-4. Possible: timestamped events from the gateware (byte, BUSY edge, collision, framing error),
+1. Radio-specific work: see that radio's folder (`gm600/CLAUDE.md`).
+2. Possible: timestamped events from the gateware (byte, BUSY edge, collision, framing error),
    for a better sniffer. Today `sniff` timestamps come from the host and are only accurate to
    a few ms.
-5. `motorola-cps` integration (the owner's JS CPS for CM/CP Commercial Series radios,
+3. `motorola-cps` integration (the owner's JS CPS for CM/CP Commercial Series radios,
    `git@github.com:nemanjan00/motorola-cps.git`):
    - Same frame format as the GM600 (`F0|len`, op, data, `0xFF − sum` checksum), but a different
      command set.
    - Its `esbep.js` sends byte by byte and waits for each echo. That clashes with the 10-bit idle
      rule, so add a "write whole frame, then read the echo" mode.
-   - It only parses short frames; GM600 block reads need the `FF` 16-bit-length form.
-   - It expects ACK/NAK as `05`/`06`. The GM600 sends `50` (confirmed on a radio); CM is
-     unknown.
+   - It only parses short frames; block reads need the `FF` 16-bit-length form.
+   - It expects ACK/NAK as `05`/`06`. The GM600 sends `50`; CM is unknown.
    - Its transports are WebSerial and Node serialport. WebSerial can't open a pty, so the web app
      needs a WebSocket transport to `glasgow run rib … socket`.
    - CM radios need HOOK at 9.3 V through a resistor to enter programming mode.
-   - Not started; ask the owner before working in that repo.
+   - Ask the owner before working in that repo.
 
 ## Reference material (`docs/` is not in git; re-fetch on a new machine)
 
-- GM600 UHF service manual (schematics): `motorola_gm600_uhf_sm.pdf`, supplied by the owner.
-  Pages 5 and 7 are the controller and I/O schematics.
-- GM Series (GM340 family) detailed service manual 6864115B62-C:
-  https://manuals.repeater-builder.com/mo-files1/-GM%20Series/GM%20Series%20Detailed%20service%20manual%206864115B62-C.pdf
-- GM600 user manual: `115e93.pdf`, supplied by the owner. Nothing about the bus.
-- 16-pin connector diagram:
-  https://www.repeater-builder.com/motorola/maxtrac/interfacing/maxtrac-16-pin-plug.gif
+Radio-specific manuals are listed in each radio's `CLAUDE.md`. Generic:
+
 - RIB overview: https://www.repeater-builder.com/motorola/rss/rss-rib.html
 - RIB from the PC side (DTR→BUSY, RI/CTS, echo timing):
   https://github.com/joncampbell123/dosbox-x/issues/6763 and pull 6765

@@ -33,7 +33,7 @@ one.
 
 - **Tested: GM600.** Reads, writes and a full DPS read/write session (DPS under QEMU through
   `socket`) on a real radio, with a Glasgow revC3 on J0400 pins 6 and 7 and 9 V on HOOK. See
-  [PROTOCOL.md](PROTOCOL.md) and [tools/](tools/).
+  [gm600/](gm600/README.md).
 - **Should work (BUS+ only), untested:** the radios that RIBless cables are sold for: GM300 / GM338, Maxtrac, GTX, Radius mobiles, GP300 / GP350. Most of these don't use BUSY.
 - **Not supported: differential BUS+ / BUS− radios.** These are the Systems 9000 family: Syntor
   X9000 / X9000E, Spectra, Spectra II and Astro Spectra. They use both BUS+ and BUS− at the
@@ -47,15 +47,13 @@ Supporting the differential radios would take a second pin driving BUS− as the
 and the radio's BUS− voltage levels have to be checked first. Nothing in the gateware rules it
 out.
 
-## GM600 wiring
+## Radio-specific notes
 
-Connect BUS+ to accessory connector J0400 pin 6 and ground to pin 7, set the Glasgow I/O voltage
-to 5 V, and leave `--busy` off (the GM600 has no BUSY line). **Put about 9 V on pin 14 (HOOK)
-from a separate supply.** Without it the radio never answers. [CONNECTION.md](CONNECTION.md) has
-the full pinout, the circuit behind pins 6 and 14, meter checks before connecting, and the control
-head connector alternative.
+Each tested radio has its own folder with wiring, protocol and codeplug notes, and host tools:
 
-The programming protocol (SBEP framing, checksums, commands) is in [PROTOCOL.md](PROTOCOL.md).
+- **[gm600/](gm600/README.md):** Motorola GM600. BUS+ on J0400 pin 6, GND on pin 7, Glasgow at
+  5 V, no `--busy`, and **about 9 V on pin 14 (HOOK) from a separate supply**, or the radio never
+  answers. The codeplug can be read and written.
 
 ## Install
 
