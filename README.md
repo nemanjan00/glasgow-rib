@@ -161,6 +161,7 @@ export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 glasgow run rib -V 5 --bus A0 sniff                         # passive, timestamped hex per message
 glasgow run rib -V 5 --bus A0 pty                           # prints /dev/pts/N
 glasgow run rib -V 5 --bus A0 socket tcp:127.0.0.1:2324     # one TCP client at a time
+glasgow run rib -V 5 --bus A0 --burst-gap 6 socket tcp:127.0.0.1:2324   # for a jittery bridge
 
 # SB9600 radio with BUSY on A1
 glasgow run rib -V 5 --bus A0 --busy A1 --busy-setup 1 --busy-hold 10 sniff
@@ -177,11 +178,13 @@ ack = await iface.read(1)                        # 50 = ACK, 60 = NAK
 await iface.get_busy()
 ```
 
-Bytes written in one `write()` go out as one burst. A burst also stays open for about
-3 bit times after the transmit FIFO runs dry, so a frame that reaches the applet in pieces (from a
-pty or socket) still goes out in one piece. Writes further apart than that each wait for a new
-10-bit idle. **Send one whole message per call, and keep one frame in flight:** after a collision
-the applet discards everything queued until the FIFO has been empty for 13 bit times.
+Bytes written in one `write()` go out as one burst. A burst also stays open for a few bit times
+after the transmit FIFO runs dry (`--burst-gap`, default 3, up to 8), so a frame that reaches the
+applet in pieces (from a pty or socket) still goes out in one piece. Writes further apart than
+that each wait for a new 10-bit idle, and the window closes early if another node starts sending.
+If a bridged program's frames still get split, raise `--burst-gap`. **Send one whole message per
+call, and keep one frame in flight:** after a collision the applet discards everything queued
+until the FIFO has been empty for the burst gap plus 10 bit times.
 
 ## Repository layout
 
@@ -206,14 +209,15 @@ the applet discards everything queued until the FIFO has been empty for 13 bit t
 
 ```sh
 python -m unittest glasgow_rib.test glasgow_rib.test_component     # applet + gateware
-(cd gm600/tools && python3 -m unittest test_tools)                  # GM600 tools, against a mock radio
+python3 -m unittest discover -s gm600/tools                         # GM600 tools, against a mock radio
 ```
 
 - **Applet tests** (`glasgow_rib/test.py`), through the host pipe: echo, gap-free bursts, waiting
   for an idle bus, BUSY in auto mode, deferring to an external BUSY, and collision abort. The
   synthesis tests run when a toolchain is available (`glasgow[builtin-toolchain]`).
 - **Component tests** (`glasgow_rib/test_component.py`), cycle-exact: a trickled frame staying in
-  one burst, separate writes waiting for idle, late bytes after a collision being discarded,
+  one burst, separate writes waiting for idle, a configurable burst gap, the window closing when
+  another node talks, late bytes after a collision being discarded,
   manual BUSY, active-high BUSY, the BUSY reset mode, and receive framing errors and overflow.
 - **Tool tests** (`gm600/tools/test_tools.py`): the SBEP codec, and the dump, read and write tools
   against `mock_radio.py`, including aborting a write stream on a failed block.

@@ -74,11 +74,16 @@ class SBEPError(IOError):
 class Radio:
     """A connection to the applet socket. One client at a time: close it when done."""
 
-    def __init__(self, addr=None, *, timeout=2.0):
+    def __init__(self, addr=None):
         host, _, port = (addr or os.environ.get("SBEP_ADDR", "127.0.0.1:2324")).rpartition(":")
         self.sock = socket.create_connection((host, int(port)), timeout=5)
-        self.timeout = timeout
         self.buf = bytearray()
+
+    @staticmethod
+    def default_timeout(frame):
+        """Seconds allowed for each phase (echo, then status and reply): DPS's write-result
+        timeout, ``len × 12 + 1000`` ms, which also covers the echo of the frame itself."""
+        return 1.0 + 0.012 * len(frame)
 
     def close(self):
         self.sock.close()
@@ -119,18 +124,24 @@ class Radio:
         del self.buf[:n]
         return out
 
-    def transact(self, frame, *, reply=True):
+    def transact(self, frame, *, reply=True, timeout=None):
         """Sends one frame and checks its echo. Returns ``(status, op, data)``: the status byte,
         and the reply frame's opcode and data (``None, None`` if no reply is expected or the
-        status isn't an ACK). Raises SBEPError on a wrong or missing echo, or no status byte."""
+        status isn't an ACK). Raises SBEPError on a wrong or missing echo, or no status byte.
+
+        ``timeout`` (seconds) applies separately to the echo and to the status plus reply;
+        the default is :meth:`default_timeout`."""
+        if timeout is None:
+            timeout = self.default_timeout(frame)
         self.drain()
         self.sock.sendall(frame)
-        deadline = time.monotonic() + self.timeout
+        deadline = time.monotonic() + timeout
         if not self._need(len(frame), deadline):
             raise SBEPError(f"short echo for {frame.hex(' ')}: {bytes(self.buf).hex(' ')}")
         echo = self._take(len(frame))
         if echo != frame:
             raise SBEPError(f"echo mismatch (collision?): sent {frame.hex(' ')}, got {echo.hex(' ')}")
+        deadline = time.monotonic() + timeout
         if not self._need(1, deadline):
             raise SBEPError(f"no status byte after {frame.hex(' ')}")
         status = self._take(1)[0]

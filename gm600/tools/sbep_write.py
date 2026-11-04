@@ -110,6 +110,9 @@ def check(fr, status, op, data):
             return "write result for the wrong address (%s)" % data[:3].hex()
     return None
 
+RESTORE_HINT = ("The radio may be partly written. Fix the cause, then run "
+                "`sbep_write.py --restore <capture log>` to put the captured codeplug back.")
+
 def send_stream(frames, label):
     print("== sending %s (%d frames) ==" % (label, len(frames)))
     writes = 0
@@ -120,10 +123,10 @@ def send_stream(frames, label):
             try:
                 status, rop, data = radio.transact(fr, reply=(op != 0x10))
             except SBEPError as e:
-                sys.exit("  [%2d] op=0x%02X ABORT: %s" % (k, op, e))
+                sys.exit("  [%2d] op=0x%02X ABORT: %s\n%s" % (k, op, e, RESTORE_HINT))
             err = check(fr, status, rop, data)
             if err:
-                sys.exit("  [%2d] op=0x%02X tx=%s ABORT: %s" % (k, op, fr.hex(), err))
+                sys.exit("  [%2d] op=0x%02X tx=%s ABORT: %s\n%s" % (k, op, fr.hex(), err, RESTORE_HINT))
             if op == 0x17:
                 writes += 1
             print("  [%2d] op=0x%02X ok" % (k, op))
@@ -149,7 +152,12 @@ def main():
         for addr, old, new in all_changes:
             print("  radio 0x%04X: 0x%02X -> 0x%02X" % (addr, old, new))
         if len(all_changes) != len(PROBE):
-            print("WARNING: expected %d patches, applied %d" % (len(PROBE), len(all_changes)))
+            msg = "expected %d patches, applied %d" % (len(PROBE), len(all_changes))
+            if mode == "--write":
+                # The capture doesn't cover every probe address: writing would be a different
+                # experiment than the one asked for.
+                sys.exit("ABORT, nothing sent: " + msg)
+            print("WARNING: " + msg)
     if mode == "--dry":
         print("DRY RUN - nothing sent. %d frames ready." % len(patched))
         return

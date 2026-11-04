@@ -1,12 +1,15 @@
 """Tests for the GM600 tools against mock_radio.py (no hardware needed).
 
 Run from this folder: python3 -m unittest test_tools
+or from the repo root: python3 -m unittest discover -s gm600/tools
 """
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mock_radio import MockRadio
 from sbep import Radio, SBEPError, encode, decode, frame_length
@@ -108,8 +111,19 @@ class ToolsTest(unittest.TestCase):
             res = run_tool(self.radio, "sbep_write.py", "--restore", log)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("write failed", res.stdout + res.stderr)
+        self.assertIn("--restore", res.stdout + res.stderr)
         # Nothing after the failed block was sent.
         self.assertEqual([decode(f)[0] for f in self.radio.frames], [0x23, 0x13, 0x17])
+
+    def test_sbep_write_refuses_partial_patch(self):
+        # The stream doesn't cover the probe addresses: --write must not send anything.
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "sniff-write.log")
+            write_file(log, capture_log(self._write_stream()))
+            res = run_tool(self.radio, "sbep_write.py", "--write", log)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("nothing sent", res.stderr)
+        self.assertEqual(self.radio.frames, [])
 
     def test_sbep_write_rejects_unknown_probe_set(self):
         env = dict(os.environ, PROBE_SET="no-such-set")

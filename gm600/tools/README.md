@@ -13,7 +13,9 @@ The SBEP codec from [../PROTOCOL.md](../PROTOCOL.md) (`encode`, `decode`, `frame
 `checksum`) and a `Radio` socket client that every tool uses. `Radio.transact(frame)` sends one
 frame and checks it end to end: the echo must match what was sent (a mismatch means a collision),
 then the status byte (`50` ACK, `60` NAK, bare `80` refused), then the reply frame's checksum. It
-raises `SBEPError` on any problem instead of returning partial data.
+raises `SBEPError` on any problem instead of returning partial data. The echo and the reply each
+get their own deadline, by default DPS's write-result timeout (`1 s + 12 ms × frame length`);
+pass `timeout=` for anything slower.
 
 ```python
 from sbep import Radio, encode
@@ -48,7 +50,9 @@ session writes a complete, valid-framed codeplug with a controlled change. Modes
 
 Every frame is checked like DPS would expect: matching echo, ACK, and for each `17` a result frame
 `84` for the same address. **The stream aborts on the first failure**, so a failed or unanswered
-block is never followed by more writes. Re-run with `--restore` once the cause is fixed.
+block is never followed by more writes; the radio may then be partly written, and the message says
+to run `--restore` once the cause is fixed. `--write` also refuses to send anything if the capture
+doesn't contain every address in the chosen `PROBE_SET`.
 
 How the probes stay valid: each block has an **additive** checksum (see
 [../CODEPLUG.md](../CODEPLUG.md)), so a changed byte is balanced by an equal, opposite change to

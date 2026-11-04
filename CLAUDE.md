@@ -26,7 +26,7 @@ python3 -m venv .venv
 export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 .venv/bin/glasgow run rib --help
 .venv/bin/python -m unittest glasgow_rib.test glasgow_rib.test_component   # ~90 s
-(cd gm600/tools && python3 -m unittest test_tools)   # tools vs mock radio, ~2 s
+python3 -m unittest discover -s gm600/tools          # tools vs mock radio, ~2 s
 ```
 
 - Build against current Glasgow main (applet API V2: `GlasgowAppletV2`, `assembly.add_*`). Older
@@ -50,12 +50,14 @@ export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 - **Echo:** everything on the line, our own bytes included, goes to the host. The GM600 DPS and
   the CM CPS both verify the echo.
 - **Atomic bursts:** a burst starts only after 10 bit times of idle (line high, BUSY inactive).
-  Bytes from one `write()` go out back to back, and the burst stays open `BURST_GAP_BITS` (3) bit
-  times after the FIFO runs dry, so a frame that trickles in from a pty or socket stays in one
-  burst. **Send one whole frame per write**; writes further apart each wait for the 10-bit idle.
-- **Discard after a collision:** until the FIFO has been empty for `DISCARD_GAP_BITS` (one byte
-  time plus 3 bits), so the late tail of an aborted frame never goes out on its own. Everything
-  queued is dropped, later frames included: keep one frame in flight.
+  Bytes from one `write()` go out back to back, and the burst stays open `burst_gap` bit times
+  after the FIFO runs dry (register and `--burst-gap`, default 3, max 8 so it stays under the
+  10-bit idle other nodes use), so a frame that trickles in from a pty or socket stays in one
+  burst. The window closes early if the receiver sees another node start. **Send one whole frame
+  per write**; writes further apart each wait for the 10-bit idle.
+- **Discard after a collision:** until the FIFO has been empty for `burst_gap + 10` bit times (one
+  byte time plus the window), so the late tail of an aborted frame never goes out on its own.
+  Everything queued is dropped, later frames included: keep one frame in flight.
 - **BUSY mode resets to `auto` when a BUSY pin is configured**, `none` otherwise. The CLI sets it
   explicitly anyway.
 - **The radio's own inter-byte gap tolerance is unmeasured.** Don't claim a number. In the DPS

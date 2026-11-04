@@ -89,7 +89,7 @@ class RIBComponentTestCase(unittest.TestCase):
             dut._MustUse__silence = True    # never elaborated here
             self.assertEqual(dut.busy_mode.init, BUSY_MODES.index(mode))
 
-    def _gap_between_two_bytes(self, delay_bits):
+    def _gap_between_two_bytes(self, delay_bits, burst_gap=None):
         """Sends one byte, hands the next to the FIFO ``delay_bits`` bit times after the first has
         fully gone out, and returns the idle time on the wire between the two, in bit times."""
         bench = _Bench()
@@ -98,6 +98,8 @@ class RIBComponentTestCase(unittest.TestCase):
 
         async def testbench(ctx):
             await self.setup(ctx, bench)
+            if burst_gap is not None:
+                ctx.set(bench.dut.burst_gap, burst_gap)
             await self.push(ctx, bench, 0x00)
             await ctx.tick().until(bench.bus_port.oe)     # start bit
             await ctx.tick().until(~bench.bus_port.oe)    # stop bit begins (all-zero byte)
@@ -124,6 +126,60 @@ class RIBComponentTestCase(unittest.TestCase):
     def test_separate_writes_wait_for_idle(self):
         # Well past the continuation window, the next byte is a new burst: 10 idle bit times first.
         self.assertGreaterEqual(self._gap_between_two_bytes(BURST_GAP_BITS + 3), 10)
+
+    def test_burst_gap_is_configurable(self):
+        # A byte 6 bit times late splits the burst at the default gap, but joins it at 8.
+        self.assertGreaterEqual(self._gap_between_two_bytes(6), 10)
+        self.assertLess(self._gap_between_two_bytes(6, burst_gap=8), 8)
+
+    def test_window_closes_when_another_node_talks(self):
+        bench = _Bench()
+        edges = []
+        result = {}
+
+        async def testbench(ctx):
+            await self.setup(ctx, bench)
+            await self.push(ctx, bench, 0x00)
+            await ctx.tick().until(bench.bus_port.oe)
+            await ctx.tick().until(~bench.bus_port.oe)
+            await ctx.tick().repeat(BIT_CYC)              # our stop bit
+            # Inside our burst window, the radio starts a frame; our next byte arrives meanwhile.
+            await ctx.tick().repeat(BIT_CYC // 2)
+            ctx.set(bench.radio_bus, 1)                   # radio's start bit
+            await ctx.tick().repeat(BIT_CYC // 2)
+            ctx.set(bench.dut.i_stream.payload, 0x00)
+            ctx.set(bench.dut.i_stream.valid, 1)
+            await ctx.tick().repeat(BIT_CYC - BIT_CYC // 2)   # rest of the start bit
+            await self._radio_send_rest(ctx, bench, 0xff)
+            result["radio_end"] = self.cycle
+            await ctx.tick().until(bench.dut.i_stream.ready)
+            ctx.set(bench.dut.i_stream.valid, 0)
+            await ctx.tick().repeat(2 * BIT_CYC)
+            result["collisions"] = ctx.get(bench.dut.collisions)
+
+        async def clock(ctx):
+            self.cycle = 0
+            async for _ in ctx.tick():
+                self.cycle += 1
+
+        sim = Simulator(bench)
+        sim.add_clock(1e-6)
+        sim.add_testbench(testbench)
+        sim.add_testbench(clock, background=True)
+        sim.add_testbench(self.edges_recorder(bench, edges), background=True)
+        sim.run()
+        self.assertEqual(result["collisions"], 0)
+        # Our second byte waited for the radio's frame and a fresh idle (counted from the radio's
+        # mid-stop bit, where the receiver goes idle, so up to a bit and a half less than 10 here).
+        second_start = [c for c, oe in edges if oe][1]
+        self.assertGreaterEqual(second_start - result["radio_end"], 8 * BIT_CYC)
+
+    async def _radio_send_rest(self, ctx, bench, byte):
+        """Sends the data and stop bits of a radio frame whose start bit has just ended."""
+        for bit in [*((byte >> n) & 1 for n in range(8)), 1]:
+            ctx.set(bench.radio_bus, not bit)
+            await ctx.tick().repeat(BIT_CYC)
+        ctx.set(bench.radio_bus, 0)
 
     def test_late_bytes_after_collision_are_discarded(self):
         bench = _Bench()

@@ -19,13 +19,16 @@ __all__ = ["RIBComponent", "RIBInterface", "RIBApplet"]
 
 BUSY_MODES = ("none", "manual", "auto")
 
-# A burst stays open this many bit times after the transmit FIFO runs dry, so bytes that trickle in
-# from a pty or socket a little late still join the same burst instead of waiting for a new idle.
+# By default a burst stays open this many bit times after the transmit FIFO runs dry, so bytes that
+# trickle in from a pty or socket a little late still join the same burst instead of waiting for a
+# new idle. It's a register (``RIBInterface.set_burst_gap``, ``--burst-gap``), at most
+# MAX_BURST_GAP_BITS: staying below the 10-bit idle that other nodes wait for.
 BURST_GAP_BITS = 3
-# After a collision, the rest of the frame is discarded until the FIFO has been empty this long:
-# one byte time (the longest a trickling frame can take to deliver its next byte and still join the
-# burst) plus the continuation window.
-DISCARD_GAP_BITS = 10 + BURST_GAP_BITS
+MAX_BURST_GAP_BITS = 8
+# After a collision, the rest of the frame is discarded until the FIFO has been empty for one byte
+# time (the longest a trickling frame can take to deliver its next byte and still join the burst)
+# plus the continuation window.
+DISCARD_EXTRA_BITS = 10
 
 
 class RIBComponent(wiring.Component):
@@ -37,9 +40,10 @@ class RIBComponent(wiring.Component):
 
     A transmit burst only starts once the line has been idle (and BUSY, if present, inactive) for
     one packet time (10 bit times). Bytes queued back to back are then sent without gaps, the way
-    a real RIB sends a message. A burst stays open for ``BURST_GAP_BITS`` bit times after the
-    transmit FIFO runs dry, so a frame that reaches the FIFO in pieces (from a pty or socket) still
-    goes out as one burst.
+    a real RIB sends a message. A burst stays open for ``burst_gap`` bit times (default
+    ``BURST_GAP_BITS``) after the transmit FIFO runs dry, so a frame that reaches the FIFO in
+    pieces (from a pty or socket) still goes out as one burst. If another node starts sending
+    during that window, the burst closes, and the next byte waits for a new idle.
 
     The optional BUSY line (active low and open-drain by default; active high drives high and
     relies on a pull-down) is driven
@@ -50,7 +54,7 @@ class RIBComponent(wiring.Component):
 
     While transmitting, every released (1) bit is checked at mid-bit; if the line reads 0, someone
     else is driving it. The transmitter then releases the bus, discards the rest of the queued
-    data until the FIFO has been empty for ``DISCARD_GAP_BITS`` bit times, counts a collision, and
+    data until the FIFO has been empty for ``burst_gap + 10`` bit times, counts a collision, and
     waits for the bus to go idle again. Everything queued at that point is dropped, including any
     later frames, so keep one frame in flight at a time.
 
@@ -72,6 +76,7 @@ class RIBComponent(wiring.Component):
             "busy_setup":  In(8),
             "busy_hold":   In(8),
             "busy_in":     Out(1),
+            "burst_gap":   In(4, init=BURST_GAP_BITS),
 
             "rx_errors":   Out(16),
             "rx_overflow": Out(16),
@@ -198,7 +203,7 @@ class RIBComponent(wiring.Component):
         tx_bitno = Signal(range(8))
         tx_shreg = Signal(8)
         in_burst = Signal()
-        gap_bits   = Signal(range(DISCARD_GAP_BITS + 1))
+        gap_bits   = Signal(range(MAX_BURST_GAP_BITS + DISCARD_EXTRA_BITS + 1))
         hold_bits  = Signal(8)
         setup_bits = Signal(8)
 
@@ -207,7 +212,15 @@ class RIBComponent(wiring.Component):
 
         with m.FSM(name="tx"):
             with m.State("IDLE"):
-                with m.If(self.i_stream.valid & in_burst):
+                with m.If(in_burst & (~rx_idle | ~rx_i)):
+                    # Someone else started sending while the burst was held open: close it, so
+                    # the next byte waits for a new idle instead of colliding.
+                    m.d.sync += [
+                        in_burst.eq(0),
+                        gap_bits.eq(0),
+                        hold_bits.eq(self.busy_hold),
+                    ]
+                with m.Elif(self.i_stream.valid & in_burst):
                     m.d.comb += self.i_stream.ready.eq(1)
                     m.d.sync += [
                         tx_shreg.eq(self.i_stream.payload),
@@ -227,7 +240,7 @@ class RIBComponent(wiring.Component):
                     m.next = "SETUP"
                 with m.Elif(in_burst & ~self.i_stream.valid):
                     # Keep the burst open briefly in case the rest of the frame is still on its way.
-                    with m.If(gap_bits == BURST_GAP_BITS):
+                    with m.If(gap_bits >= self.burst_gap):
                         m.d.sync += [
                             in_burst.eq(0),
                             gap_bits.eq(0),
@@ -289,11 +302,11 @@ class RIBComponent(wiring.Component):
 
             with m.State("DISCARD"):
                 # Drop the rest of the frame, including bytes that arrive a little late, until the
-                # FIFO has stayed empty for DISCARD_GAP_BITS bit times.
+                # FIFO has stayed empty for burst_gap + DISCARD_EXTRA_BITS bit times.
                 m.d.comb += self.i_stream.ready.eq(1)
                 with m.If(self.i_stream.valid):
                     m.d.sync += gap_bits.eq(0)
-                with m.Elif(gap_bits == DISCARD_GAP_BITS):
+                with m.Elif(gap_bits >= self.burst_gap + DISCARD_EXTRA_BITS):
                     m.d.sync += gap_bits.eq(0)
                     m.next = "IDLE"
                 with m.Elif(tick):
@@ -329,6 +342,7 @@ class RIBInterface:
         self._busy_setup  = assembly.add_rw_register(component.busy_setup)
         self._busy_hold   = assembly.add_rw_register(component.busy_hold)
         self._busy_in     = assembly.add_ro_register(component.busy_in)
+        self._burst_gap   = assembly.add_rw_register(component.burst_gap)
         self._rx_errors   = assembly.add_ro_register(component.rx_errors)
         self._rx_overflow = assembly.add_ro_register(component.rx_overflow)
         self._collisions  = assembly.add_ro_register(component.collisions)
@@ -343,6 +357,14 @@ class RIBInterface:
         if not 4 <= bit_cyc < (1 << 16):
             raise GlasgowAppletError(f"baud rate {baud} is out of range")
         await self._bit_cyc.set(bit_cyc)
+
+    async def set_burst_gap(self, bits):
+        """Sets how many bit times a burst stays open after the transmit FIFO runs dry (default
+        ``BURST_GAP_BITS``). Raise it if a frame from a pty or socket gets split into several
+        bursts; keep it below 10 so another node can't mistake the gap for an idle bus."""
+        if not 0 <= bits <= MAX_BURST_GAP_BITS:
+            raise GlasgowAppletError(f"burst gap must be 0 to {MAX_BURST_GAP_BITS} bit times")
+        await self._burst_gap.set(bits)
 
     async def set_busy_mode(self, mode, *, setup_bits=0, hold_bits=10):
         """Configures BUSY handling: ``"none"``, ``"manual"`` (see :meth:`set_busy`), or
@@ -486,6 +508,11 @@ class RIBApplet(GlasgowAppletV2):
             "-b", "--baud", metavar="RATE", type=int, default=9600,
             help="set bus baud rate to RATE bits per second (default: %(default)s)")
         parser.add_argument(
+            "--burst-gap", metavar="BITS", type=int, default=BURST_GAP_BITS,
+            help="keep a burst open BITS bit times after the host's data runs out, so a frame "
+                 f"written in pieces stays in one burst (0 to {MAX_BURST_GAP_BITS}, "
+                 "default: %(default)s)")
+        parser.add_argument(
             "--busy-mode", choices=BUSY_MODES, default="auto",
             help="BUSY line handling, if --busy is given (default: %(default)s)")
         parser.add_argument(
@@ -499,6 +526,7 @@ class RIBApplet(GlasgowAppletV2):
 
     async def setup(self, args):
         await self.rib_iface.set_baud(args.baud)
+        await self.rib_iface.set_burst_gap(args.burst_gap)
         if args.busy is not None:
             await self.rib_iface.set_busy_mode(args.busy_mode,
                 setup_bits=args.busy_setup, hold_bits=args.busy_hold)
