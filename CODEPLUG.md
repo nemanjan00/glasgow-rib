@@ -11,7 +11,7 @@ are radio addresses. Ground truth: a live DPS "Read Radio" of serial `807IYA0903
 | Range | Block | R/W | Contents |
 |---|---|---|---|
 | `0x0D80`–`0x0E12` | Radio / alignment | **read-only** (never rewritten) | serial `807IYA0903CG` (ASCII @ `0x0D88`), band-cal / tuning-grid words (@ `0x0DDA`), softpot |
-| `0x0E13`–`~0x0F32` | Network (MPT1327) | read-write | trunking/network parameters — **mostly not decoded**; MPT own-number lives here |
+| `0x0E13`–`~0x0F07` | Network (MPT1327) | read-write | trunking/network parameters — **field set fully enumerated, byte-offsets partly bound** (Control Channel List `0x0E5F`, Channel Frequency Plan `0x0EB0`); MPT own-number lives here |
 | `0x0F33`–`0x0FFB` | Personality (conventional) | read-write | per-channel option table, channel freq/PL table, timers, block checksum |
 
 DPS's write touches only `0x0E13`–`0x0FFB`; `0x0D80`–`0x0E12` (serial + alignment) and
@@ -36,9 +36,19 @@ This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`; record at `0x0F83` has Tx `0x
 
 ## Other decoded fields
 
-- **MPT own-number (identity):** BE16 at `0x0F0B` = `0x0142` = **322**.
+- **MPT own-number (identity):** BE16 at `0x0F0B` = `0x0142` = **322** (field `MPT1327_OWN_IDENT`).
 - **Serial:** ASCII `807IYA0903CG` at `0x0D88` (also returned by `23 01`).
 - **Transmit timeout:** enabled + duration 10 s (GUI), stored in the personality block.
+
+## Complete field inventory (static)
+
+All **195 codeplug fields** (MPT1327 network/trunking, personality, and RF alignment) are
+enumerated by symbolic name + type-category + attribute-flags, recovered statically from the
+field-registry table in the DPS binary (`WDPS_DP.EXE`). This is the authoritative list of *what*
+the codeplug stores; exact byte/bit offsets are bound separately (write-contrast or transform RE).
+Full table: motorola-cps `docs/DPS_EMEA_600SERIES_R00.03.02/FIELD_DICTIONARY.md`. The network block
+is editable in `WDPS_DP.EXE` (which also does Read/Write Radio), so the proven GUI-edit→write→dump→diff
+method applies to it just as it did to the personality options.
 
 ## Per-block checksum — additive, but exact scheme NOT established
 
