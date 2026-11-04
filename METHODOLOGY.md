@@ -24,8 +24,9 @@ Output: enough to speak the wire and read/write the vendor's own files offline.
 
 Implement the wire protocol as Glasgow gateware, not a bit-banged USB-serial dongle. The timing is
 then deterministic (see the open-drain / echo / atomic-burst notes in [README.md](README.md)):
-messages go out back to back, collisions are caught in hardware, and nothing depends on host or
-USB timing. Prove it live by reading the
+messages go out back to back and nothing depends on host or USB timing. (Collisions aren't handled
+in the PHY — it sends the whole frame; the host detects one by the echo not matching.) Prove it
+live by reading the
 codeplug and writing it back **unchanged** — a clean round-trip is the first real milestone.
 
 ## 3. Decode fields by write-contrast — the workhorse

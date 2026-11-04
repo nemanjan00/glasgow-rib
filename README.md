@@ -33,8 +33,8 @@ glasgow-rib turns that whole chain into gateware on a Glasgow:
   drain, exactly like the radio does. BUS+ and ground are the only signal wires.
 - **The timing lives in the FPGA.** A RIB sends each message as one gap-free burst, and USB
   can't promise that from the host side. The gateware waits for an idle bus, sends each message
-  back to back, and detects collisions bit by bit. (How long a gap the radio itself tolerates
-  hasn't been measured; DPS allows up to 121 ms between bytes it receives.)
+  back to back, and echoes everything so the host can compare it. (How long a gap the radio
+  itself tolerates hasn't been measured; DPS allows up to 121 ms between bytes it receives.)
 - **Scriptable.** Use it from Python, expose it as a pty or a TCP socket, or write your own CPS
   on top of it.
 - **The original software still works.** Motorola's GM600 Dealer Programmer (16-bit Windows 3.1)
@@ -96,7 +96,7 @@ set to 9 V with a current limit. That's all: no RIB, no MAX232, no comparator, n
 </p>
 
 <p align="center">
-  <img src="assets/bus-timing.svg" alt="BUS+ timing: wait for 10 idle bit times, send a gap-free burst, echo everything, release on collision" width="100%">
+  <img src="assets/bus-timing.svg" alt="BUS+ timing: wait for 10 idle bit times, send a gap-free burst, echo everything" width="100%">
 </p>
 
 The applet is a half-duplex, open-drain 8N1 UART with an optional BUSY line:
@@ -108,8 +108,8 @@ The applet is a half-duplex, open-drain 8N1 UART with an optional BUSY line:
 - **Atomic bursts:** a transmission starts only after the bus has been idle (line high, BUSY
   inactive) for one packet time, which is 10 bit times. Bytes queued together then go out back to
   back.
-- **Collision detection:** every released (1) bit is checked at mid-bit. If the line reads 0, the
-  applet releases the bus, discards the rest of the queued burst and counts a collision.
+- **Collisions:** the applet does no collision handling of its own — it sends the whole frame, as
+  a real RIB does. The host spots a collision by the echoed bytes not matching what it sent.
 - **BUSY** (optional) is open drain and active low by default; `--busy-active high` switches the
   polarity. The input is glitch filtered over 1/8 of a bit time. BUSY has three modes:
   - `auto` (default): asserted `--busy-setup` bit times before the first start bit, and released
@@ -161,7 +161,6 @@ export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 glasgow run rib -V 5 --bus A0 sniff                         # passive, timestamped hex per message
 glasgow run rib -V 5 --bus A0 pty                           # prints /dev/pts/N
 glasgow run rib -V 5 --bus A0 socket tcp:127.0.0.1:2324     # one TCP client at a time
-glasgow run rib -V 5 --bus A0 --burst-gap 6 socket tcp:127.0.0.1:2324   # for a jittery bridge
 
 # SB9600 radio with BUSY on A1
 glasgow run rib -V 5 --bus A0 --busy A1 --busy-setup 1 --busy-hold 10 sniff
@@ -173,18 +172,15 @@ From Python (`glasgow repl rib …` or your own app), via the applet's `RIBInter
 iface = applet.rib_iface
 frame = bytes.fromhex("F1 10 FE")
 echo = await iface.transfer(frame, timeout=0.5)  # write + read back the echo
-if echo != frame: ...                            # collision (short echo or wrong bytes): retry
+if echo != frame: ...                            # wrong bytes = collision, short = timeout: retry
 ack = await iface.read(1)                        # 50 = ACK, 60 = NAK
 await iface.get_busy()
 ```
 
 Bytes written in one `write()` go out as one burst. A burst also stays open for a few bit times
-after the transmit FIFO runs dry (`--burst-gap`, default 3, up to 8), so a frame that reaches the
-applet in pieces (from a pty or socket) still goes out in one piece. Writes further apart than
-that each wait for a new 10-bit idle, and the window closes early if another node starts sending.
-If a bridged program's frames still get split, raise `--burst-gap`. **Send one whole message per
-call, and keep one frame in flight:** after a collision the applet discards everything queued
-until the FIFO has been empty for the burst gap plus 10 bit times.
+(3) after the transmit FIFO runs dry, so a frame that reaches the applet in pieces (from a pty or
+socket) still goes out in one piece. Writes further apart than that each wait for a new 10-bit
+idle. **Send one whole message per call.**
 
 ## Repository layout
 
@@ -213,12 +209,11 @@ python3 -m unittest discover -s gm600/tools                         # GM600 tool
 ```
 
 - **Applet tests** (`glasgow_rib/test.py`), through the host pipe: echo, gap-free bursts, waiting
-  for an idle bus, BUSY in auto mode, deferring to an external BUSY, and collision abort. The
-  synthesis tests run when a toolchain is available (`glasgow[builtin-toolchain]`).
+  for an idle bus, BUSY in auto mode, and deferring to an external BUSY. The synthesis tests run
+  when a toolchain is available (`glasgow[builtin-toolchain]`).
 - **Component tests** (`glasgow_rib/test_component.py`), cycle-exact: a trickled frame staying in
-  one burst, separate writes waiting for idle, a configurable burst gap, the window closing when
-  another node talks, late bytes after a collision being discarded,
-  manual BUSY, active-high BUSY, the BUSY reset mode, and receive framing errors and overflow.
+  one burst, separate writes waiting for idle, manual BUSY, active-high BUSY, the BUSY reset mode,
+  and receive framing errors and overflow.
 - **Tool tests** (`gm600/tools/test_tools.py`): the SBEP codec, and the dump, read and write tools
   against `mock_radio.py`, including aborting a write stream on a failed block.
 

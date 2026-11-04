@@ -97,9 +97,10 @@ assert encode(0x05) == b"\x50"
 1. Send the whole frame in **one** write, so the applet puts it on the wire with no gaps
    between bytes.
 2. Read back `len(frame)` bytes of echo and compare them with what you sent. A mismatch
-   means a collision: retry. Use a timeout here (DPS uses `(n_data + 100) * 5` ms): on a
-   collision the applet stops sending and drops the rest of the frame, so fewer bytes come
-   back. `iface.transfer(frame, timeout=…)` does this and returns whatever echo arrived.
+   means a collision: retry. Use a timeout here (DPS uses `(n_data + 100) * 5` ms): the
+   applet sends the whole frame regardless, so on a collision the echo comes back the same
+   length but with wrong bytes. `iface.transfer(frame, timeout=…)` does this and returns
+   whatever echo arrived.
 3. Wait up to **200 ms** for the ACK byte `50`. `60` is a NAK.
 4. If the command returns data, a second frame follows the ACK. `86` is the error opcode.
 
@@ -273,8 +274,9 @@ BUS+ activity while pressing buttons. Keep the parser robust anyway:
 
 - Resync on frame boundaries using the checksum, and ignore frames that aren't the reply you
   expect.
-- The applet only starts sending once the line has been idle for 10 bit times, and drops a
-  frame if it detects a collision. Retry when the echo doesn't match.
+- The applet only starts sending once the line has been idle for 10 bit times. It does no
+  collision handling of its own (it sends the whole frame); the host spots a collision by the
+  echo not matching. Retry when the echo doesn't match.
 
 ## Open questions
 

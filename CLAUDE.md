@@ -38,8 +38,8 @@ python3 -m unittest discover -s gm600/tools          # tools vs mock radio, ~2 s
 - The simulation clock is 1 MHz. Tests run at 100 kbaud (`BIT_CYC = 10`) to stay fast; 9600 baud
   sims take minutes.
 - In simulation, `pipe.flush()` blocks until the gateware has consumed every byte. A test that
-  writes with `flush=True` while the gateware is deliberately holding off (BUSY asserted,
-  collision) deadlocks. Write without a flush in those tests.
+  writes with `flush=True` while the gateware is deliberately holding off (BUSY asserted)
+  deadlocks. Write without a flush in those tests.
 - `asyncio.wait_for` doesn't work inside the Amaranth testbench, so `transfer(timeout=...)` has
   no simulation test yet.
 
@@ -50,29 +50,26 @@ python3 -m unittest discover -s gm600/tools          # tools vs mock radio, ~2 s
 - **Echo:** everything on the line, our own bytes included, goes to the host. The GM600 DPS and
   the CM CPS both verify the echo.
 - **Atomic bursts:** a burst starts only after 10 bit times of idle (line high, BUSY inactive).
-  Bytes from one `write()` go out back to back, and the burst stays open `burst_gap` bit times
-  after the FIFO runs dry (register and `--burst-gap`, default 3, max 8 so it stays under the
-  10-bit idle other nodes use), so a frame that trickles in from a pty or socket stays in one
-  burst. The window closes early if the receiver sees another node start. **Send one whole frame
-  per write**; writes further apart each wait for the 10-bit idle.
-- **Discard after a collision:** until the FIFO has been empty for `burst_gap + 10` bit times (one
-  byte time plus the window), so the late tail of an aborted frame never goes out on its own.
-  Everything queued is dropped, later frames included: keep one frame in flight.
+  Bytes from one `write()` go out back to back, and the burst stays open a fixed `BURST_GAP_BITS`
+  (3) bit times after the FIFO runs dry (under the 10-bit idle other nodes use), so a frame that
+  trickles in from a pty or socket stays in one burst. **Send one whole frame per write**; writes
+  further apart each wait for the 10-bit idle.
 - **BUSY mode resets to `auto` when a BUSY pin is configured**, `none` otherwise. The CLI sets it
   explicitly anyway.
 - **The radio's own inter-byte gap tolerance is unmeasured.** Don't claim a number. In the DPS
   capture, host bytes reached the socket at most 0.48 ms apart (under one byte time), so DPS's
   frames went out back to back even before the continuation window existed.
-- **Collisions:** checked at mid-bit on released bits. On a collision the gateware releases the
-  line, discards the rest of the queued burst and counts it. `transfer(frame, timeout=…)` then
-  returns a short echo, which the caller treats as a mismatch and retries.
+- **Collisions:** none handled in the gateware — like a real RIB it sends the whole frame. The
+  host detects a collision by the echo not matching (`transfer(frame, timeout=…)` returns the echo
+  for the caller to compare; a short echo means it timed out).
 - **No IN flush:** the FX2 sends a short packet 125 µs after the last byte, which is fast enough
   at 9600 baud.
 
 ## Status
 
 Done: applet with pty, socket and sniff operations; BUSY modes (none, manual, auto, with
-setup/hold); collision abort; transfer timeout. 7 simulation tests and 2 synthesis tests pass.
+setup/hold); transfer timeout. The applet and component suites pass (15 tests, 2 of them
+synthesis); the GM600 tool suite passes (10 tests).
 **Tested on a real radio: GM600** (Glasgow revC3, 9600 baud, read and write); see
 `gm600/README.md`. BUSY handling is still simulation-only, because the GM600 has no BUSY line.
 
@@ -84,7 +81,7 @@ setup/hold); collision abort; transfer timeout. 7 simulation tests and 2 synthes
 ## Next steps
 
 1. Radio-specific work: see that radio's folder (`gm600/CLAUDE.md`).
-2. Possible: timestamped events from the gateware (byte, BUSY edge, collision, framing error),
+2. Possible: timestamped events from the gateware (byte, BUSY edge, framing error),
    for a better sniffer. Today `sniff` timestamps come from the host and are only accurate to
    a few ms.
 3. `motorola-cps` integration (the owner's JS CPS for CM/CP Commercial Series radios,
