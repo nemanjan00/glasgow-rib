@@ -108,23 +108,3 @@ class RIBAppletTestCase(GlasgowAppletV2TestCase, applet=RIBApplet):
         self.assertTrue(await applet.rib_iface.get_busy())
         ctx.set(self.radio_busy, 0)
         self.assertEqual(await applet.rib_iface.read(1), b"\x44")
-
-    @applet_v2_simulation_test(prepare=prepare_radio, args=f"--baud {BAUD}")
-    async def test_collision_aborts_burst(self, applet, ctx):
-        # Wait until the first start bit, then have the "radio" hold the line low over our 1 bits.
-        # No flush: in simulation that would block until the gateware took all three bytes.
-        await applet.rib_iface.write(bytes([0xff, 0xff, 0xff]))
-        while not self.tx_edges:
-            await ctx.tick()
-        ctx.set(self.radio_bus, 1)
-        await ctx.tick().repeat(3 * BIT_CYC)
-        ctx.set(self.radio_bus, 0)
-        await ctx.tick().repeat(40 * BIT_CYC)
-        self.assertEqual(await applet.rib_iface._collisions, 1)
-        # The rest of the burst was discarded, and the bus is usable again afterwards.
-        # (Whatever garbage the receiver decoded during the collision comes first.)
-        await applet.rib_iface.write(b"\x5a", flush=True)
-        received = bytearray()
-        while not received.endswith(b"\x5a"):
-            received += await applet.rib_iface.read(1, flush=False)
-        self.assertLessEqual(len(received), 2)
