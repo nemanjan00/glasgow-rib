@@ -11,8 +11,14 @@ are radio addresses. Ground truth: a live DPS "Read Radio" of serial `807IYA0903
 | Range | Block | R/W | Contents |
 |---|---|---|---|
 | `0x0D80`–`0x0E12` | Radio / alignment | **read-only** (never rewritten) | serial `807IYA0903CG` (ASCII @ `0x0D88`), band-cal / tuning-grid words (@ `0x0DDA`), softpot |
-| `0x0E13`–`~0x0F07` | Network (MPT1327) | read-write | trunking/network parameters — **field set fully enumerated, byte-offsets partly bound** (Control Channel List `0x0E5F`, Channel Frequency Plan `0x0EB0`); MPT own-number lives here |
-| `0x0F33`–`0x0FFB` | Personality (conventional) | read-write | per-channel option table, channel freq/PL table, timers, block checksum |
+| `0x0E13`–`~0x0F07` | Network (MPT1327) | read-write | trunking/network parameters — **field set fully enumerated, byte-offsets partly bound** (Control Channel List `0x0E5F`, Channel Frequency Plan `0x0EB0`) |
+| `~0x0F08`–`0x0FF4` | Personality | read-write | MPT numbers incl. own-number, timers, power (`0x0F08`–`0x0F2A`); Own Group list (`0x0F2B`–`0x0F66`); channel table (`0x0F67`–`0x0F82`); Shortform Dialling (`0x0F83`–`0x0F99`); undecoded rest; checksum byte `0x0FF4` |
+| `0x0FF5`–`0x0FFB` | Factory field | blanked by DPS | see "DPS clears a 7-byte trailing field" |
+| `0x0FFC`–`0x0FFF` | — | untouched | never written by DPS |
+
+Exact offsets for every bound field are in [gm600_codeplug.ksy](gm600_codeplug.ksy). The block
+boundaries marked `~` come from field positions and checksum probes, not from a pinned checksum
+range.
 
 DPS's write touches only `0x0E13`–`0x0FFB`; `0x0D80`–`0x0E12` (serial + alignment) and
 `0x0FFC`–`0x0FFF` are left alone.
@@ -32,7 +38,8 @@ end-marker (a coincidence that breaks as soon as a dial string grows).
 | +6 | options | bitfield (see table below): bit0 Data, bits2:1 Inhibit, bit3 Power, bit4 Monitor | bound |
 
 Frequency formula detail and per-channel proof: [FREQ_ENCODING.md](FREQ_ENCODING.md). PL/TPL tone
-index table: motorola-cps `docs/.../FIELD_HELP_REFERENCE.md`.
+index table: the `pl_tone` enum in [gm600_codeplug.ksy](gm600_codeplug.ksy) (source: motorola-cps
+`docs/.../FIELD_HELP_REFERENCE.md`).
 
 This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`; `0x0F83` onward is the Shortform buffer — its
 `FF` padding is not a channel terminator (earlier "Tx=0xFFFF end" reading corrected).
@@ -66,8 +73,9 @@ established only this much:
 - Additivity is **all it proves.** It does **not** establish the target constant, the exact block
   boundaries, or where the checksum byte lives — a net-zero change passes for *any* target and *any*
   boundaries. **Correction (caught by an independent pre-write dump):** the earlier "each block sums
-  to `0xFF`" claim here was wrong. Summing the ranges in the layout table gives Radio `0xD1`,
-  Network `0xDD`, Personality `0x06` — none is `0xFF`, no two-way split of `0x0E13`–`0x0FFB` makes
+  to `0xFF`" claim here was wrong. Summing the ranges of the earlier layout (`0x0D80`–`0x0E12`,
+  `0x0E13`–`0x0F32`, `0x0F33`–`0x0FFB`) gives Radio `0xD1`, Network `0xDD`, Personality `0x06` —
+  none is `0xFF`, no two-way split of `0x0E13`–`0x0FFB` makes
   each half sum to `0xFF`, and the Personality sum isn't even invariant across the DPS write
   (`0x06` → `0xF2`, see the trailing-field note below), so these boundaries aren't right either.
 - The radio **writes whatever bytes it is told** — every `17` returns `84` (OK) regardless of

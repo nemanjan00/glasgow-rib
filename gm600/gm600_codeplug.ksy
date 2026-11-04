@@ -13,8 +13,9 @@ doc: |
   0x0F29 — are not yet bound): a live DPS
   "Read Radio" of radio serial 807IYA0903 (model M08RHF4CK3, UHF R-band) plus a
   large set of DPS write-contrasts (change one field in DPS -> Write Radio -> diff
-  the dump). Values cited in docs are this reference radio's. See CODEPLUG_BITMAP.md,
-  FIELD_HELP_REFERENCE.md, LIVE_CAPTURE.md.
+  the dump). Values cited in docs are this reference radio's. See CODEPLUG.md in this
+  folder, and CODEPLUG_BITMAP.md, FIELD_HELP_REFERENCE.md, LIVE_CAPTURE.md in the
+  motorola-cps repo (docs/DPS_EMEA_600SERIES_R00.03.02/).
 
   640-byte block map (all bytes accounted for):
     0x000-0x092  alignment_block  radio 0x0D80-0x0E12  READ-ONLY factory cal (serial, softpot, band grid)

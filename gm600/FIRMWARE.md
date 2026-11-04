@@ -30,7 +30,7 @@ K-series memory-management unit (bank register at `0x1058`, MMU control register
 | Range | Contents |
 |---|---|
 | `0000`–`02FF` | Internal RAM (768 bytes) |
-| `0D80`–`0FFF` | **Internal EEPROM, 640 bytes** — the "alignment block": serial `807IYA0903CG`, tuning |
+| `0D80`–`0FFF` | **Internal EEPROM, 640 bytes** — the whole codeplug: alignment, network and personality blocks ([CODEPLUG.md](CODEPLUG.md)) |
 | `1000`–`107F` | **I/O register block** — bank select `0x1058`, SCI data `0x1077`, free-running timer `0x100E`. Values here change between reads because they are live registers, not RAM. |
 | `1080`–`3FFF` | RAM / working data structures (external SRAM U0103, inferred) |
 | `4000`–`7FFF` | **Banked flash window** (see below) |
@@ -59,10 +59,9 @@ The radio has a 256 KB flash (U0102, 28F020) behind a 64 KB CPU. It is paged int
   3), so each descriptor is at `stub + 3 + 0x4CAC`. (At `stub + 0x4CAC` the first descriptor would
   decode as bank `0x7E`, which is impossible; with `+3` every bank is a multiple of 4.)
 
-Consequence for the protocol: **the 2 KB personality region is not visible in the 64 KB `11`
-view.** It lives in flash (or battery-backed SRAM, U0103) reachable only once the right page is
-selected, which is almost certainly what `21` does before a codeplug read. Don't guess `21`
-values — capture them from DPS.
+Consequence for the protocol: none for the codeplug. It is the internal EEPROM, which is always
+in the map, so plain `11` reads reach it (confirmed by a DPS capture). Banking only matters for
+dumping the firmware itself.
 
 ## SCI (the BUS+ UART)
 
@@ -159,46 +158,38 @@ From the `11` read handler at `4D85` and the `17` write handler at `4CE8`:
   ignored for addressing, which is why reads wrap every 64 KB.
 - **`0D80`–`0FFF` is special-cased.** Both the read and write handlers do a range check
   (`addr − 0x0D80`, then `addr − 0x1000`); addresses in that window are served from / written to
-  the CPU's internal EEPROM, everything else from the normal memory read/write path. This is the
-  "alignment block" and it is why that region is the radio's non-volatile tuning store.
+  the CPU's internal EEPROM, everything else from the normal memory read/write path. That window
+  is the radio's non-volatile store: the whole codeplug ([CODEPLUG.md](CODEPLUG.md)).
 
-Still open (need a real radio or a DPS capture, as PROTOCOL.md says): the meaning of the `82`
-size bytes, exactly what `21` pages in, and the behaviour of `18`, `20`, `22`, `26`.
+Still open: what `21` does (DPS never sends it to a GM600), and the exact behaviour of `18`,
+`20` and `22`.
 
-## Is the codeplug in the dump? No.
+## Is the codeplug in the dump? Yes: the internal EEPROM
 
-The stored personality codeplug (the `0x7F1`-byte `.per` body) is **not** present in this 64 KB
-view. What is here:
+The whole codeplug is the 640-byte internal EEPROM at `0D80`–`0FFF`, and it is in this dump. A
+live DPS read (20 × 32-byte `11` reads of exactly that range) matched it byte for byte. The `.per`
+file DPS saves (`0x7F1` bytes) is DPS's own expanded format, built from those 640 bytes; no such
+region exists in the radio. The decode is in [CODEPLUG.md](CODEPLUG.md).
 
-- **Internal EEPROM, `0D80`–`0FFF` (640 bytes).** Holds the identity string `807IYA0903CG` (serial
-  + model suffix) and binary tuning/softpot data. This is the **alignment block**, not channels.
-- **RAM, `1080`–`3FFF`.** Pointer tables and working structures. A blank DPS `.rad`/`.net` body
-  cross-matches here only in short (≤13-byte) runs around `3300`–`3C00`, which is low-signal (the
-  DPS sample is a default/empty codeplug). At most this is an unpacked working copy, not the
-  stored codeplug.
+An earlier version of this section said the codeplug was paged in with `21` from SRAM or flash.
+That was wrong: DPS never sends `21` to a GM600.
 
-The channel/personality data therefore lives somewhere not in this logical snapshot — the
-**battery-backed SRAM (U0103, 32 KB)**, which isn't in the 64 KB window, or an **unmapped flash
-bank**. That matches the protocol: DPS presets an address/page with `21` before reading the
-codeplug region, i.e. the codeplug is paged in, not sitting in the default map.
-
-To capture a real codeplug: read it over BUS+ with `11` after the correct `21` page select (get
-the `21` values from a DPS session), or read U0103 directly. The `0D80`–`0FFF` alignment block is
-already readable with plain `11` reads.
+`1080`–`3FFF` is RAM with pointer tables and working structures, not the stored codeplug.
 
 ## Limitation: only one flash bank is in this dump
 
 The `11` dump is the CPU's 64 KB *logical* view, so it contains **only the flash bank that was
 mapped at `4000`–`7FFF` when it was read** (bank `04`), plus the fixed `8000`+ region, RAM and the
-EEPROM. The other ten banks — including the query-reply formatter and, almost certainly, the
-personality codec — are not here.
+EEPROM. The other ten banks, including the query-reply formatter and most of the application
+code, are not here.
 
 To get the rest you either:
 
 - **Read the flash chip** (U0102, 28F020) with a programmer — the complete, reliable route; or
 - **Dump bank by bank over BUS+**: set `0x1058` to each of `00 04 08 0C 10 14 1C 20 24 28 2C` (0x18 is unused) and read `4000`–`7FFF`.
-  Changing `0x1058` needs either a register write (`17` to `0x1058`, risky) or whatever `21`
-  selects. Work the `21` values out from a DPS capture before trying this.
+  Changing `0x1058` needs a register write (`17` to `0x1058`: untested and risky, because the
+  firmware itself runs from banked code), the `26` backdoor with a known-good stub, or bootstrap
+  mode (below).
 
 ## How these addresses were found (so they can be re-derived)
 

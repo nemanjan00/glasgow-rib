@@ -13,18 +13,13 @@ How to pull a codeplug (and other memory) off a GM600 over BUS+ with the applet.
 >   → a final `0x10`. **No `0x19`.** Writes cover only **`0x0E13`–`0x0FFB`** (last two blocks are 7 B @`0x0FF5` and 2 B @`0x0FF3`, not 32; `0x0FFC`–`0x0FFF` unwritten); the lower part
 >   `0x0D80`–`0x0E12` (serial + alignment) is read-only and not rewritten.
 > - **Native frequency encoding:** `f = 375.000 MHz + (BE16 & 0x7FFF) × (bit15 ? 6.25 : 5 kHz)`.
-> - A reference radio decoded fully (channels + identity). Full write-up and the Kaitai spec are
->   in the motorola-cps repo (`LIVE_CAPTURE.md`, `CODEPLUG_BITMAP.md`, `gm600_codeplug.ksy`).
+> - A reference radio decoded fully (channels + identity): [CODEPLUG.md](CODEPLUG.md) and the
+>   Kaitai spec [gm600_codeplug.ksy](gm600_codeplug.ksy). The live-capture write-up is in the
+>   motorola-cps repo (`LIVE_CAPTURE.md`, `CODEPLUG_BITMAP.md`).
 >
-> The read-only probe plan below is kept for other radios/variants, but for the GM600 just read
-> `0x0D80`–`0x0FFF` directly.
-
-The frame formats and the DPS read order below are **byte-confirmed by reversing the GM600 DPS
-Dealer Programmer** (`WDPS_DP.EXE`). What is **not** known statically is where the codeplug
-regions actually live — DPS keeps those addresses in runtime objects, not in code. So this doc
-gives the proven pieces, a safe read-only probe plan to find the rest on the wire, and the
-questions that plan should answer. (Full DPS static-RE provenance is in the separate motorola-cps
-repo, `docs/DPS_EMEA_600SERIES_R00.03.02/DUMP_SEQUENCE.md` — not visible from this repo.)
+> For the GM600, just read `0x0D80`–`0x0FFF` directly (`tools/dump_codeplug.py`). The
+> [history section](#history-how-the-codeplug-was-found-superseded) records how it was found and
+> is kept for other radios and variants; its conclusions about the GM600 were wrong.
 
 ## Prerequisite
 
@@ -58,7 +53,19 @@ repo, `docs/DPS_EMEA_600SERIES_R00.03.02/DUMP_SEQUENCE.md` — not visible from 
    This captures RAM, I/O registers, the EEPROM, the fixed firmware bank and whichever flash bank
    is currently mapped. See the FIRMWARE.md memory map for what each range is.
 
-## What to resolve on the wire (the point of probing)
+## History: how the codeplug was found (superseded)
+
+Everything below was written **before** the DPS capture and is kept as a record. Its working
+theory (codeplug paged in from SRAM or flash, or packed somewhere in RAM) turned out to be wrong:
+the codeplug is the EEPROM at `0x0D80`–`0x0FFF`. The probe that showed `11` ignores the top
+address byte is still valid.
+
+The frame formats and the DPS read order were byte-confirmed by reversing `WDPS_DP.EXE`, but
+statically it wasn't clear where the codeplug regions live, because DPS keeps those addresses in
+runtime objects. (Full DPS static-RE provenance: motorola-cps repo,
+`docs/DPS_EMEA_600SERIES_R00.03.02/DUMP_SEQUENCE.md`.)
+
+### What to resolve on the wire (the point of probing)
 
 FIRMWARE.md and the DPS static RE **disagree**, and only the radio can settle it:
 
@@ -82,11 +89,12 @@ Both can't be fully true. Probe to decide (all read-only):
    a 2 KB region that decodes as channel data (frequencies, per the DPS field map). It is not in
    the default low-64 KB image if FIRMWARE.md is right.
 
-The authoritative answer is one **live DPS "Read Radio" capture** through the applet (`sniff` or
-`pty` under 86Box): it shows the exact region addresses and whether `0x21` is used. The DPS master
+The authoritative answer was one **live DPS "Read Radio" capture** through the applet (it was
+done under QEMU; see `tools/README.md`): it showed the exact region addresses and that `0x21` isn't
+used. The DPS master
 read order (10 main regions, then record sets) is documented in the motorola-cps repo.
 
-## Offline analysis of the 64 KB dump (2026-11-03, no radio)
+### Offline analysis of the 64 KB dump (2026-11-03, no radio)
 
 Searched `docs/gm600-807IYA0903-2026-11-03-cpu64k.bin` with the DPS `.per`/`.rad` field map
 (frequencies are plain LE32 Hz; serial is ASCII; tuning grid references 375.000 MHz and band edges
@@ -127,4 +135,5 @@ with a base, not values readable from any radio reply.
 - **`0x26`** — jumps the CPU to an address taken from the request (factory backdoor); a wrong
   value runs garbage with interrupts off. See FIRMWARE.md.
 
-Keep everything read-only until a DPS capture confirms the write path.
+The write path is now confirmed (see [PROTOCOL.md](PROTOCOL.md)), but writes still need a
+pre-write dump and correct checksums ([CODEPLUG.md](CODEPLUG.md)).

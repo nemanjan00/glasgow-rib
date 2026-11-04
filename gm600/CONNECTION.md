@@ -118,7 +118,8 @@ See [README.md](../README.md#install) for installing and running the applet. For
 the default baud rate (9600, the only one the 600 Series uses) and leave `--busy` off.
 
 `sniff` shows nothing on an idle radio, so it can't check the wiring. Instead, with HOOK at 9 V,
-run `glasgow run rib -V 5 --bus A0 socket tcp:localhost:2600` and send `F1 10 FE` (enter
+run `glasgow run rib -V 5 --bus A0 socket tcp:127.0.0.1:2324` (the port the [tools](tools/) use)
+and send `F1 10 FE` (enter
 programming mode). The radio answers `50` (ACK) right after the echo and then resets; see
 [PROTOCOL.md](PROTOCOL.md#confirmed-on-a-gm600).
 
@@ -135,7 +136,7 @@ BUS+ is also passed through to the internal control head connector J0101:
 |---|---|
 | 15 | BUS+ |
 | 7 | GND |
-| 18 | ON_OFF_CONTROL (control head service request, see below) |
+| 18 | ON_OFF_CONTROL (control head service request) |
 
 J0101 has HOOK_RSS too (pin 3), so the same 9 V rule applies there.
 

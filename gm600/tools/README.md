@@ -52,8 +52,9 @@ The patch addresses in `sbep_write.py` are specific to this radio's layout and i
 Reads all 640 B (`0x0D80`–`0x0FFF`) via `0x11` and writes a .bin. Diff two dumps (baseline vs a
 DPS-written change) to bind fields: `cmp`/Python diff shows exactly which native bytes a GUI option
 moved. This is how Monitor was bound (ch1 Monitor=Yes → only `0x0F6D 08→18` and checksum `0x0FF4`
-changed). Reply header is `FF 80 00 24 <ah><am><al>` then 32 data bytes (the `00` after `24` is the
-high address byte — a classic off-by-one trap).
+changed). Reply header is `FF 80 00 24 <ah><am><al>` then 32 data bytes and the checksum.
+`00 24` is the 16-bit length; the next byte is the high address byte, which is also `00` here, so
+it's easy to be off by one.
 
 ## `mouse_ctl.py` — closed-loop headless mouse (now working)
 

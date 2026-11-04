@@ -3,9 +3,10 @@
 Host-side protocol for programming 600 Series radios (GM600 / GP600, MPT1327 trunked) over
 the BUS+ line, through the `glasgow_rib` applet (`socket` or `pty` mode).
 
-Everything here was reverse engineered from Motorola's DPS (`WDPS_DP.EXE`, R00.03.02, a 16-bit
-Windows 3.1 program). Parts of it are now confirmed on a real GM600; see
-[Confirmed on a GM600](#confirmed-on-a-gm600). The open questions are listed at the end.
+This was first reverse engineered from Motorola's DPS (`WDPS_DP.EXE`, R00.03.02, a 16-bit
+Windows 3.1 program). Most of it is now confirmed on a real GM600, including full DPS read and
+write sessions captured through the applet; see [Reading and writing a radio](#reading-and-writing-a-radio-what-dps-does-captured-on-a-gm600)
+and [Confirmed on a GM600](#confirmed-on-a-gm600). The open questions are listed at the end.
 
 ## Physical layer
 
@@ -130,7 +131,7 @@ DPS's receive function returns these status codes:
 | Op | What it does | Request data | Reply |
 |---|---|---|---|
 | `10` | Enter programming mode | none | ACK, then **the radio resets** (confirmed) |
-| `13` | Ask the largest block size the radio accepts | none | ACK, then `82` frame with 3 data bytes (confirmed: `00 20 00`); which two are the size is open |
+| `13` | Ask the largest block size the radio accepts | none | ACK, then `82` frame `00 20 00`: a constant hardcoded in the firmware ([FIRMWARE.md](FIRMWARE.md)), not a real limit; 64-byte reads work |
 | `11` | Read a block | `len a23-16 a15-8 a7-0` (24-bit address) | ACK, then `80` frame: 3 header bytes + `len` data bytes |
 | `17` | Write a block | `a23-16 a15-8 a7-0 data…` | ACK, then `84` (OK) or `85` (failed) |
 | `23` | Read an ID string | `[index]`: 0, 1, 3 and 4 are used; 1 is read at connect | ACK, then `8B` frame: the index byte, then the ASCII string (confirmed for index 1: the serial number, no NUL) |
@@ -142,7 +143,8 @@ DPS's receive function returns these status codes:
 The two write flavours of `20` (`01` and `02`) are probably RAM-only vs. permanent.
 
 **Do not send `20`, `22` or `19` until you have captured them from real DPS traffic.** They
-change the radio's alignment, and a bad write can detune the radio.
+change the radio's alignment, and a bad write can detune the radio. **Never send `26`**: the
+firmware jumps to an address taken from the request ([FIRMWARE.md](FIRMWARE.md)).
 
 ### Example frames
 
@@ -231,8 +233,8 @@ First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
   handles it with its 21 ms wait.
 - Without 9 V on HOOK, `F1 10 FE` gets only its echo, and no ACK.
 - `8B` replies repeat the index before the string and have no NUL terminator.
-- `82` carries 3 data bytes (`00 20 00`), not 2. What they mean is open: 64-byte reads work,
-  so it isn't a 32-byte limit.
+- `82` carries 3 data bytes (`00 20 00`), not 2. The firmware returns a hardcoded constant
+  ([FIRMWARE.md](FIRMWARE.md)); 64-byte reads work, so it isn't a real limit.
 - `23` indexes: 0 → `02 09` (binary, maybe a model code), 1 → `807IYA0903` (serial), 3 →
   `R03.03.21` (firmware version), 4 → `02.03` (probably the codeplug version). 3 and 4 end
   in a NUL; 1 doesn't.
@@ -245,19 +247,19 @@ First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
   | Range | Contents |
   |---|---|
   | `0000`–`02FF` | internal RAM (changes between reads) |
-  | `0D80`–`0FFF` | CPU internal EEPROM, 640 bytes = the "alignment block" |
+  | `0D80`–`0FFF` | CPU internal EEPROM, 640 bytes = the whole codeplug ([CODEPLUG.md](CODEPLUG.md)) |
   | `1000`–`107F` | CPU register block (bank select `0x1058`, SCI data `0x1077`); live, changes between reads |
   | `4000`–`7FFF` | banked 16 KB flash window: shows whichever bank is mapped in at the time |
   | `8000`–`DAFF` | fixed firmware (`Copyright 1992, Motorola, Inc.`, `R03.03.21`), vectors at `FFD6` |
 
-- The alignment block starts `02 50 7F EA 4E B4 02 09 "807IYA0903CG" …`. Bytes 6–7 are the
+- The EEPROM starts `02 50 7F EA 4E B4 02 09 "807IYA0903CG" …`. Bytes 6–7 are the
   `02 09` that `23 00` returns, so the ID queries read from this EEPROM. DPS checks **per-block**
   checksums (Radio / Network / Personality), not one over the image; write-probes show the scheme is
   additive but its exact target/boundaries/checksum-byte are not yet established — see
   [CODEPLUG.md](CODEPLUG.md).
 - The board only has a 256 KB flash (U0102), a 32 KB "hybrid" SRAM (U0103, probably
   battery-backed) and the CPU EEPROM. The codeplug is the CPU EEPROM (see "Reading and writing a
-  radio"); I first assumed a separate 2 KB personality region behind paging, which was wrong.
+  radio"). An early theory of a separate 2 KB personality region behind paging was wrong.
 
 ## Other traffic on BUS+
 
@@ -275,7 +277,6 @@ BUS+ activity while pressing buttons. Keep the parser robust anyway:
 - Which `23` index returns the model and which the radio info? (Index 1 is the serial.)
 - How long the reset after `10` takes, and whether the radio needs anything before it accepts
   commands again.
-- What the `82` reply bytes mean.
 - What `21` does. DPS doesn't send it to a GM600.
 - What exactly do `20`, `22` and `19` do?
 - Does the radio enforce its own limit on the gap between received bytes? DPS allows 121 ms on
