@@ -86,7 +86,11 @@ programming-history / flag / counter field (`11 DC` looks like a value, not padd
   state (`FF` here) — **not** the factory original.
 - The factory bytes survive only in the **pre-write dumps** (`native-eeprom.bin`, and the lab's
   `docs/gm600-807IYA0903-2026-11-03-alignment-0D80.bin`) — keep them.
-- What those 7 bytes encode is not yet known; worth decoding.
+- What those 7 bytes encode: **factory/firmware-owned data, not DPS-managed** (investigated
+  2026-11-04). Framing `0x20` + LE32 `0` + BE16 `0x11DC`. Ruled out: not a block checksum (no domain
+  sum matches), not present in the DPS-decoded `.per`, and not written by `WSERIAL.EXE` (that
+  serializes the DPS *executable* for licensing, not the radio). Likely a production/alignment/runtime
+  marker that DPS blanks on write; positive decode needs firmware RE or a second-radio contrast.
 
 ## Per-channel options — in the `+6` byte (contrast-confirmed)
 
