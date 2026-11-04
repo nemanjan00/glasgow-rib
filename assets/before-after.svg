@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="960" height="420" font-family="Helvetica, Arial, sans-serif">
+  <title>Before: PC, RS-232, RIB box and wall wart. After: USB, Glasgow and three wires.</title>
+  <style>
+    .bg { fill: #ffffff; stroke: #d0d7de; }
+    .ink { fill: #1f2328; }
+    .muted { fill: #59636e; }
+    .old { fill: #fff1e5; stroke: #bc4c00; }
+    .oldtext { fill: #bc4c00; }
+    .new { fill: #dafbe1; stroke: #1a7f37; }
+    .newtext { fill: #1a7f37; }
+    .box { fill: #ffffff; stroke: #8c959f; }
+    .link { stroke: #8c959f; }
+    .div { stroke: #d0d7de; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; stroke: #30363d; }
+      .ink { fill: #e6edf3; }
+      .muted { fill: #9198a1; }
+      .old { fill: #2b1a0c; stroke: #f0883e; }
+      .oldtext { fill: #f0883e; }
+      .new { fill: #0f2a19; stroke: #3fb950; }
+      .newtext { fill: #3fb950; }
+      .box { fill: #161b22; stroke: #6e7681; }
+      .link { stroke: #6e7681; }
+      .div { stroke: #30363d; }
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="959" height="419" rx="16"/>
+
+  <!-- BEFORE -->
+  <text class="oldtext" x="40" y="48" font-size="20" font-weight="bold">Before</text>
+  <text class="muted" x="128" y="48" font-size="14">the way Motorola intended</text>
+  <g font-size="12.5" text-anchor="middle">
+    <rect class="old" x="40" y="70" width="150" height="70" rx="8" stroke-width="2"/>
+    <text class="ink" x="115" y="98" font-weight="bold">Period PC</text>
+    <text class="muted" x="115" y="116">DOS / Win 3.1,</text>
+    <text class="muted" x="115" y="131">real COM port</text>
+
+    <line class="link" x1="190" y1="105" x2="225" y2="105" stroke-width="3"/>
+    <rect class="old" x="225" y="70" width="140" height="70" rx="8" stroke-width="2"/>
+    <text class="ink" x="295" y="98" font-weight="bold">RS-232 cable</text>
+    <text class="muted" x="295" y="116">DB-25, DTR / RI</text>
+    <text class="muted" x="295" y="131">modem lines</text>
+
+    <line class="link" x1="365" y1="105" x2="400" y2="105" stroke-width="3"/>
+    <rect class="old" x="400" y="70" width="160" height="70" rx="8" stroke-width="2"/>
+    <text class="ink" x="480" y="98" font-weight="bold">RIB (RLN4008)</text>
+    <text class="muted" x="480" y="116">level shifting,</text>
+    <text class="muted" x="480" y="131">bus timing</text>
+
+    <line class="link" x1="560" y1="105" x2="595" y2="105" stroke-width="3"/>
+    <rect class="old" x="595" y="70" width="140" height="70" rx="8" stroke-width="2"/>
+    <text class="ink" x="665" y="98" font-weight="bold">Wall wart</text>
+    <text class="muted" x="665" y="116">to power</text>
+    <text class="muted" x="665" y="131">the RIB</text>
+
+    <line class="link" x1="735" y1="105" x2="770" y2="105" stroke-width="3"/>
+    <rect class="old" x="770" y="70" width="150" height="70" rx="8" stroke-width="2"/>
+    <text class="ink" x="845" y="98" font-weight="bold">Radio cable</text>
+    <text class="muted" x="845" y="116">model-specific</text>
+    <text class="muted" x="845" y="131">programming lead</text>
+  </g>
+  <text class="muted" x="40" y="170" font-size="13">Closed software tied to old hardware. Protocol and codeplug undocumented. Hard to find, hard to script.</text>
+
+  <line class="div" x1="40" y1="200" x2="920" y2="200" stroke-width="1.5" stroke-dasharray="6 5"/>
+
+  <!-- AFTER -->
+  <text class="newtext" x="40" y="242" font-size="20" font-weight="bold">After</text>
+  <text class="muted" x="112" y="242" font-size="14">glasgow-rib</text>
+  <g font-size="12.5" text-anchor="middle">
+    <rect class="new" x="40" y="264" width="200" height="70" rx="8" stroke-width="2"/>
+    <text class="ink" x="140" y="292" font-weight="bold">Any computer</text>
+    <text class="muted" x="140" y="310">Linux / macOS / Windows,</text>
+    <text class="muted" x="140" y="325">just USB</text>
+
+    <line class="link" x1="240" y1="299" x2="300" y2="299" stroke-width="3"/>
+    <rect class="new" x="300" y="264" width="200" height="70" rx="8" stroke-width="2"/>
+    <text class="ink" x="400" y="292" font-weight="bold">Glasgow</text>
+    <text class="muted" x="400" y="310">the whole RIB, as gateware,</text>
+    <text class="muted" x="400" y="325">bus-powered</text>
+
+    <line class="link" x1="500" y1="299" x2="560" y2="299" stroke-width="3"/>
+    <rect class="new" x="560" y="264" width="360" height="70" rx="8" stroke-width="2"/>
+    <text class="ink" x="740" y="292" font-weight="bold">Three wires to the radio</text>
+    <text class="muted" x="740" y="310">BUS+ and GND, plus HOOK at 9 V on a GM600.</text>
+    <text class="muted" x="740" y="325">No level shifter, no comparator, no RIB.</text>
+  </g>
+  <text class="muted" x="40" y="366" font-size="13">Scriptable from Python. Protocol and GM600 codeplug documented here. The original Motorola</text>
+  <text class="muted" x="40" y="384" font-size="13">software still works too, running in an emulator with its COM port bridged to the applet.</text>
+</svg>
