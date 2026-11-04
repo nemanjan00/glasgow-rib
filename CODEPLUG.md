@@ -120,10 +120,13 @@ A host writing a modified personality must recompute this byte (`+= Σ of its da
 
 - Read/write wire protocol: **~90–95 %**, proven live. Container (block map, checksums): partial —
   additive per-block checksum shown, but target/boundaries/checksum-byte not yet pinned.
-- Conventional channel programming (freq, PL, channel table, identity, timeout): **~90–95 %**.
-- Whole-codeplug field content: **~50–60 %** — the undecoded **MPT1327 trunking network block** is
-  the biggest remaining chunk, followed by the per-channel option bits and the factory
-  alignment/softpot region.
+- Conventional channel programming (freq, PL, channel table, identity, timeout, per-channel option
+  bits): **~90–95 %** — the meaningful programmable surface, byte-bound.
+- **MPT1327 trunking network block (`0x0E13`–`0x0F07`): out of scope.** Its fields are fully
+  *enumerated* (see `FIELD_DICTIONARY.md`) and a few offsets are correlated (Control Channel List
+  `0x0E5F`, Channel Frequency Plan `0x0EB0`), but per-byte binding was intentionally skipped — it
+  needs a live write-contrast sweep and isn't needed for conventional use.
+- Factory alignment/softpot region (`0x0D80`–`0x0E12`): read-only, enumerated, not byte-bound.
 
 ## Cross-reference
 
