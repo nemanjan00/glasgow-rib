@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" width="760" height="300" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 815 300" width="815" height="300" font-family="Helvetica, Arial, sans-serif">
   <title>BUS+ timing: wait for 10 idle bit times, send the burst back to back, read everything back</title>
   <style>
     .bg { fill: #ffffff; stroke: #d0d7de; }
@@ -22,7 +22,7 @@
       .echotext { fill: #3fb950; }
     }
   </style>
-  <rect class="bg" x="0.5" y="0.5" width="759" height="299" rx="16"/>
+  <rect class="bg" x="0.5" y="0.5" width="814" height="299" rx="16"/>
   <text class="ink" x="40" y="42" font-size="18" font-weight="bold">What the gateware does on BUS+</text>
   <text class="muted" x="40" y="64" font-size="13">Timing lives in the FPGA, not on the far side of USB.</text>
 
