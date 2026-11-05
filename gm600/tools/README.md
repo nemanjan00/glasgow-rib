@@ -76,11 +76,33 @@ it's easy to be off by one.
 
 ## `mock_radio.py` and `test_tools.py` — no hardware needed
 
-`mock_radio.py` is a fake GM600 behind a fake applet socket: it echoes, ACKs, and answers `23`,
-`13`, `11` (from a 640-byte image), `17` and `10` like the real radio, and refuses reads over
-64 bytes. Run it standalone (`python3 mock_radio.py dump.bin 2399`, then `SBEP_ADDR=127.0.0.1:2399`)
-to try a tool safely. `test_tools.py` uses it to test the codec and every tool, including a write
-stream aborting on a failed block: `python3 -m unittest test_tools`.
+`mock_radio.py` is a fake GM600 behind a fake applet socket: it echoes, ACKs, and answers `23`
+(ID), `13` (block size), `11` (reads from an EEPROM image), `17` (writes) and `10` like the real
+radio, refuses reads over 64 bytes, and NAKs anything it can't parse instead of dying. One thread
+per connection, so a VM serial with auto-reconnect can't wedge it. A 640-byte image is served as
+the codeplug (base `0x0D80`); a larger dump (e.g. the 4096-byte low EEPROM) is served from `0x0000`.
+
+```
+python3 mock_radio.py dump.bin 2399        # then SBEP_ADDR=127.0.0.1:2399 for any tool
+```
+
+**It is faithful enough that Motorola's own DPS reads it.** Its reply bytes are identical to a real
+radio's, verified against a capture (`test_tools.py::DPSReadTest`), so you can load a saved codeplug
+into DPS with no hardware — then browse or edit it (including fields we never byte-bound in the raw
+codeplug, like the trunking/conventional mode, which DPS knows how to pack) and Save a `.rad`. To do
+it, point the mock at the DPS VM's COM1 the same way the applet is bridged (see the capture rig
+below) and run **File → Read Radio → All**. Proven end to end: DPS reported *"Successfully
+completed"* and showed the real model `M08RHF4CK3` reading a dump through the mock.
+
+```
+# in two tmux windows so they survive SSH logout (systemd kills bare background jobs):
+tmux new -d -s mock   'python3 gm600/tools/mock_radio.py my-dump.bin 2324'
+tmux new -d -s bridge 'socat TCP-LISTEN:2323,reuseaddr,fork TCP:127.0.0.1:2324'
+# QEMU serial is a reconnecting client to 2323 (see below); then Read Radio in DPS.
+```
+
+`test_tools.py` uses the mock to test the codec and every tool (including DPS's exact read sequence
+and a write stream aborting on a failed block): `python3 -m unittest test_tools`.
 
 ## `mouse_ctl.py` — closed-loop headless mouse (now working)
 

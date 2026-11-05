@@ -133,5 +133,42 @@ class ToolsTest(unittest.TestCase):
         self.assertIn("unknown PROBE_SET", res.stderr)
 
 
+class DPSReadTest(unittest.TestCase):
+    """The mock answers Motorola DPS's "Read Radio" exactly as a real GM600 did.
+
+    The expected bytes below are from a socat capture of DPS reading a real radio (2026-11-03): the
+    model (`23 00`) and CP-version (`23 04`) queries, the max-block query (`13`), then 20 reads of
+    32 B covering the whole codeplug 0x0D80..0x1000. If these match, DPS accepts the mock as a radio.
+    """
+
+    def setUp(self):
+        self.radio = MockRadio(IMAGE)
+
+    def tearDown(self):
+        self.radio.close()
+
+    def test_handshake_bytes_match_real_radio(self):
+        # answer = ACK (50) + reply frame; compare to the captured radio bytes
+        self.assertEqual(self.radio._answer(encode(0x23, b"\x00")),
+                         bytes.fromhex("50 f4 8b 00 02 09 75"))             # model 0x0209
+        self.assertEqual(self.radio._answer(encode(0x23, b"\x04")),
+                         bytes.fromhex("50 f8 8b 04 30 32 2e 30 33 00 85"))  # CP version "02.03"
+        self.assertEqual(self.radio._answer(encode(0x13)),
+                         bytes.fromhex("50 f4 82 00 20 00 69"))             # max block = 0x20
+
+    def test_full_read_reconstructs_image(self):
+        out = bytearray()
+        for k in range(20):                                # DPS reads 0x0D80..0x1000 in 32 B steps
+            addr = 0x0D80 + 0x20 * k
+            reply = self.radio._answer(encode(0x11, bytes([0x20]) + addr.to_bytes(3, "big")))
+            self.assertEqual(reply[0], 0x50)                               # ACK first
+            self.assertEqual(reply[1:5], bytes.fromhex("ff 80 00 24"))      # long read-reply header
+            op, data = decode(reply[1:])                                    # also verifies checksum
+            self.assertEqual(op, 0x80)
+            self.assertEqual(data[:3], addr.to_bytes(3, "big"))            # echoed address
+            out += data[3:]
+        self.assertEqual(bytes(out), IMAGE)
+
+
 if __name__ == "__main__":
     unittest.main()
