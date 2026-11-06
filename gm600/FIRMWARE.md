@@ -197,6 +197,39 @@ To get the rest you either:
   firmware itself runs from banked code), the `26` backdoor with a known-good stub, or bootstrap
   mode (below).
 
+## Full-chip dump — all 16 banks (2026-11-06)
+
+The whole 256 KB flash (U0102, AT29C020) has since been read **off-board** (XGECU T48) — route 1
+above — lifting the single-bank limitation. Full byte-level analysis lives in the motorola-cps repo
+(`docs/GM600.md`); the reversing results that change or extend this doc:
+
+- **16 × 16 KB pages.** Banked page `p` at CPU `0x4000`–`0x7FFF` is `file = cpu − 0x4000 + p·0x4000`
+  (bank reg `p<<2`); the fixed region `0x8000`–`0xFFFF` is pages 14–15 (`file = cpu + 0x30000`),
+  vectors at the very top (`file 0x3FFC0`+). Reset code at `0xD45A`, register-init table at `0xD437`,
+  version `R03.03.21` at `0xCDC5`.
+- **Page 6 (bank reg `0x18`) is populated** — correcting the "0x18 is unused" note above; the
+  single-bank list simply never mapped it in.
+- **`0x2D`/`0x2E` are banked after all.** Their dispatch entries (`0x8B8A`/`0x8B87`) point into the
+  far-call stub table → **bank `0x10` (page 4), CPU `0x6E14`/`0x6D24`** — real code (purpose TBD),
+  not the "unbanked handler" guessed from one bank.
+- **No firmware flash-write path.** The dispatch table ends at `0x2E`; the AT29C020
+  software-data-protection unlock (`AA→0x5555`, `55→0x2AAA`) appears **nowhere** in the 256 KB; the
+  `0x17` handler writes internal EEPROM for `0x0D80`–`0x0FFF` and is a plain memcpy (`0xCE79`) for
+  everything else — so SBEP `0x17` cannot reprogram flash (the chip's SDP eats it). A field reflash
+  must run from RAM: upload a stub via `0x17`, launch it via `0x26`, and have it do the SDP unlock +
+  256-byte page program itself. Erased pages 12/13 (`file 0x30000`–`0x37FFF`) are free patch space.
+- **The control head is on the CPU's SPI bus, not BUS+.** SPI transfer routine `0x9102`; device
+  dispatcher `0x8F1F` jumps through a word table at `0x8F44`. **Entry 10 → `0x8F64`** pushes one
+  byte from RAM shadow **`0x34AE`** to the front-panel **LED** shift register (so
+  `ldab #10; jsr $8F1F` = "update LEDs"); **entry 8** sends the 21-byte **LCD** buffer from `0x37AC`.
+- **In-circuit patching over BUS+, self-healing.** The OC3/4/5 timer ISRs (`0x92A1`/`0x92AA`/
+  `0x9298`) clear their flag and `jmp` through **RAM pointers `$A4`/`$A6`/`$A2`**. Write a stub's
+  address into one with a `0x17` RAM write → periodic execution with no flash change (reset re-inits
+  the pointers, so RAM experiments are self-healing). With the LED push above, that's enough to make
+  a front-panel LED follow a firmware flag without touching the flash.
+
+The **>4-channel limit** (below) can now be settled against the full image — it lives in these banks.
+
 ## How these addresses were found (so they can be re-derived)
 
 - Disassembled with capstone (`CS_ARCH_M680X` / `CS_MODE_M680X_6811`) against the 64 KB dump.
