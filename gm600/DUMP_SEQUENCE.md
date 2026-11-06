@@ -53,6 +53,21 @@ binary references used to find it, for future reversing of this and other radios
    is mapped at `0x4000` at the time ([FIRMWARE.md](FIRMWARE.md) has the map). It takes about
    2 minutes at 9600 baud.
 
+   > **Read the full image in _normal_ mode — do not send the step-1 `0x10` first.** Verified
+   > in-circuit on `807IYA0903` (2026-11-06): once the radio is in programming mode (`0x10`) it
+   > answers only codeplug-region reads (`0x0D80`–`0x0FFF`); `0x11` reads of `0x8000`, `0x4000`,
+   > etc. come back as **echo with no reply**. Without `0x10` the same reads return real data —
+   > `0x8000` = fixed firmware, `0x4000` = bank 04 (its dispatch table and `82 36` unsupported-stub
+   > fill, consistent with the off-chip `motofix.BIN`). So the codeplug dump (step 4, after `0x10`)
+   > and the full-image sweep (step 5, no `0x10`) are two different sessions.
+   >
+   > **This only ever reaches the one flash bank currently mapped at `0x4000`.** You cannot dump the
+   > other 15 banks by writing the bank-select register (`0x1058`) over `0x17`: the `0x11`/`0x17`
+   > handlers themselves live in that banked window (bank 04), so changing the bank swaps the running
+   > handler out from under the CPU and it crashes. A full 256 KB flash dump needs a small RAM stub
+   > (upload via `0x17`, run via `0x26`) that selects a bank, copies `0x4000`–`0x7FFF` into RAM,
+   > restores bank 04 and returns — or read the chip off-board (that is what `motofix.BIN` is).
+
 ## Probe methods (read-only, reusable on other radios and variants)
 
 These were used to locate the GM600 codeplug before a DPS capture was available. They're worth
