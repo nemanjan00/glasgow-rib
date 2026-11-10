@@ -74,6 +74,26 @@ changed). Reply header is `FF 80 00 24 <ah><am><al>` then 32 data bytes and the 
 `00 24` is the 16-bit length; the next byte is the high address byte, which is also `00` here, so
 it's easy to be off by one.
 
+## `ramdump.py` — full 256 KB flash dump (DANGER: uploads & runs code)
+
+Dumps the **whole external flash** (U0102, all 16 banks), not just the mapped one. The SBEP `11`
+read only sees the bank at `0x4000`, and a bank-walk can't work (the `11`/`17` handlers run from
+that banked window). So this uploads a 73-byte **68HC11 stub into RAM** with `0x17` writes, launches
+it with the `0x26` backdoor (`sei` + `jmp`), and the stub streams all 256 KB out the SCI — each
+banked page, then the fixed `0x8000`–`0xFFFF`. It does **not** return; power-cycle when done.
+
+```
+python3 ramdump.py flash.bin        # ~4.5 min at 9600; then power-cycle the radio
+```
+
+The stub is `ramdump.S` — readable 68HC11 assembly with the register map as a small HAL (equates)
+— assembled by `asm6811.py`, a tiny bundled 6811 assembler (`python3 asm6811.py ramdump.S` prints
+the bytes). No external toolchain. **Verified in-circuit on `807IYA0903`: the output is byte-for-byte
+identical (same SHA-256) to the off-board T48 read (`motofix.BIN`), all 16 pages.**
+`test_tools.py::RamdumpAssemblerTest` checks the assembler reproduces the verified stub from the
+`.S`, no hardware needed. The `0x26` jump runs arbitrary code with interrupts off — only ever launch
+the address you just uploaded.
+
 ## `mock_radio.py` and `test_tools.py` — no hardware needed
 
 `mock_radio.py` is a fake GM600 behind a fake applet socket: it echoes, ACKs, and answers `23`

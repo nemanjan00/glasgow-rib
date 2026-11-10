@@ -170,5 +170,35 @@ class DPSReadTest(unittest.TestCase):
         self.assertEqual(bytes(out), IMAGE)
 
 
+class RamdumpAssemblerTest(unittest.TestCase):
+    """asm6811 must reproduce the hardware-verified dumper stub from ramdump.S."""
+
+    # Verified in-circuit: this stub dumped all 256 KB byte-identical to the off-board T48 read.
+    PROVEN = bytes.fromhex(
+        "0fc600f71058ce40008655b7103a86aab7103ab61074848027f9a600b71077088c800026e4"
+        "cb04c13826d8ce80008655b7103a86aab7103ab61074848027f9a600b710770826e720fe")
+
+    def test_ramdump_S_assembles_to_verified_bytes(self):
+        import ramdump
+        org, code = ramdump.build_stub()
+        self.assertEqual(org, 0x2000)
+        self.assertEqual(code, self.PROVEN)
+
+    def test_modes_and_relative_branch(self):
+        import asm6811
+        a = asm6811.assemble(
+            "        .org $100\n"
+            "MASK    = $80\n"
+            "loop:   ldaa #MASK\n"       # IMM8 via equate -> 86 80
+            "        staa $1077\n"       # EXT            -> B7 10 77
+            "        bne loop\n")        # REL back to $100 from $105 -> -7 (F9)
+        self.assertEqual(a.code, bytes.fromhex("8680b7107726f9"))
+
+    def test_branch_out_of_range_rejected(self):
+        import asm6811
+        with self.assertRaises(asm6811.AsmError):
+            asm6811.assemble("        .org 0\n        bra $200\n")
+
+
 if __name__ == "__main__":
     unittest.main()

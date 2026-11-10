@@ -201,7 +201,9 @@ To get the rest you either:
   bank-walk over BUS+ — writing `0x1058` with a `17` and reading `4000`–`7FFF` — **does not work:**
   the `11`/`17` handlers themselves run from the banked window (bank `04`), so changing the bank
   pulls the running handler out from under the CPU and it crashes. See
-  [DUMP_SEQUENCE.md](DUMP_SEQUENCE.md).
+  [DUMP_SEQUENCE.md](DUMP_SEQUENCE.md). **Implemented in [tools/ramdump.py](tools/ramdump.py)
+  (`ramdump.S` + `asm6811.py`) and verified in-circuit on `807IYA0903`: its 256 KB output is
+  byte-for-byte identical (same SHA-256) to the off-board `motofix.BIN`, all 16 pages.**
 
 ## Full-chip dump — all 16 banks (2026-11-06)
 

@@ -65,8 +65,10 @@ binary references used to find it, for future reversing of this and other radios
    > other 15 banks by writing the bank-select register (`0x1058`) over `0x17`: the `0x11`/`0x17`
    > handlers themselves live in that banked window (bank 04), so changing the bank swaps the running
    > handler out from under the CPU and it crashes. A full 256 KB flash dump needs a small RAM stub
-   > (upload via `0x17`, run via `0x26`) that selects a bank, copies `0x4000`–`0x7FFF` into RAM,
-   > restores bank 04 and returns — or read the chip off-board (that is what `motofix.BIN` is).
+   > (upload via `0x17`, run via `0x26`) that walks the banks and streams each out the SCI — this is
+   > **implemented in [tools/ramdump.py](tools/README.md), and its output is byte-for-byte identical
+   > (same SHA-256) to the off-board T48 read (`motofix.BIN`), verified in-circuit on `807IYA0903`.**
+   > (The chip can also be read off-board on a programmer; that is what `motofix.BIN` is.)
 
 ## Probe methods (read-only, reusable on other radios and variants)
 
