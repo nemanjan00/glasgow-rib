@@ -8,7 +8,23 @@ Peripherals are stubbed: SPI/SCI writes are captured; timer/interrupts come next
 Memory: 0x0000-0x3FFF RAM; 0x1000-0x107F registers (0x1058=bank, SPI/SCI captured);
 0x0D80-0x0FFF internal EEPROM; 0x4000-0x7FFF banked flash (page=reg0x58>>2); 0x8000-0xFFFF fixed.
 """
+from collections import deque
+
 S, X_, H, I, N, Z, V, C = 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01
+
+# SCI registers — this is a 68HC11K4: SCI block is at 0x1070-0x1077, NOT the classic 0x102B map.
+#   0x1072 SCCR1, 0x1073 SCCR2, 0x1074 SCSR1, 0x1075 SCSR2, 0x1077 SCDR.
+SCCR2 = 0x73                                  # register offset (0x1073)
+SCSR  = 0x74                                  # register offset (0x1074)
+SCSR_TDRE, SCSR_RDRF, SCSR_IDLE = 0x80, 0x20, 0x10
+SCCR2_TIE, SCCR2_RIE, SCCR2_ILIE = 0x80, 0x20, 0x10
+# RX is interrupt-driven: RIE is set in idle, so every received byte raises the SCI interrupt
+# (vector 0xFFD6 -> 0x9336), whose ISR reads exactly that one byte. Bytes must therefore be
+# delivered one at a time, paced ~1 byte-time apart; re-reading SCDR returns the same byte.
+RX_BYTE_INSNS = 250                           # ~instructions per byte at the emulated bitrate.
+# The firmware arms an inter-byte OC5 timeout of ~3.5 byte-times (table @0x92E2) when it advances
+# the reception state machine; bytes must arrive within it, so pacing must be < that timeout and
+# > one state-handler's run (~80 insns, so re-reads of SCDR in a handler see the same byte).
 
 
 class Mem:
@@ -22,6 +38,9 @@ class Mem:
         #                                   watchdog-resets to make it take effect (found via the debugger)
         self.spi_out = bytearray()
         self.sci_out = bytearray()
+        self.sci_rx_byte = 0
+        self.rx_queue = deque()              # pending SCI RX bytes (a BUS+ frame from the host)
+        self.rx_timer = 0                    # instructions until the next queued byte is delivered
         self.watch = None
         self.tcnt = 0                      # free-running timer (TCNT @ 0x100E)
         self.tcnt_prev = 0
@@ -35,6 +54,31 @@ class Mem:
     def tick(self, n=4):
         self.tcnt = (self.tcnt + n) & 0xFFFF
 
+    def feed_rx(self, data):
+        """Queue a BUS+ frame for the SCI receiver.
+
+        Reception is interrupt-driven: RIE is set, so each byte that arrives raises the SCI
+        interrupt (0xFFD6 -> ISR 0x9336), and the ISR reads exactly that one byte, advancing a
+        reception state machine (RAM byte_30). Bytes are therefore delivered one at a time, paced
+        ~1 byte-time apart by pump_rx(); the queue is NOT drained by SCDR reads (re-reading SCDR
+        returns the same latched byte, as on real hardware)."""
+        self.rx_queue.extend(data)
+        if not (self.reg[SCSR] & SCSR_RDRF):
+            self.rx_timer = 1                 # deliver the first byte promptly
+
+    def pump_rx(self):
+        """Per-instruction: deliver the next queued byte when its byte-time elapses."""
+        if self.rx_timer > 0:
+            self.rx_timer -= 1
+            if self.rx_timer == 0 and self.rx_queue and not (self.reg[SCSR] & SCSR_RDRF):
+                self.sci_rx_byte = self.rx_queue.popleft()
+                self.reg[SCSR] |= SCSR_RDRF
+                self.rx_timer = RX_BYTE_INSNS if self.rx_queue else 0
+
+    def sci_rx(self, byte):
+        """Feed a single RX byte (low-level helper; prefer feed_rx for whole frames)."""
+        self.feed_rx(bytes([byte & 0xFF]))
+
     def rb(self, a):
         a &= 0xFFFF
         if a < 0x1000:
@@ -43,6 +87,11 @@ class Mem:
             o = a - 0x1000
             if o == 0x0E: return (self.tcnt >> 8) & 0xFF      # TCNT high
             if o == 0x0F: return self.tcnt & 0xFF             # TCNT low
+            if o == SCSR:                                     # the emulated transmitter is always ready:
+                return self.reg[SCSR] | SCSR_TDRE | 0x40      # report TDRE + TC set (plus live RX flags)
+            if o == 0x77:                                     # reading SCDR returns the RX latch and
+                self.reg[SCSR] &= ~(SCSR_RDRF | SCSR_IDLE)    # clears RDRF+IDLE; the byte stays latched
+                return self.sci_rx_byte                       # (re-reads return the same byte)
             return self.reg[o]
         if a < 0x4000:
             return self.ram[a]
@@ -71,7 +120,15 @@ class Mem:
             elif o == 0x28:                    # port D / chip-selects: CS change ends a transfer
                 self._cur_xfer = None
             elif o == 0x77:
-                self.sci_out.append(v); self.reg[0x74] |= 0x80
+                self.sci_out.append(v); self.reg[SCSR] |= SCSR_TDRE   # transmit + TDRE
+                # Single-wire half-duplex bus: a transmitted byte is echoed back on RX. This echo is
+                # how the firmware CLOCKS a multi-byte reply — each TX-byte state writes SCDR, the
+                # echo raises RDRF -> SCI interrupt -> the ISR consumes the echo and runs the next
+                # TX state. Loop every transmitted byte back, as long as nothing is inbound (the host
+                # isn't mid-frame); a host frame in rx_queue takes precedence over our own echo.
+                if not self.rx_queue:
+                    self.sci_rx_byte = v
+                    self.reg[SCSR] |= SCSR_RDRF
             elif o == 0x3A:                    # COPRST: 0x55 then 0xAA kicks the watchdog
                 if v == 0x55: self.cop_arm = True
                 elif v == 0xAA and self.cop_arm: self.cop_kicks += 1; self.cop_arm = False
@@ -179,6 +236,10 @@ class CPU:
                 return vec
         if r[0x24] & r[0x25] & 0x80:
             return 0xFFDE
+        # SCI: receive (RIE & RDRF) or idle-line (ILIE & IDLE) -> SCI vector 0xFFD6
+        if (r[SCCR2] & SCCR2_RIE and r[SCSR] & SCSR_RDRF) or \
+           (r[SCCR2] & SCCR2_ILIE and r[SCSR] & SCSR_IDLE):
+            return 0xFFD6
         return None
 
     def _timer_irq(self):
@@ -240,6 +301,7 @@ class CPU:
                 raise NotImplementedError("0x%02X @0x%04X (bank 0x%02X)" % (op, (self.PC - 1) & 0xFFFF, self.m.reg[0x58]))
             h(self)
             self.m.tick()
+            self.m.pump_rx()
             self._timer_irq()
         return 'max'
 
