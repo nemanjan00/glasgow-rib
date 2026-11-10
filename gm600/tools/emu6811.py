@@ -1,0 +1,566 @@
+"""A 68HC11 core emulator — foundation for running GM600 firmware in software.
+
+Run firmware routines (and eventually boot) to trace the display render, find variables by
+watching memory, and test codeplug writes without the bench. CPU is fairly complete (ALU x all
+addressing modes, 16-bit ops, memory RMW, bit ops, Y/CPD prefixes, branches, stack, calls).
+Peripherals are stubbed: SPI/SCI writes are captured; timer/interrupts come next.
+
+Memory: 0x0000-0x3FFF RAM; 0x1000-0x107F registers (0x1058=bank, SPI/SCI captured);
+0x0D80-0x0FFF internal EEPROM; 0x4000-0x7FFF banked flash (page=reg0x58>>2); 0x8000-0xFFFF fixed.
+"""
+S, X_, H, I, N, Z, V, C = 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01
+
+
+class Mem:
+    def __init__(self, flash=None, eeprom=None):
+        self.ram = bytearray(0x4000)
+        self.flash = bytearray(flash) if flash else bytearray(0x40000)
+        self.eeprom = bytearray(eeprom or b"\xff" * 0x280)
+        self.reg = bytearray(0x80)
+        self.spi_out = bytearray()
+        self.sci_out = bytearray()
+        self.watch = None
+        self.tcnt = 0                      # free-running timer (TCNT @ 0x100E)
+        self.cop_arm = False               # COP watchdog kick sequence (0x55 then 0xAA -> 0x103A)
+        self.cop_kicks = 0
+        self.adc = [0xFF, 0xFF, 0xFF, 0xFF]  # ADR1-4 (keypad idle = 5V = 0xFF, no key)
+        self.spi_xfers = []                  # list of (cs_value, bytes) grouped by chip-select
+        self._cur_xfer = None
+
+    def tick(self, n=4):
+        self.tcnt = (self.tcnt + n) & 0xFFFF
+
+    def rb(self, a):
+        a &= 0xFFFF
+        if a < 0x1000:
+            return self.eeprom[a - 0x0D80] if 0x0D80 <= a < 0x1000 else self.ram[a]
+        if a < 0x1080:
+            o = a - 0x1000
+            if o == 0x0E: return (self.tcnt >> 8) & 0xFF      # TCNT high
+            if o == 0x0F: return self.tcnt & 0xFF             # TCNT low
+            return self.reg[o]
+        if a < 0x4000:
+            return self.ram[a]
+        if a < 0x8000:
+            return self.flash[((self.reg[0x58] >> 2) * 0x4000) + (a - 0x4000)]
+        return self.flash[0x38000 + (a - 0x8000)]
+
+    def wb(self, a, v):
+        a &= 0xFFFF; v &= 0xFF
+        if self.watch:
+            self.watch(a, v)
+        if a < 0x1000:
+            if 0x0D80 <= a < 0x1000:
+                self.eeprom[a - 0x0D80] = v
+            else:
+                self.ram[a] = v
+            return
+        if a < 0x1080:
+            o = a - 0x1000
+            self.reg[o] = v
+            if o == 0x2A:
+                self.spi_out.append(v); self.reg[0x29] |= 0x80
+                if self._cur_xfer is None:
+                    self._cur_xfer = (self.reg[0x28], bytearray()); self.spi_xfers.append(self._cur_xfer)
+                self._cur_xfer[1].append(v)
+            elif o == 0x28:                    # port D / chip-selects: CS change ends a transfer
+                self._cur_xfer = None
+            elif o == 0x77:
+                self.sci_out.append(v); self.reg[0x74] |= 0x80
+            elif o == 0x3A:                    # COPRST: 0x55 then 0xAA kicks the watchdog
+                if v == 0x55: self.cop_arm = True
+                elif v == 0xAA and self.cop_arm: self.cop_kicks += 1; self.cop_arm = False
+                else: self.cop_arm = False
+            elif o == 0x30:                    # ADCTL write starts a conversion -> instantly complete
+                self.reg[0x30] = v | 0x80      # set CCF (conversions complete flag)
+                self.reg[0x31:0x35] = bytes(self.adc)   # ADR1-4 results
+            return
+        if a < 0x4000:
+            self.ram[a] = v
+
+    def rw(self, a):
+        return (self.rb(a) << 8) | self.rb(a + 1)
+
+    def ww(self, a, v):
+        self.wb(a, (v >> 8) & 0xFF); self.wb(a + 1, v & 0xFF)
+
+
+class CPU:
+    def __init__(self, mem):
+        self.m = mem
+        self.A = self.B = 0
+        self.X = self.Y = 0
+        self.SP = 0x01FF
+        self.PC = 0
+        self.CC = S | X_ | I
+        self.ireg = 'X'           # which index register the current (possibly prefixed) op uses
+
+    @property
+    def D(self): return (self.A << 8) | self.B
+    @D.setter
+    def D(self, v): self.A = (v >> 8) & 0xFF; self.B = v & 0xFF
+
+    def ir(self): return self.X if self.ireg == 'X' else self.Y
+    def set_ir(self, v):
+        if self.ireg == 'X': self.X = v & 0xFFFF
+        else: self.Y = v & 0xFFFF
+
+    def sf(self, b, on): self.CC = (self.CC | b) if on else (self.CC & ~b)
+    def gf(self, b): return bool(self.CC & b)
+    def nz8(self, v): self.sf(N, v & 0x80); self.sf(Z, (v & 0xFF) == 0)
+    def nz16(self, v): self.sf(N, v & 0x8000); self.sf(Z, (v & 0xFFFF) == 0)
+
+    def fb(self):
+        v = self.m.rb(self.PC); self.PC = (self.PC + 1) & 0xFFFF; return v
+    def fw(self):
+        return (self.fb() << 8) | self.fb()
+
+    def push(self, v): self.m.wb(self.SP, v & 0xFF); self.SP = (self.SP - 1) & 0xFFFF
+    def pull(self): self.SP = (self.SP + 1) & 0xFFFF; return self.m.rb(self.SP)
+    def pushw(self, v): self.push(v & 0xFF); self.push((v >> 8) & 0xFF)
+    def pullw(self): hi = self.pull(); lo = self.pull(); return (hi << 8) | lo
+
+    # addressing-mode effective address
+    def ea(self, mode):
+        if mode == 'd': return self.fb()
+        if mode == 'e': return self.fw()
+        if mode == 'i': return (self.ir() + self.fb()) & 0xFFFF
+        raise ValueError(mode)
+
+    def add8(self, a, b, cin=0):
+        r = a + b + cin
+        self.sf(H, ((a & 0xF) + (b & 0xF) + cin) > 0xF)
+        self.sf(C, r > 0xFF); self.sf(V, ((a ^ r) & (b ^ r) & 0x80) != 0)
+        r &= 0xFF; self.nz8(r); return r
+
+    def sub8(self, a, b, bin=0):
+        r = a - b - bin
+        self.sf(C, r < 0); self.sf(V, ((a ^ b) & (a ^ (r & 0xFF)) & 0x80) != 0)
+        r &= 0xFF; self.nz8(r); return r
+
+    def reset(self):
+        """Hardware/COP reset: re-vector, set S/X/I, clear bank; RAM is battery-backed (preserved)."""
+        self.PC = self.m.rw(0xFFFE)
+        self.CC = S | X_ | I
+        self.m.reg[0x58] = 0
+
+    def irq(self, vector):
+        """Take an interrupt: stack PC,Y,X,A,B,CC and vector."""
+        self.pushw(self.PC); self.pushw(self.Y); self.pushw(self.X)
+        self.push(self.A); self.push(self.B); self.push(self.CC)
+        self.sf(I, True)
+        self.PC = self.m.rw(vector)
+
+    def run(self, max_insns=5_000_000, stop_pc=None, trace=None, cop_timeout=0, max_resets=30):
+        resets = 0; since_kick = 0; last_kicks = self.m.cop_kicks
+        for _ in range(max_insns):
+            if stop_pc is not None and self.PC == stop_pc:
+                return 'stop'
+            if cop_timeout:
+                if self.m.cop_kicks != last_kicks:
+                    last_kicks = self.m.cop_kicks; since_kick = 0
+                else:
+                    since_kick += 1
+                    if since_kick > cop_timeout:
+                        resets += 1; since_kick = 0
+                        if resets > max_resets:
+                            return 'cop_loop'
+                        self.reset()
+                        continue
+            if trace: trace(self)
+            self.ireg = 'X'
+            op = self.fb()
+            if op == 0x18:                      # Y prefix
+                self.ireg = 'Y'; op = self.fb()
+            elif op == 0x1A:                    # CPD / cross prefix (page 3)
+                op = self.fb()
+                if op == 0x83: self._cpd(self.fw()); continue
+                if op == 0x93: self._cpd(self.m.rw(self.ea('d'))); continue
+                if op == 0xA3: self._cpd(self.m.rw(self.ea('i'))); continue
+                if op == 0xB3: self._cpd(self.m.rw(self.ea('e'))); continue
+                if op == 0xEE: self.Y = self.m.rw((self.X + self.fb()) & 0xFFFF); self.nz16(self.Y); continue
+                if op == 0xEF: self.m.ww((self.X + self.fb()) & 0xFFFF, self.Y); self.nz16(self.Y); continue
+                raise NotImplementedError("0x1A%02X @0x%04X" % (op, self.PC))
+            elif op == 0xCD:                    # page 4 (index cross)
+                op = self.fb()
+                if op == 0xEE: self.X = self.m.rw((self.Y + self.fb()) & 0xFFFF); self.nz16(self.X); continue
+                if op == 0xEF: self.m.ww((self.Y + self.fb()) & 0xFFFF, self.X); self.nz16(self.X); continue
+                if op == 0xA3: self._cpd(self.m.rw((self.Y + self.fb()) & 0xFFFF)); continue
+                if op == 0xAC: v = self.m.rw((self.Y + self.fb()) & 0xFFFF); self.sf(C, self.X < v); self.nz16((self.X - v) & 0xFFFF); continue
+                raise NotImplementedError("0xCD%02X @0x%04X" % (op, self.PC))
+            h = OPC.get(op)
+            if h is None:
+                raise NotImplementedError("0x%02X @0x%04X (bank 0x%02X)" % (op, (self.PC - 1) & 0xFFFF, self.m.reg[0x58]))
+            h(self)
+            self.m.tick()
+        return 'max'
+
+    def _cpd(self, v):
+        r = self.D - v
+        self.sf(C, self.D < v); self.sf(V, ((self.D ^ v) & (self.D ^ (r & 0xFFFF)) & 0x8000) != 0)
+        self.nz16(r & 0xFFFF)
+
+
+OPC = {}
+def op(code):
+    def d(fn): OPC[code] = fn; return fn
+    return d
+
+
+# ---------- generated ALU ops across addressing modes ----------
+def _rd(c, mode):
+    return c.m.rb(c.ea(mode))
+
+def _alu_reg(reg, base, fn16=None):
+    # reg='A'/'B'; base immediate opcode; generates imm/dir/idx/ext (+0x00/0x10/0x20/0x30 from 0x8x row)
+    pass
+
+def _mk(reg):
+    def get(c): return c.A if reg == 'A' else c.B
+    def put(c, v):
+        if reg == 'A': c.A = v & 0xFF
+        else: c.B = v & 0xFF
+    return get, put
+
+for _reg, _hi in (('A', 0x80), ('B', 0xC0)):
+    g, p = _mk(_reg)
+    def mkops(g=g, p=p, hi=_hi):
+        def load(mode):
+            def h(c): v = (c.fb() if mode == 'm' else _rd(c, mode)); p(c, v); c.nz8(v); c.sf(V, False)
+            return h
+        def store(mode):
+            def h(c): ea = c.ea(mode); v = g(c); c.m.wb(ea, v); c.nz8(v); c.sf(V, False)
+            return h
+        def alu(name):
+            def mk(mode):
+                def h(c):
+                    v = (c.fb() if mode == 'm' else _rd(c, mode)); a = g(c)
+                    if name == 'add': p(c, c.add8(a, v))
+                    elif name == 'adc': p(c, c.add8(a, v, 1 if c.gf(C) else 0))
+                    elif name == 'sub': p(c, c.sub8(a, v))
+                    elif name == 'sbc': p(c, c.sub8(a, v, 1 if c.gf(C) else 0))
+                    elif name == 'cmp': c.sub8(a, v)
+                    elif name == 'and': r = a & v; p(c, r); c.nz8(r); c.sf(V, False)
+                    elif name == 'ora': r = a | v; p(c, r); c.nz8(r); c.sf(V, False)
+                    elif name == 'eor': r = a ^ v; p(c, r); c.nz8(r); c.sf(V, False)
+                    elif name == 'bit': r = a & v; c.nz8(r); c.sf(V, False)
+                return h
+            return mk
+        # opcode layout within a row: imm=hi+6, dir=hi+0x16-0x10.., use HC11 standard map:
+        OPC[hi + 0x06] = load('m')          # LDAA/LDAB immediate (86/C6)
+        OPC[hi + 0x16] = load('d')          # 96 / D6
+        OPC[hi + 0x26] = load('i')          # A6 / E6
+        OPC[hi + 0x36] = load('e')          # B6 / F6
+        OPC[hi + 0x17] = store('d')         # 97 / D7
+        OPC[hi + 0x27] = store('i')         # A7 / E7
+        OPC[hi + 0x37] = store('e')         # B7 / F7
+        for nm, lowimm in (('sub', 0x00), ('cmp', 0x01), ('sbc', 0x02), ('and', 0x04),
+                           ('bit', 0x05), ('ora', 0x0A), ('eor', 0x08), ('adc', 0x09),
+                           ('add', 0x0B)):
+            mk = alu(nm)
+            OPC[hi + lowimm] = mk('m')
+            OPC[hi + 0x10 + lowimm] = mk('d')
+            OPC[hi + 0x20 + lowimm] = mk('i')
+            OPC[hi + 0x30 + lowimm] = mk('e')
+    mkops()
+
+
+# ---------- 16-bit loads/stores (D, X/Y via ireg, SP) ----------
+def _ld16(which):
+    def mk(mode):
+        def h(c):
+            v = (c.fw() if mode == 'm' else c.m.rw(c.ea(mode)))
+            if which == 'D': c.D = v
+            elif which == 'IR': c.set_ir(v)
+            else: c.SP = v
+            c.nz16(v); c.sf(V, False)
+        return h
+    return mk
+def _st16(which):
+    def mk(mode):
+        def h(c):
+            ea = c.ea(mode); v = (c.D if which == 'D' else (c.ir() if which == 'IR' else c.SP))
+            c.m.ww(ea, v); c.nz16(v); c.sf(V, False)
+        return h
+    return mk
+ld = _ld16('D'); st = _st16('D')
+OPC[0xCC] = ld('m'); OPC[0xDC] = ld('d'); OPC[0xEC] = ld('i'); OPC[0xFC] = ld('e')
+OPC[0xDD] = st('d'); OPC[0xED] = st('i'); OPC[0xFD] = st('e')
+ld = _ld16('IR'); st = _st16('IR')
+OPC[0xCE] = ld('m'); OPC[0xDE] = ld('d'); OPC[0xEE] = ld('i'); OPC[0xFE] = ld('e')
+OPC[0xDF] = st('d'); OPC[0xEF] = st('i'); OPC[0xFF] = st('e')
+ld = _ld16('SP'); st = _st16('SP')
+OPC[0x8E] = ld('m'); OPC[0x9E] = ld('d'); OPC[0xAE] = ld('i'); OPC[0xBE] = ld('e')
+OPC[0x9F] = st('d'); OPC[0xAF] = st('i'); OPC[0xBF] = st('e')
+
+
+# ---------- 16-bit arithmetic ----------
+def _subd(mode):
+    def h(c):
+        v = (c.fw() if mode == 'm' else c.m.rw(c.ea(mode))); r = c.D - v
+        c.sf(C, r < 0); c.sf(V, ((c.D ^ v) & (c.D ^ (r & 0xFFFF)) & 0x8000) != 0)
+        c.D = r & 0xFFFF; c.nz16(c.D)
+    return h
+def _addd(mode):
+    def h(c):
+        v = (c.fw() if mode == 'm' else c.m.rw(c.ea(mode))); r = c.D + v
+        c.sf(C, r > 0xFFFF); c.D = r & 0xFFFF; c.nz16(c.D)
+    return h
+OPC[0x83] = _subd('m'); OPC[0x93] = _subd('d'); OPC[0xA3] = _subd('i'); OPC[0xB3] = _subd('e')
+OPC[0xC3] = _addd('m'); OPC[0xD3] = _addd('d'); OPC[0xE3] = _addd('i'); OPC[0xF3] = _addd('e')
+def _cpx(mode):
+    def h(c):
+        v = (c.fw() if mode == 'm' else c.m.rw(c.ea(mode)))
+        c.sf(C, c.ir() < v); c.sf(V, ((c.ir() ^ v) & (c.ir() ^ ((c.ir() - v) & 0xFFFF)) & 0x8000) != 0)
+        c.nz16((c.ir() - v) & 0xFFFF)
+    return h
+OPC[0x8C] = _cpx('m'); OPC[0x9C] = _cpx('d'); OPC[0xAC] = _cpx('i'); OPC[0xBC] = _cpx('e')
+
+
+# ---------- memory read-modify-write (ext/idx) ----------
+def _rmw(name):
+    def mk(mode):
+        def h(c):
+            ea = c.ea(mode); v = c.m.rb(ea)
+            if name == 'inc': r = (v + 1) & 0xFF; c.nz8(r); c.sf(V, v == 0x7F)
+            elif name == 'dec': r = (v - 1) & 0xFF; c.nz8(r); c.sf(V, v == 0x80)
+            elif name == 'clr': r = 0; c.nz8(0); c.sf(V, False); c.sf(C, False)
+            elif name == 'com': r = (~v) & 0xFF; c.nz8(r); c.sf(V, False); c.sf(C, True)
+            elif name == 'neg': r = (-v) & 0xFF; c.nz8(r); c.sf(V, v == 0x80); c.sf(C, v != 0)
+            elif name == 'tst': c.nz8(v); c.sf(V, False); c.sf(C, False); return
+            elif name == 'asl': c.sf(C, bool(v & 0x80)); r = (v << 1) & 0xFF; c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+            elif name == 'lsr': c.sf(C, bool(v & 1)); r = v >> 1; c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+            elif name == 'asr': c.sf(C, bool(v & 1)); r = ((v >> 1) | (v & 0x80)) & 0xFF; c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+            elif name == 'rol': nc = bool(v & 0x80); r = ((v << 1) | (1 if c.gf(C) else 0)) & 0xFF; c.sf(C, nc); c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+            elif name == 'ror': nc = bool(v & 1); r = ((v >> 1) | (0x80 if c.gf(C) else 0)) & 0xFF; c.sf(C, nc); c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+            c.m.wb(ea, r)
+        return h
+    return mk
+for nm, lo in (('neg', 0x00), ('com', 0x03), ('lsr', 0x04), ('ror', 0x06), ('asr', 0x07),
+               ('asl', 0x08), ('rol', 0x09), ('dec', 0x0A), ('inc', 0x0C), ('tst', 0x0D), ('clr', 0x0F)):
+    OPC[0x60 + lo] = _rmw(nm)('i')
+    OPC[0x70 + lo] = _rmw(nm)('e')
+# accumulator RMW (A: 0x4x, B: 0x5x)
+def _rmw_acc(name, reg):
+    def h(c):
+        v = c.A if reg == 'A' else c.B
+        fn = _rmw(name)('d')  # reuse logic via a temp cell is messy; inline:
+        # inline compute:
+        if name == 'inc': r = (v + 1) & 0xFF; c.nz8(r); c.sf(V, v == 0x7F)
+        elif name == 'dec': r = (v - 1) & 0xFF; c.nz8(r); c.sf(V, v == 0x80)
+        elif name == 'clr': r = 0; c.nz8(0); c.sf(V, False); c.sf(C, False)
+        elif name == 'com': r = (~v) & 0xFF; c.nz8(r); c.sf(V, False); c.sf(C, True)
+        elif name == 'neg': r = (-v) & 0xFF; c.nz8(r); c.sf(V, v == 0x80); c.sf(C, v != 0)
+        elif name == 'tst': c.nz8(v); c.sf(V, False); c.sf(C, False); return
+        elif name == 'asl': c.sf(C, bool(v & 0x80)); r = (v << 1) & 0xFF; c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+        elif name == 'lsr': c.sf(C, bool(v & 1)); r = v >> 1; c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+        elif name == 'asr': c.sf(C, bool(v & 1)); r = ((v >> 1) | (v & 0x80)) & 0xFF; c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+        elif name == 'rol': nc = bool(v & 0x80); r = ((v << 1) | (1 if c.gf(C) else 0)) & 0xFF; c.sf(C, nc); c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+        elif name == 'ror': nc = bool(v & 1); r = ((v >> 1) | (0x80 if c.gf(C) else 0)) & 0xFF; c.sf(C, nc); c.nz8(r); c.sf(V, c.gf(N) ^ c.gf(C))
+        if reg == 'A': c.A = r
+        else: c.B = r
+    return h
+for nm, lo in (('neg', 0x00), ('com', 0x03), ('lsr', 0x04), ('ror', 0x06), ('asr', 0x07),
+               ('asl', 0x08), ('rol', 0x09), ('dec', 0x0A), ('inc', 0x0C), ('tst', 0x0D), ('clr', 0x0F)):
+    OPC[0x40 + lo] = _rmw_acc(nm, 'A')
+    OPC[0x50 + lo] = _rmw_acc(nm, 'B')
+
+
+# ---------- bit ops bset/bclr/brset/brclr (dir + idx) ----------
+def _bset(mode, clear):
+    def h(c):
+        ea = c.ea(mode); mask = c.fb(); v = c.m.rb(ea)
+        v = (v & ~mask) if clear else (v | mask)
+        c.m.wb(ea, v & 0xFF); c.nz8(v & 0xFF); c.sf(V, False)
+    return h
+OPC[0x14] = _bset('d', False); OPC[0x15] = _bset('d', True)
+OPC[0x1C] = _bset('i', False); OPC[0x1D] = _bset('i', True)
+def _brbit(mode, setcond):
+    def h(c):
+        ea = c.ea(mode); mask = c.fb(); rel = c.fb()
+        if rel & 0x80: rel -= 0x100
+        v = c.m.rb(ea); masked = v & mask
+        take = (masked == mask) if setcond else (masked == 0)
+        if take: c.PC = (c.PC + rel) & 0xFFFF
+    return h
+OPC[0x12] = _brbit('d', True); OPC[0x13] = _brbit('d', False)
+OPC[0x1E] = _brbit('i', True); OPC[0x1F] = _brbit('i', False)
+
+
+# ---------- inherent / register ----------
+@op(0x01)
+def _(c): pass
+@op(0x0F)
+def _(c): c.sf(I, True)
+@op(0x0E)
+def _(c): c.sf(I, False)
+@op(0x0D)
+def _(c): c.sf(C, True)
+@op(0x0C)
+def _(c): c.sf(C, False)
+@op(0x0A)
+def _(c): c.sf(V, True)
+@op(0x0B)
+def _(c): c.sf(V, False)
+@op(0x08)
+def _(c): c.set_ir((c.ir() + 1) & 0xFFFF); c.sf(Z, c.ir() == 0)
+@op(0x09)
+def _(c): c.set_ir((c.ir() - 1) & 0xFFFF); c.sf(Z, c.ir() == 0)
+@op(0x31)
+def _(c): c.SP = (c.SP + 1) & 0xFFFF
+@op(0x34)
+def _(c): c.SP = (c.SP - 1) & 0xFFFF
+@op(0x30)
+def _tsx(c): c.set_ir((c.SP + 1) & 0xFFFF)
+@op(0x35)
+def _txs(c): c.SP = (c.ir() - 1) & 0xFFFF
+@op(0x3A)
+def _abx(c): c.set_ir((c.ir() + c.B) & 0xFFFF)
+@op(0x8F)
+def _xgdx(c): d = c.D; c.D = c.ir(); c.set_ir(d)
+@op(0x16)
+def _(c): c.B = c.A; c.nz8(c.B); c.sf(V, False)
+@op(0x17)
+def _(c): c.A = c.B; c.nz8(c.A); c.sf(V, False)
+@op(0x19)
+def _daa(c):
+    a = c.A; corr = 0; cf = c.gf(C)
+    if (a & 0xF) > 9 or c.gf(H): corr |= 0x06
+    if a > 0x99 or cf: corr |= 0x60
+    r = (a + corr) & 0xFF; c.sf(C, cf or (a + corr) > 0xFF); c.A = r; c.nz8(r)
+@op(0x3D)
+def _mul(c): r = c.A * c.B; c.D = r & 0xFFFF; c.sf(C, bool(r & 0x80))
+@op(0x05)
+def _lsrd(c): c.sf(C, bool(c.D & 1)); c.D = (c.D >> 1) & 0xFFFF; c.nz16(c.D); c.sf(V, c.gf(N) ^ c.gf(C))
+@op(0x04)
+def _lsld(c): c.sf(C, bool(c.D & 0x8000)); c.D = (c.D << 1) & 0xFFFF; c.nz16(c.D); c.sf(V, c.gf(N) ^ c.gf(C))
+@op(0x02)
+def _idiv(c):
+    if c.X == 0: c.sf(C, True); return
+    q = c.D // c.X; r = c.D % c.X; c.X = q & 0xFFFF; c.D = r & 0xFFFF
+    c.sf(Z, c.X == 0); c.sf(C, False); c.sf(V, False)
+@op(0x03)
+def _fdiv(c):
+    if c.X == 0 or c.D >= c.X: c.sf(C, True); c.sf(V, c.D >= c.X); return
+    q = (c.D << 16) // c.X; r = (c.D << 16) % c.X; c.X = q & 0xFFFF; c.D = r & 0xFFFF
+    c.sf(Z, c.X == 0); c.sf(C, False)
+
+
+# accumulator inherent shifts/clears already covered by 0x4x/0x5x table
+
+
+# ---------- stack / transfers ----------
+@op(0x36)
+def _(c): c.push(c.A)
+@op(0x32)
+def _(c): c.A = c.pull()
+@op(0x37)
+def _(c): c.push(c.B)
+@op(0x33)
+def _(c): c.B = c.pull()
+@op(0x3C)
+def _(c): c.pushw(c.ir())
+@op(0x38)
+def _(c): c.set_ir(c.pullw())
+@op(0x06)
+def _tap(c): c.CC = c.A | S | X_   # S,X stay set-ish; keep simple
+@op(0x07)
+def _tpa(c): c.A = c.CC
+
+
+# ---------- branches ----------
+def _br(cond):
+    def h(c):
+        rel = c.fb()
+        if rel & 0x80: rel -= 0x100
+        if cond(c): c.PC = (c.PC + rel) & 0xFFFF
+    return h
+OPC[0x20] = _br(lambda c: True)
+OPC[0x21] = _br(lambda c: False)
+OPC[0x22] = _br(lambda c: not (c.gf(C) or c.gf(Z)))
+OPC[0x23] = _br(lambda c: c.gf(C) or c.gf(Z))
+OPC[0x24] = _br(lambda c: not c.gf(C))
+OPC[0x25] = _br(lambda c: c.gf(C))
+OPC[0x26] = _br(lambda c: not c.gf(Z))
+OPC[0x27] = _br(lambda c: c.gf(Z))
+OPC[0x28] = _br(lambda c: not c.gf(V))
+OPC[0x29] = _br(lambda c: c.gf(V))
+OPC[0x2A] = _br(lambda c: not c.gf(N))
+OPC[0x2B] = _br(lambda c: c.gf(N))
+OPC[0x2C] = _br(lambda c: not (c.gf(N) ^ c.gf(V)))
+OPC[0x2D] = _br(lambda c: c.gf(N) ^ c.gf(V))
+OPC[0x2E] = _br(lambda c: not (c.gf(Z) or (c.gf(N) ^ c.gf(V))))
+OPC[0x2F] = _br(lambda c: c.gf(Z) or (c.gf(N) ^ c.gf(V)))
+
+
+# ---------- jumps / calls / returns ----------
+@op(0x7E)
+def _(c): c.PC = c.ea('e')
+@op(0x6E)
+def _(c): c.PC = c.ea('i')
+@op(0xBD)
+def _(c): ea = c.ea('e'); c.pushw(c.PC); c.PC = ea
+@op(0xAD)
+def _(c): ea = c.ea('i'); c.pushw(c.PC); c.PC = ea
+@op(0x9D)
+def _(c): ea = c.ea('d'); c.pushw(c.PC); c.PC = ea
+@op(0x8D)
+def _(c):
+    rel = c.fb()
+    if rel & 0x80: rel -= 0x100
+    c.pushw(c.PC); c.PC = (c.PC + rel) & 0xFFFF
+@op(0x39)
+def _(c): c.PC = c.pullw()
+@op(0x3B)
+def _rti(c):
+    c.CC = c.pull(); c.B = c.pull(); c.A = c.pull()
+    c.X = c.pullw(); c.Y = c.pullw(); c.PC = c.pullw()
+@op(0x3F)
+def _swi(c): raise NotImplementedError("SWI @0x%04X" % c.PC)
+@op(0x3E)
+def _wai(c): raise NotImplementedError("WAI @0x%04X (needs interrupts)" % c.PC)
+@op(0x00)
+def _test(c): raise NotImplementedError("TEST/illegal 0x00 @0x%04X" % c.PC)
+
+
+def run_selftest():
+    m = Mem()
+    prog = bytes([0x86, 0x05, 0xC6, 0x07, 0x3D, 0xFD, 0x20, 0x00, 0xCE, 0x00, 0x0A, 0x20, 0xFE])
+    m.ram[0x100:0x100 + len(prog)] = prog
+    c = CPU(m); c.PC = 0x0100
+    c.run(stop_pc=0x0100 + len(prog) - 2)
+    ok = m.rw(0x2000) == 35 and c.X == 10
+    print("selftest: 5*7=%d X=%d -> %s" % (m.rw(0x2000), c.X, "OK" if ok else "FAIL"))
+    return ok
+
+
+def boot(flash_path, eeprom_path=None, insns=8_000_000, cop_timeout=150000):
+    """Load the GM600 firmware (256 KB flash + optional 640 B EEPROM) and boot it.
+
+    Returns the CPU after it reaches its main loop. The firmware's init uses deliberate
+    COP watchdog resets (RAM is battery-backed), which `cop_timeout` emulates. SPI/SCI output
+    is captured in mem.spi_xfers / mem.sci_out."""
+    flash = bytearray(open(flash_path, "rb").read())
+    ee = open(eeprom_path, "rb").read() if eeprom_path else None
+    m = Mem(flash=flash, eeprom=ee)
+    c = CPU(m)
+    c.PC = m.rw(0xFFFE)
+    c.run(max_insns=insns, cop_timeout=cop_timeout)
+    return c
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2:
+        run_selftest()
+        print("usage: emu6811.py <flash.bin> [eeprom.bin]   # boot the firmware, dump display SPI")
+        sys.exit(0)
+    c = boot(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    m = c.m
+    print("booted: PC=0x%04X  COP kicks=%d  SPI bytes=%d  SCI bytes=%d" %
+          (c.PC, m.cop_kicks, len(m.spi_out), len(m.sci_out)))
+    import collections
+    seen = collections.Counter((cs, bytes(b)) for cs, b in m.spi_xfers)
+    print("distinct LCD/SPI transfers (chip-select, length, bytes):")
+    for (cs, b), n in sorted(seen.items(), key=lambda kv: -kv[1]):
+        print("  cs=0x%02X len=%2d x%-4d  %s" % (cs, len(b), n, b.hex()))

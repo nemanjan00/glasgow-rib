@@ -200,5 +200,24 @@ class RamdumpAssemblerTest(unittest.TestCase):
             asm6811.assemble("        .org 0\n        bra $200\n")
 
 
+class EmulatorTest(unittest.TestCase):
+    """The 68HC11 core must execute correctly (validated on a known program)."""
+
+    def test_cpu_core_selftest(self):
+        import emu6811
+        self.assertTrue(emu6811.run_selftest())
+
+    def test_mul_and_idiv(self):
+        import emu6811
+        m = emu6811.Mem()
+        # ldd #1000 ; ldx #7 ; idiv -> X=142 rem D=6
+        prog = bytes([0xCC, 0x03, 0xE8, 0xCE, 0x00, 0x07, 0x02, 0x20, 0xFE])
+        m.ram[0x200:0x200 + len(prog)] = prog
+        c = emu6811.CPU(m); c.PC = 0x200
+        c.run(stop_pc=0x200 + len(prog) - 2)
+        self.assertEqual(c.X, 1000 // 7)
+        self.assertEqual(c.D, 1000 % 7)
+
+
 if __name__ == "__main__":
     unittest.main()

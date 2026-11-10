@@ -100,6 +100,28 @@ identical (same SHA-256) to the off-board T48 read (`motofix.BIN`), all 16 pages
 `.S`, no hardware needed. The `0x26` jump runs arbitrary code with interrupts off — only ever launch
 the address you just uploaded.
 
+## `emu6811.py` and `asm6811.py` — firmware emulator + assembler
+
+`asm6811.py` is a tiny 68HC11 assembler (used by `ramdump.S`). `emu6811.py` is a 68HC11 **core
+emulator** that runs the GM600 firmware in software — the goal being to reverse the display and
+build remote control by *executing* the firmware, not just reading disassembly.
+
+```
+python3 emu6811.py                         # CPU self-test (no firmware)
+python3 emu6811.py motofix.BIN eeprom.bin  # boot the firmware, dump the display SPI transfers
+```
+
+State: the CPU core is validated (millions of firmware instructions, no opcode faults) and the
+firmware **boots** — reset vector `0xD45A`, through init (with the deliberate COP-watchdog resets
+it uses; RAM is battery-backed), into its main loop where it **kicks the COP and drives the LCD
+over SPI**. The emulator captures every SPI/SCI transfer (`mem.spi_xfers`), so the display output
+is observable. Memory model: RAM, registers (bank `0x1058`, SPI/SCI captured, ADC stubbed), the
+internal EEPROM, and the banked + fixed flash from the 256 KB image. The firmware image
+(`motofix.BIN`) is Motorola's and is **not** in the repo — supply your own dump (see `ramdump.py`).
+Next: find the displayed-number variable and decode the digit encoding, then inject a scheduler
+task (unused OC ISR RAM pointers `$A4`/`$A6`) for remote control. `test_tools.py::EmulatorTest`
+checks the core, no firmware needed.
+
 ## `mock_radio.py` and `test_tools.py` — no hardware needed
 
 `mock_radio.py` is a fake GM600 behind a fake applet socket: it echoes, ACKs, and answers `23`
