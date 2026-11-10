@@ -49,8 +49,8 @@ The radio has a 256 KB flash (U0102) behind a 64 KB CPU. It is paged into the
 
 > **The flash is an Atmel AT29C020, not a 28F020.** Seen on this unit: a TSOP-32 marked
 > `AT29C020 12TI`, on board `8402626Y08` (© 1997). The parts list / other board revisions may show a
-> 28F020. **Reading is identical** — both are 256 KB over a standard JEDEC parallel interface, so the
-> BUS+ bank-walk and a programmer dump work unchanged. **Writing differs:** the 28F020 is Intel-style
+> 28F020. **Reading is identical** — both are 256 KB over a standard JEDEC parallel interface, so a
+> programmer dump works unchanged. **Writing differs:** the 28F020 is Intel-style
 > and needs 12 V on VPP; the AT29C020 is **5 V-only**, writes in 256-byte pages behind a
 > software-data-protection unlock — **no VPP to supply**, so flashing is a simpler problem on this unit
 > (still untried). A TSOP-32 adapter on a T48/TL866 reads it; in-circuit reading is awkward (it fights
@@ -58,9 +58,12 @@ The radio has a 256 KB flash (U0102) behind a 64 KB CPU. It is paged into the
 
 - **Bank select register = `0x1058`.** Writing it changes which 16 KB flash page appears at
   `4000`.
-- Banks used by the firmware are **`00 04 08 0C 10 14 1C 20 24 28 2C`** — eleven 16 KB pages.
-  Note `0x18` is skipped. `0x1058 = 0` also selects the register/RAM page for some accesses; the
-  reset init writes it last.
+- The flash is **16 × 16 KB pages**. Pages 0–11 are populated program banks (bank-register value =
+  `page << 2`, i.e. `00 04 08 0C 10 14 18 1C 20 24 28 2C`), pages **12–13 are erased** (free space),
+  and pages **14–15 are the fixed `8000`–`FFFF` region**. (An earlier single-bank view wrongly
+  listed `0x18`/page 6 as skipped — the full off-board dump shows it is populated; see the full-chip
+  section below.) `0x1058 = 0` also selects the register/RAM page for some accesses; the reset init
+  writes it last.
 - Far calls into a banked routine go through a **trampoline at `0x87B5`**: it saves the current
   `0x1058`, sets bank `2`, reads a 3-byte `[bank, addr_hi, addr_lo]` descriptor, switches to the
   target bank, `jsr`s, then restores the old bank. A table of 504 fixed call stubs starts at
@@ -186,16 +189,19 @@ region exists in the radio. The decode is in [CODEPLUG.md](CODEPLUG.md).
 
 The `11` dump is the CPU's 64 KB *logical* view, so it contains **only the flash bank that was
 mapped at `4000`–`7FFF` when it was read** (bank `04`), plus the fixed `8000`+ region, RAM and the
-EEPROM. The other ten banks, including the query-reply formatter and most of the application
+EEPROM. The other banked pages, including the query-reply formatter and most of the application
 code, are not here.
 
 To get the rest you either:
 
-- **Read the flash chip** (U0102, the AT29C020) with a programmer — the complete, reliable route; or
-- **Dump bank by bank over BUS+**: set `0x1058` to each of `00 04 08 0C 10 14 1C 20 24 28 2C` (0x18 is unused) and read `4000`–`7FFF`.
-  Changing `0x1058` needs a register write (`17` to `0x1058`: untested and risky, because the
-  firmware itself runs from banked code), the `26` backdoor with a known-good stub, or bootstrap
-  mode (below).
+- **Read the flash chip** (U0102, the AT29C020) with a programmer — the complete, reliable route
+  (this is what the full-chip dump below used); or
+- **Run a RAM stub launched via `0x26`** that selects each bank, copies `4000`–`7FFF` out over the
+  SCI, and (since you can just power-cycle afterwards) need not restore anything or return. A naïve
+  bank-walk over BUS+ — writing `0x1058` with a `17` and reading `4000`–`7FFF` — **does not work:**
+  the `11`/`17` handlers themselves run from the banked window (bank `04`), so changing the bank
+  pulls the running handler out from under the CPU and it crashes. See
+  [DUMP_SEQUENCE.md](DUMP_SEQUENCE.md).
 
 ## Full-chip dump — all 16 banks (2026-11-06)
 
@@ -241,7 +247,8 @@ The **>4-channel limit** (below) can now be settled against the full image — i
 
 ## Getting the full flash — two more routes, and the channel-limit question
 
-Beyond the two routes above (read U0102 (the AT29C020) with a programmer; bank-walk over BUS+ via `0x1058`):
+Beyond reading U0102 (the AT29C020) with a programmer (the route the full-chip dump used) and the
+`0x26` RAM-stub route described above, two more:
 
 - **68HC11 bootstrap mode.** The K-series has no BDM (BDM arrived with the HC12/HCS08 generation), so
   bootstrap is the native debug door: strap the mode pins at reset (`MODA_LIR`/`MODB_VSTBY`, both

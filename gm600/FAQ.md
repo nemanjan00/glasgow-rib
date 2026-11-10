@@ -69,7 +69,8 @@ trunked `322` regardless). Keep your pre-write codeplug dump; see the warning in
 ## DPS service / alignment menus ask for a password.
 
 The Service → Transmitter/Receiver Alignment menus in the Dealer Programmer are password-gated
-(checked client-side in `WDPS_DP.EXE`, `password.cpp`). If the EXE was never serialized with a
-password (WSERIAL `-P` not run) the stored value is empty, so an **empty password (just OK)** gets
-in. These menus let you key/receive on a test frequency, which is another way to put the radio on a
-known frequency without the front panel.
+(checked client-side in `WDPS_DP.EXE`, `password.cpp`). This is a per-EXE detail, not a universal
+one: **on our copy of `WDPS_DP.EXE`** the stored password reads as unset (WSERIAL `-P` was never
+run), so an **empty password (just OK)** gets in — a copy serialized with a password will reject
+that. These menus let you key/receive on a test frequency, which is another way to put the radio on
+a known frequency without the front panel.
