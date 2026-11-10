@@ -47,6 +47,7 @@ the applet, under QEMU.
 | [DUMP_SEQUENCE.md](DUMP_SEQUENCE.md) | How to dump, the probe methods used to find the codeplug, and DPS binary references for reversing |
 | [FIRMWARE.md](FIRMWARE.md) | 68HC11 memory map, flash banking, SBEP dispatch table, routes to a full flash dump |
 | [HARDWARE.md](HARDWARE.md) | Accessory connector reference and repeater tap points (COR, PL, flat audio) |
+| [FAQ.md](FAQ.md) | Operating the radio from the front panel: entering conventional mode, channel select, squelch/PL, what the display shows |
 | [tools/](tools/README.md) | `dump_codeplug.py`, `sbep_client.py`, `sbep_write.py` on a shared `sbep.py`; `mock_radio.py` for testing without a radio; the QEMU + DPS capture rig |
 | [assets/](assets/) | Diagrams; `make_diagrams.py` regenerates the codeplug map and session diagrams |
 
