@@ -17,6 +17,9 @@ class Mem:
         self.flash = bytearray(flash) if flash else bytearray(0x40000)
         self.eeprom = bytearray(eeprom or b"\xff" * 0x280)
         self.reg = bytearray(0x80)
+        self.reg[0x3F] = 0xD9              # CONFIG (non-volatile on HC11) = the GM600's value;
+        #                                   without it the firmware endlessly rewrites CONFIG and
+        #                                   watchdog-resets to make it take effect (found via the debugger)
         self.spi_out = bytearray()
         self.sci_out = bytearray()
         self.watch = None
@@ -27,6 +30,7 @@ class Mem:
         self.adc = [0xFF, 0xFF, 0xFF, 0xFF]  # ADR1-4 (keypad idle = 5V = 0xFF, no key)
         self.spi_xfers = []                  # list of (cs_value, bytes) grouped by chip-select
         self._cur_xfer = None
+        self.force_oc1 = False               # debug: force OC1 interrupt enabled (tick), see docs
 
     def tick(self, n=4):
         self.tcnt = (self.tcnt + n) & 0xFFFF
@@ -97,6 +101,7 @@ class CPU:
         self.PC = 0
         self.CC = S | X_ | I
         self.ireg = 'X'           # which index register the current (possibly prefixed) op uses
+        self.insn_pc = 0          # start PC of the instruction currently executing (for the debugger)
 
     @property
     def D(self): return (self.A << 8) | self.B
@@ -168,8 +173,9 @@ class CPU:
             r[0x25] |= 0x80                          # TOF (timer overflow) in TFLG2
         if self.gf(I):
             return
+        tmsk1 = r[0x22] | (0x80 if m.force_oc1 else 0)   # debug: force OC1 tick enabled
         for bit, vec in ((0x80, 0xFFE8), (0x40, 0xFFE6), (0x20, 0xFFE4), (0x10, 0xFFE2), (0x08, 0xFFE0)):
-            if r[0x22] & r[0x23] & bit:              # TMSK1 enabled & TFLG1 flagged
+            if tmsk1 & r[0x23] & bit:                # TMSK1 enabled & TFLG1 flagged
                 self.irq(vec); return
         if r[0x24] & r[0x25] & 0x80:                 # timer-overflow interrupt
             self.irq(0xFFDE)
@@ -191,6 +197,7 @@ class CPU:
                         self.reset()
                         continue
             if trace: trace(self)
+            self.insn_pc = self.PC
             self.ireg = 'X'
             op = self.fb()
             if op == 0x18:                      # Y prefix
@@ -545,6 +552,93 @@ def _swi(c): raise NotImplementedError("SWI @0x%04X" % c.PC)
 def _wai(c): raise NotImplementedError("WAI @0x%04X (needs interrupts)" % c.PC)
 @op(0x00)
 def _test(c): raise NotImplementedError("TEST/illegal 0x00 @0x%04X" % c.PC)
+
+
+class _Stop(Exception):
+    pass
+
+
+class Debugger:
+    """A debugger interface for the emulator: breakpoints, memory watchpoints, stepping, and
+    the handy `find_writer` (what instruction writes an address — e.g. the RTOS tick counter).
+
+        dbg = Debugger(cpu)
+        dbg.find_writer(0x000C)          # -> [(pc, addr, value), ...] that wrote $0C
+        dbg.bp(0x8540); dbg.cont()       # run to a breakpoint
+        print(dbg.state())               # registers + flags + disassembly at PC
+    """
+
+    def __init__(self, cpu):
+        self.cpu = cpu
+        self.m = cpu.m
+        self.breakpoints = set()
+        self.watch_w = {}                 # addr -> list of (insn_pc, addr, value)
+        self.stopped = None
+        self.m.watch = self._on_write
+
+    def _on_write(self, addr, v):
+        if addr in self.watch_w:
+            self.watch_w[addr].append((self.cpu.insn_pc, addr, v))
+            self.stopped = ('watch', addr)
+
+    def bp(self, addr):
+        self.breakpoints.add(addr & 0xFFFF)
+
+    def watchpoint(self, addr):
+        self.watch_w.setdefault(addr & 0xFFFF, [])
+
+    def cont(self, limit=5_000_000, cop_timeout=150000):
+        """Run until a breakpoint or watchpoint fires (or `limit`). Returns the stop reason."""
+        self.stopped = None
+        bps = self.breakpoints
+
+        def tr(c):
+            if self.stopped:
+                raise _Stop()
+            if c.PC in bps:
+                self.stopped = ('bp', c.PC)
+                raise _Stop()
+        try:
+            self.cpu.run(max_insns=limit, cop_timeout=cop_timeout, trace=tr)
+        except _Stop:
+            pass
+        return self.stopped
+
+    def find_writer(self, addr, limit=5_000_000, cop_timeout=150000, hits=1):
+        """Run until `addr` is written `hits` times; return the (insn_pc, addr, value) list."""
+        self.watch_w[addr & 0xFFFF] = []
+        self.stopped = None
+
+        def tr(c):
+            if len(self.watch_w[addr & 0xFFFF]) >= hits:
+                raise _Stop()
+        try:
+            self.cpu.run(max_insns=limit, cop_timeout=cop_timeout, trace=tr)
+        except _Stop:
+            pass
+        rec = self.watch_w.pop(addr & 0xFFFF)
+        return rec
+
+    def step(self, n=1):
+        for _ in range(n):
+            self.cpu.run(max_insns=1, cop_timeout=0)
+
+    def state(self):
+        c = self.cpu
+        flags = "".join(k for k, b in (("S", S), ("X", X_), ("H", H), ("I", I),
+                                       ("N", N), ("Z", Z), ("V", V), ("C", C)) if c.CC & b)
+        s = ("PC=%04X A=%02X B=%02X X=%04X Y=%04X SP=%04X CC=%s bank=%02X" %
+             (c.PC, c.A, c.B, c.X, c.Y, c.SP, flags or "-", self.m.reg[0x58]))
+        try:
+            from capstone import Cs, CS_ARCH_M680X, CS_MODE_M680X_6811
+            md = Cs(CS_ARCH_M680X, CS_MODE_M680X_6811)
+            code = bytes(self.m.rb(c.PC + i) for i in range(16))
+            dis = next(md.disasm(code, c.PC), None)
+            if dis:
+                s += "\n  %04X: %s %s" % (dis.address, dis.mnemonic, dis.op_str)
+        except ImportError:
+            pass
+        return s
 
 
 def run_selftest():
