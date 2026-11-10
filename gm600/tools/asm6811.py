@@ -29,7 +29,11 @@ INSTR = {
     "adda": {"IMM8": 0x8B}, "addb": {"IMM8": 0xCB},
     "cmpa": {"IMM8": 0x81}, "cmpb": {"IMM8": 0xC1},
     "ldx": {"IMM16": 0xCE, "EXT": 0xFE}, "stx": {"EXT": 0xFF}, "cpx": {"IMM16": 0x8C},
-    "bra": {"REL": 0x20}, "beq": {"REL": 0x27}, "bne": {"REL": 0x26},
+    "lds": {"IMM16": 0x8E, "EXT": 0xBE},
+    "jmp": {"EXT": 0x7E, "IDX": 0x6E}, "jsr": {"EXT": 0xBD, "IDX": 0xAD}, "rts": {"INH": 0x39},
+    "psha": {"INH": 0x36}, "pula": {"INH": 0x32}, "pshb": {"INH": 0x37}, "pulb": {"INH": 0x33},
+    "pshx": {"INH": 0x3C}, "pulx": {"INH": 0x38}, "des": {"INH": 0x34}, "ins": {"INH": 0x31},
+    "bra": {"REL": 0x20}, "bsr": {"REL": 0x8D}, "beq": {"REL": 0x27}, "bne": {"REL": 0x26},
     "bcs": {"REL": 0x25}, "bcc": {"REL": 0x24}, "bmi": {"REL": 0x2B}, "bpl": {"REL": 0x2A},
 }
 SIZE = {"INH": 1, "IMM8": 2, "IDX": 2, "REL": 2, "EXT": 3, "IMM16": 3}
