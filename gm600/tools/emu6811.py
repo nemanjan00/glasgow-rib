@@ -21,6 +21,7 @@ class Mem:
         self.sci_out = bytearray()
         self.watch = None
         self.tcnt = 0                      # free-running timer (TCNT @ 0x100E)
+        self.tcnt_prev = 0
         self.cop_arm = False               # COP watchdog kick sequence (0x55 then 0xAA -> 0x103A)
         self.cop_kicks = 0
         self.adc = [0xFF, 0xFF, 0xFF, 0xFF]  # ADR1-4 (keypad idle = 5V = 0xFF, no key)
@@ -74,6 +75,8 @@ class Mem:
             elif o == 0x30:                    # ADCTL write starts a conversion -> instantly complete
                 self.reg[0x30] = v | 0x80      # set CCF (conversions complete flag)
                 self.reg[0x31:0x35] = bytes(self.adc)   # ADR1-4 results
+            elif o in (0x23, 0x25):            # TFLG1/TFLG2: writing a 1 CLEARS that flag
+                self.reg[o] = (self.reg[o] & ~v) & 0xFF
             return
         if a < 0x4000:
             self.ram[a] = v
@@ -151,6 +154,26 @@ class CPU:
         self.sf(I, True)
         self.PC = self.m.rw(vector)
 
+    def _timer_irq(self):
+        """Set OC compare flags on TCNT crossings and service an enabled timer interrupt.
+
+        This is what makes the firmware's RTOS tick: the scheduler runs on an output-compare ISR."""
+        m = self.m; r = m.reg
+        last, now = m.tcnt_prev, m.tcnt; m.tcnt_prev = now
+        for bit, toco in ((0x80, 0x16), (0x40, 0x18), (0x20, 0x1A), (0x10, 0x1C), (0x08, 0x1E)):
+            toc = (r[toco] << 8) | r[toco + 1]
+            if (last < toc <= now) if last <= now else (toc > last or toc <= now):
+                r[0x23] |= bit                      # set OCxF in TFLG1
+        if now < last:
+            r[0x25] |= 0x80                          # TOF (timer overflow) in TFLG2
+        if self.gf(I):
+            return
+        for bit, vec in ((0x80, 0xFFE8), (0x40, 0xFFE6), (0x20, 0xFFE4), (0x10, 0xFFE2), (0x08, 0xFFE0)):
+            if r[0x22] & r[0x23] & bit:              # TMSK1 enabled & TFLG1 flagged
+                self.irq(vec); return
+        if r[0x24] & r[0x25] & 0x80:                 # timer-overflow interrupt
+            self.irq(0xFFDE)
+
     def run(self, max_insns=5_000_000, stop_pc=None, trace=None, cop_timeout=0, max_resets=30):
         resets = 0; since_kick = 0; last_kicks = self.m.cop_kicks
         for _ in range(max_insns):
@@ -193,6 +216,7 @@ class CPU:
                 raise NotImplementedError("0x%02X @0x%04X (bank 0x%02X)" % (op, (self.PC - 1) & 0xFFFF, self.m.reg[0x58]))
             h(self)
             self.m.tick()
+            self._timer_irq()
         return 'max'
 
     def _cpd(self, v):
