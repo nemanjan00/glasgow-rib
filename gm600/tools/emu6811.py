@@ -159,26 +159,38 @@ class CPU:
         self.sf(I, True)
         self.PC = self.m.rw(vector)
 
-    def _timer_irq(self):
-        """Set OC compare flags on TCNT crossings and service an enabled timer interrupt.
-
-        This is what makes the firmware's RTOS tick: the scheduler runs on an output-compare ISR."""
+    def _update_timer_flags(self):
+        """Set OC compare flags on TCNT crossings (and TOF on overflow)."""
         m = self.m; r = m.reg
         last, now = m.tcnt_prev, m.tcnt; m.tcnt_prev = now
         for bit, toco in ((0x80, 0x16), (0x40, 0x18), (0x20, 0x1A), (0x10, 0x1C), (0x08, 0x1E)):
             toc = (r[toco] << 8) | r[toco + 1]
             if (last < toc <= now) if last <= now else (toc > last or toc <= now):
-                r[0x23] |= bit                      # set OCxF in TFLG1
+                r[0x23] |= bit
         if now < last:
-            r[0x25] |= 0x80                          # TOF (timer overflow) in TFLG2
+            r[0x25] |= 0x80
+
+    def _pending_vector(self):
+        """The vector of the highest-priority enabled+flagged timer interrupt, or None."""
+        r = self.m.reg
+        tmsk1 = r[0x22] | (0x80 if self.m.force_oc1 else 0)
+        for bit, vec in ((0x80, 0xFFE8), (0x40, 0xFFE6), (0x20, 0xFFE4), (0x10, 0xFFE2), (0x08, 0xFFE0)):
+            if tmsk1 & r[0x23] & bit:
+                return vec
+        if r[0x24] & r[0x25] & 0x80:
+            return 0xFFDE
+        return None
+
+    def _timer_irq(self):
+        """Per-instruction: update timer flags and service a timer interrupt if one is pending.
+
+        This is what makes the firmware's RTOS tick: the scheduler runs on an output-compare ISR."""
+        self._update_timer_flags()
         if self.gf(I):
             return
-        tmsk1 = r[0x22] | (0x80 if m.force_oc1 else 0)   # debug: force OC1 tick enabled
-        for bit, vec in ((0x80, 0xFFE8), (0x40, 0xFFE6), (0x20, 0xFFE4), (0x10, 0xFFE2), (0x08, 0xFFE0)):
-            if tmsk1 & r[0x23] & bit:                # TMSK1 enabled & TFLG1 flagged
-                self.irq(vec); return
-        if r[0x24] & r[0x25] & 0x80:                 # timer-overflow interrupt
-            self.irq(0xFFDE)
+        v = self._pending_vector()
+        if v is not None:
+            self.irq(v)
 
     def run(self, max_insns=5_000_000, stop_pc=None, trace=None, cop_timeout=0, max_resets=30):
         resets = 0; since_kick = 0; last_kicks = self.m.cop_kicks
@@ -210,6 +222,11 @@ class CPU:
                 if op == 0xB3: self._cpd(self.m.rw(self.ea('e'))); continue
                 if op == 0xEE: self.Y = self.m.rw((self.X + self.fb()) & 0xFFFF); self.nz16(self.Y); continue
                 if op == 0xEF: self.m.ww((self.X + self.fb()) & 0xFFFF, self.Y); self.nz16(self.Y); continue
+                if op == 0xAC:                               # CPY idx,X
+                    v = self.m.rw((self.X + self.fb()) & 0xFFFF)
+                    self.sf(C, self.Y < v); self.nz16((self.Y - v) & 0xFFFF)
+                    self.sf(V, ((self.Y ^ v) & (self.Y ^ ((self.Y - v) & 0xFFFF)) & 0x8000) != 0)
+                    continue
                 raise NotImplementedError("0x1A%02X @0x%04X" % (op, self.PC))
             elif op == 0xCD:                    # page 4 (index cross)
                 op = self.fb()
@@ -461,9 +478,9 @@ def _daa(c):
     r = (a + corr) & 0xFF; c.sf(C, cf or (a + corr) > 0xFF); c.A = r; c.nz8(r)
 @op(0x3D)
 def _mul(c): r = c.A * c.B; c.D = r & 0xFFFF; c.sf(C, bool(r & 0x80))
-@op(0x05)
-def _lsrd(c): c.sf(C, bool(c.D & 1)); c.D = (c.D >> 1) & 0xFFFF; c.nz16(c.D); c.sf(V, c.gf(N) ^ c.gf(C))
 @op(0x04)
+def _lsrd(c): c.sf(C, bool(c.D & 1)); c.D = (c.D >> 1) & 0xFFFF; c.nz16(c.D); c.sf(V, c.gf(N) ^ c.gf(C))
+@op(0x05)
 def _lsld(c): c.sf(C, bool(c.D & 0x8000)); c.D = (c.D << 1) & 0xFFFF; c.nz16(c.D); c.sf(V, c.gf(N) ^ c.gf(C))
 @op(0x02)
 def _idiv(c):
@@ -549,7 +566,16 @@ def _rti(c):
 @op(0x3F)
 def _swi(c): raise NotImplementedError("SWI @0x%04X" % c.PC)
 @op(0x3E)
-def _wai(c): raise NotImplementedError("WAI @0x%04X (needs interrupts)" % c.PC)
+def _wai(c):
+    # WAI stacks the registers once, then halts until an unmasked interrupt vectors in.
+    c.pushw(c.PC); c.pushw(c.Y); c.pushw(c.X); c.push(c.A); c.push(c.B); c.push(c.CC)
+    for _ in range(2_000_000):
+        c.m.tick(); c._update_timer_flags()
+        if not c.gf(I):
+            v = c._pending_vector()
+            if v is not None:
+                c.sf(I, True); c.PC = c.m.rw(v); return
+    raise RuntimeError("WAI with no interrupt (deadlock) @0x%04X" % c.PC)
 @op(0x00)
 def _test(c): raise NotImplementedError("TEST/illegal 0x00 @0x%04X" % c.PC)
 
