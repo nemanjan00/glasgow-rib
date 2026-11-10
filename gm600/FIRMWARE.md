@@ -27,6 +27,14 @@ MSKD 68HC11K4"), while the schematic symbol is labelled **68HC11K1_QFP**. Either
 K-series memory-management unit (bank register at `0x1058`, MMU control registers around offset
 `0x55`–`0x5F`) and 640 bytes of internal EEPROM. The 64 KB logical map seen through `11`:
 
+> **No internal mask ROM is active — the firmware is 100 % external flash.** Even if the die is the
+> masked K4, its on-chip ROM is disabled here: `0x8000`–`0xFFFF` read back **byte-for-byte identical
+> to the off-board flash chip** (`motofix.BIN` pages 14/15), and the reset vector at `0xFFFE` points
+> into that external code — if on-chip ROM were mapped there, the CPU's view would differ. `CONFIG`
+> (`0x103F`) reads `0xD9` (EEON set, internal EEPROM enabled). So the radio runs as a K1-equivalent:
+> internal RAM + EEPROM, all code external. The only on-chip non-volatile store is the 640-byte
+> EEPROM codeplug (`dump_codeplug.py`, or `ramdump.py --with-eeprom`).
+
 | Range | Contents |
 |---|---|
 | `0000`–`02FF` | Internal RAM (768 bytes) |

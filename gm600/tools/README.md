@@ -83,8 +83,14 @@ it with the `0x26` backdoor (`sei` + `jmp`), and the stub streams all 256 KB out
 banked page, then the fixed `0x8000`–`0xFFFF`. It does **not** return; power-cycle when done.
 
 ```
-python3 ramdump.py flash.bin        # ~4.5 min at 9600; then power-cycle the radio
+python3 ramdump.py flash.bin               # ~4.5 min at 9600; then power-cycle the radio
+python3 ramdump.py radio.bin --with-eeprom  # append the 640 B internal EEPROM = complete NV image
 ```
+
+`ramdump.py` dumps the **external** flash only. The CPU-internal EEPROM (the 640 B codeplug at
+`0x0D80`) is separate — `dump_codeplug.py`, or `--with-eeprom` to tack it onto the flash image
+(bytes `0x40000`–`0x4027F`). There is no internal mask ROM active (FIRMWARE.md), so those two
+stores are the radio's whole non-volatile state.
 
 The stub is `ramdump.S` — readable 68HC11 assembly with the register map as a small HAL (equates)
 — assembled by `asm6811.py`, a tiny bundled 6811 assembler (`python3 asm6811.py ramdump.S` prints
