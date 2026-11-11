@@ -239,7 +239,7 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
   byte from RAM shadow **`0x34AE`** to the front-panel **LED** shift register (so
   `ldab #10; jsr $8F1F` = "update LEDs"); **entry 8** sends the 21-byte **LCD** buffer from `0x37AC`.
   - **LED shift-register bit map** (byte at `0x34AE`), verified on the real radio by driving each bit
-    from a RAM stub (`tools/led_cmd.S` + `tools/led_demo.py`) and watching the panel over a webcam
+    from a RAM stub (`tools/led_cmd.S` + `tools/lab/led_demo.py`) and watching the panel over a webcam
     (per-bit photos: [images/led_bitmap.jpg](images/led_bitmap.jpg); all LEDs on:
     [images/front_panel_all_leds.jpg](images/front_panel_all_leds.jpg)):
 
@@ -267,45 +267,12 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
     The firmware's first real display push is preceded by the command **`00 00 3f`** at `CS=0x41`
     (sets the controller's address pointer); then it streams 21 data bytes at `CS=0x01` and, in steady
     state, repeats entry 8 (the controller auto-wraps after 21 bytes).
-  - ***Active* LCD driving — CONFIRMED (with the FULL init).** The earlier failures were because the
-    stub only sent the `00 00 3f` address command + data; the controller actually needs the full init
-    **config** first. Replaying the exact captured phase sequence byte-for-byte drives the control head
-    (the display visibly changed `322` → `888`, and a `byte0=0xFF` data write blanked it). The init
-    phases (captured at steady boot, `tools/lcd_replay.py`): `CS=0x20` ×2 (26 B config), `CS=0x01`
-    (21 B + 9 B), `CS=0x61` (10 B cmd), `CS=0x60` (`de`,`df`), `CS=0x01` (9 B), then per update
-    `CS=0x41` (`00 00 3f` addr cmd) + `CS=0x01` (21 B data). Tool: `tools/lcd_replay.S` (a generic
-    phase-replay interpreter: host sends `[cs][spcr][nlen][data…]`) + `tools/lcd_replay.py`.
-  - **Re-checked rigorously (don't trust the earlier "888"):** that `888` was the **boot self-test**
-    (all-segments), caught mid-animation — not driven data. A controlled test (full boot, stub launched,
-    then idle/blank/full captures) shows:
-    - **The stub HAS sole control** — with it running and no data sent, the display is frozen (`322`,
-      backlight off); the firmware is halted. (So no SPI contention — my earlier contention guess was
-      wrong.)
-    - **My init/config DOES reach the control head** — it turns the backlight on.
-    - **But the 21-byte digit-data write (`CS=0x01` after `00 00 3f`) does NOT overwrite the held
-      digits** — `all-00` and `all-FF` both leave `322`. Extra settling (post-boot, post-provision)
-      did not change this, so it's an **addressing/data-format** issue, not timing.
-  - **Still OPEN: writing the digit RAM.** The held digits aren't refreshed (static), yet my `CS=0x01`
-    data doesn't replace them — likely `00 00 3f` isn't the digit-RAM address, or the 21-byte buffer is
-    structured (not raw consecutive segments; `tools/gm600_remote.py` *decodes* it, so it has fields).
-    This is slow to crack over a webcam; **a logic analyzer on the control-head SPI** (SCK/MOSI + the
-    `0x107E` CS nibble) would show the firmware's exact address/command/data to replicate. Passive
-    decode via `0x37AC` remains the reliable route to the segment map.
-
-  - ***Active* LCD driving SOLVED (pure data, no flash / no 12 V).** The firmware renders the 21-byte
-    `0x37AC` shadow then pushes it to the LCD each cycle. **Tight-loop SBEP `0x17` writes to `0x37AC`
-    race that render**, so the firmware's own (fully-set-up) push displays *your* bytes. Verified on the
-    real radio (webcam): `all-00` blanks the display, `all-FF` shows `888` — i.e. full control from
-    empty to all-segments, overriding the firmware's "322". No checksum on `0x37AC`. Tool:
-    `tools/lcd_drive.py` (a writer thread races `0x37AC`; images/lcd_driven_blank_888_dig.jpg).
-    The display is multiplexed (digit segments in bytes 12-20 by COM line); showing an arbitrary
-    *specific* number additionally needs the multiplex bit-map decoded (the race blends a sparse buffer
-    with the firmware's concurrent 322 render — extremes win cleanly, sparse numbers need the co-render
-    suppressed via the self-healing OC-ISR hook, 0xA2/0xA4/0xA6).
-  - **The LCD is read *passively* instead** — `0x37AC` (21 bytes) is a live mirror decoded by
-    `tools/gm600_remote.py` (channel "1" = `0530 00c1 008f d085 e5af ea00 a661 0000 6008 020010`,
-    "322" = `8530 18c1 008f d080 e5af fe00 a261 8000 6018 020010`). Segment decoding is best done this
-    way: capture `0x37AC` for known displays and correlate.
+  - **Driving the LCD — see the consolidated "## LCD" section below for the settled facts.** Short
+    version: change the displayed idle number via the **Own Unit No.** codeplug field (`tools/setunit.py`
+    / DPS, cam-verified); direct stub driving of arbitrary `0x37AC` content is **not working yet** and
+    the SBEP-`0x17` "race" on `0x37AC` is **unreliable** (RAM writes don't ACK). The 21-byte `0x37AC`
+    buffer is read *passively* by `tools/gm600_remote.py` (channel "1" = `0530 00c1 008f d085 e5af ea00
+    a661 0000 6008 020010`; "322" = `8530 18c1 008f d080 e5af fe00 a261 8000 6018 020010`).
 - **In-circuit patching over BUS+, self-healing.** The OC3/4/5 timer ISRs (`0x92A1`/`0x92AA`/
   `0x9298`) clear their flag and `jmp` through **RAM pointers `$A4`/`$A6`/`$A2`**. Write a stub's
   address into one with a `0x17` RAM write → periodic execution with no flash change (reset re-inits
@@ -381,107 +348,71 @@ The host tool is [`tools/gm600_keypad_patch.py`](tools/gm600_keypad_patch.py) (`
 AT29C020 in-system **sector** write (256-byte sectors at `0x1000` and `0x1E00`) — the one remaining
 hardware step; the module emits the exact byte diff for a flash writer.
 
-## LCD content: what is and is NOT data-drivable (bench, 5 V applet + webcam, no logic analyzer)
+## LCD — settled facts
 
-Full investigation of "can we make the display show a chosen value by writing data?" — using the
-cycle-accurate emulator as an oracle (`tools/emu6811.py`, renders 0x37AC identically to the glass)
-and the real radio + webcam as the numeral ground truth. The radio serves SBEP on the applet socket
-(`127.0.0.1:2324`); `0x17` writes the internal EEPROM codeplug (0x0D80–0x0FFF) **and** the RO
-factory region, and `0x10` resets/reboots the CPU (re-render). RW-block checksum at 0x0E12 =
-`(Σ(0x0D94..0x0E11) − 0x55) & 0xFF` (verified: stored 0xEE == computed).
+The control head is a multiplexed segment LCD on the CPU's SPI bus (not BUS+). The firmware keeps a
+21-byte shadow at **`0x37AC`** and pushes it to the controller each refresh. Everything below is
+verified; the chronological dead-ends are in **Lessons** at the end.
 
-### DRIVABLE — identity/annunciator field 0x0E07–0x0E0D (VERIFIED on cam)
-Writing this 7-byte field + `0x10` reset changes the LCD annunciator segments and the backlight,
-persistently, rendered by the firmware. Bit-level map (emulator-derived, confirmed on hardware):
-- 0x0E07 → buf idx12, bits 4–7 (idx12 low nibble fixed 0x2)
-- 0x0E0B → buf idx16 = `src & 0x7B`
-- 0x0E0C → buf idx17 = `0x10 | (src & 0x0C)`
-- 0x0E0D → buf idx18 = `0x02 | (src & 0x1C)`
-- 0x0E08 → buf idx13 (lookup-style, not a clean mask)
-- 0x0E09/0x0E0A → no display effect
-all-FF or all-00 here turns the **backlight on** and lights/clears an annunciator icon; the main
-3-digit number is UNAFFECTED. So this field = status icons + backlight, NOT the main number. (Earlier
-`DIGIT_BYTES=(3,5,6,12,13,14,16,17,18,20)` in gm600_remote was an icon-heavy guess; the real main
-digits are buffer idx **[0,1,2,4,6,8,14]**.)
+### SPI push protocol (what a refresh actually sends)
+Dispatcher `0x8F1F` jumps through a word table at `0x8F44`; **entry 8** = push the 21-byte LCD buffer,
+**entry 10** = push the 1-byte LED shadow `0x34AE`. SPI bytes go out via primitive **`0x9102`**(X=buf,
+B=count): per byte it waits SPSR(`0x1029`) SPIF (`tst $1029; bpl`), writes SPDR(`0x102A`), and reads
+SPDR after the last to clear it (no COP kick inside). CS lines live in port **`0x107E`** and are driven
+with **BSET/BCLR** (read-modify-write, to preserve the other device selects) — *not* full-byte stores.
+A refresh (emulator-traced) is:
+- **Command phase:** SPCR(`0x1028`)=`0x57`, `BSET 0x107E #0x41`, send `02 50 3F` via `0x9102`, `BCLR 0x107E #0x61`.
+- **Data phase:** SPCR=`0x50`, `BSET 0x107E #0x01`, send the 21 bytes of `0x37AC`, then clear.
+The firmware brackets updates with an SPI-bus acquire/release (`0x5013`/`0x5032` → device-manager
+`0x9FFB`/`0xA01A`, device struct `D=0x0245`); boot inits the controller with entries 5,4,3 once.
 
-### NOT cleanly drivable — the main 3-digit "322" (trunking idle)
-- **NOT** `0x0F0B` (documented MPT1327_OWN_IDENT = 0x0142 = 322): changing it, checksum-fixed,
-  fresh-boot, changes **zero** of the 21 buffer bytes. The displayed 322 is not this field.
-- Provenance sweep (every codeplug byte flipped, checksum-fixed, fresh-boot, full-buffer diff): the
-  main-digit bytes [0,1,2,4,6,8,14] are moved only by `0x0D92/0x0DDA/0x0DF7/0x0EAF/0x0EB1`
-  (freq-plan) and `0x0DD5/0x0DD6`. All of these drive the display to one of two states, never a clean
-  alternate number: a **fallback** `00 31 04 80 d1 e4 00` (also what a wiped RW region yields) or
-  **blank** `00…00` (0x0DD5/6). Clean small changes to the control-channel frequency bytes leave the
-  display on 322. So 322 is firmware-determined (trunking idle, no live MPT1327 network on the bench)
-  and derived from a valid multi-byte structure, not a single pokeable field.
-- Renderer: `0x61B1/0x61B7/0x617B` (bank 0) draw the main digits **procedurally via bset/bclr**
-  (opcodes 0x1C/0x1D) — there is no digit→segment font table to read, and no single RAM "number"
-  byte (live-patch sweeps of the renderer's scratch struct 0x2FB4–0x2FC4 and input region
-  0x374x–0x377x changed nothing; the struct is a transient comms-decode buffer).
+### LED shadow `0x34AE` bit map (verified on the radio via `tools/led_cmd.S` + webcam)
+| bit | mask | element | | bit | mask | element |
+|--|--|--|--|--|--|--|
+| 0 | `0x01` | amber status LED | | 2 | `0x04` | green status LED |
+| 1 | `0x02` | red status LED | | 7 | `0x80` | LCD/keypad EL backlight |
 
-### Injection paths and why they don't give an arbitrary number
-- **RAM-stub LCD takeover** (`lcd_cmd.S`/`lcd_replay.S`, upload via 0x17 + launch via 0x26): the stub
-  runs and pushes 0x37AC via the SPI dispatcher (entry 8, `jsr 0x8F1F`), but its controller
-  addressing differs from the firmware's steady-state refresh, so a pushed buffer does not map to the
-  expected glyph (322-buffer shows as 888; arbitrary buffers stay latched at 322/888). Driving a
-  chosen numeral would need the per-COM multiplex font, which cannot be learned on the bench because
-  the firmware only ever renders one number (322) in trunking and conventional-mode numbers need the
-  keypad.
-- **Race** (tight-loop `0x17` to RAM 0x37AC while firmware refreshes): RAM writes to 0x37AC do **not**
-  return a write-ACK (only EEPROM-range 0x17 writes ACK with 0x84), so the race is unreliable here.
-- **Recovery:** `0x10` reset reliably reboots the radio to normal trunking (322) — including out of a
-  hung 0x26 stub, as long as the SBEP ISR is still alive. The applet `-V 5` is the logic reference,
-  not the radio's main supply, so restarting the applet does not power-cycle the radio.
+bits 3–6: no visible LED (bit 6 set in the idle baseline `0x40`). The left indicator is a tri-color
+stack. Direct `0x17` writes to `0x34AE` don't show — the firmware overwrites the shadow on its own
+events — so driving LEDs needs a stub that calls the push (or the self-healing OC-ISR hook above).
 
-### Remaining routes to a specific displayed NUMBER (each needs a decision/resources)
-1. **Keypad flash-patch** (`tools/gm600_keypad_patch.py` + fixed `tools/flashtool.py`): override the
-   A/D keypad source in flash → inject Button-A long-hold (→ conventional mode = data-driven channel
-   number) and channel up/down. Risk: AT29C020 boot-block sector write (0x1000/0x1E00) is untested on
-   hardware and the boot block may be program-locked → re-brick risk.
-2. **DPS reprogram** of the identity/network (the vendor tool in the QEMU VM) — the legitimate "write
-   changed identity"; needs GUI interaction (VNC).
-3. **Band-plan/entry-checksum RE**: find the exact checksum for the freq-plan entry so a valid
-   alternate control-channel frequency renders a different channel number instead of the fallback.
+### Icon/annunciator + backlight field — codeplug `0x0E07–0x0E0D` (cam-verified)
+Writing this 7-byte field + `0x10` reset changes annunciator segments and the backlight (NOT the main
+number). Bit map (emulator-derived, confirmed on hardware): `0x0E07`→buf idx12 bits4–7; `0x0E0B`→idx16
+=`src&0x7B`; `0x0E0C`→idx17=`0x10|(src&0x0C)`; `0x0E0D`→idx18=`0x02|(src&0x1C)`; `0x0E08`→idx13
+(lookup, not a clean mask); `0x0E09`/`0x0E0A` = no effect. all-FF/all-00 here turns the backlight on
+and lights/clears an icon.
 
-### RESOLVED — the main number IS data-drivable: Own Unit No. @ 0x0F0B–0x0F0C (VERIFIED on cam)
-The "322" idle display is the **MPT1327 Own Unit No.** (DPS → Edit → Trunking → MPT Personality
-Data → "Own Unit No."), stored in the codeplug as a **big-endian 16-bit** value at **0x0F0B–0x0F0C**
-(322=0x0142, 456=0x01C8, 712=0x02C8), protected by the block checksum at **0x0FF4**
-(`(Σ(0x0F08..0x0FF3) − 0x55) & 0xFF`). This is the documented MPT1327_OWN_IDENT location — the docs
-were right all along.
+### The displayed idle NUMBER = MPT1327 Own Unit No. — codeplug `0x0F0B–0x0F0C` (cam-verified)
+Big-endian 16-bit (322=`0x0142`, 456=`0x01C8`, 712=`0x02C8`), protected by the block checksum at
+**`0x0FF4`** = `(Σ(0x0F08..0x0FF3) − 0x55) & 0xFF`. This is the documented MPT1327_OWN_IDENT location.
+Change it two ways, both cam-verified (322→456→712→322):
+- **Direct SBEP, no DPS:** `tools/setunit.py <n>` — `0x17`-writes the two bytes + the checksum, then
+  `0x10` reset. (A DPS 322→456 write diffs to exactly these two bytes, which is what cracked it.)
+- **Vendor DPS:** File→Read Radio, Edit→Trunking→MPT Personality Data→"Own Unit No.", File→Write
+  Radio; driven headless with `tools/mouse_ctl.py` + `tools/typestr.py`.
+The main digits (buffer idx `[0,1,2,4,6,8,14]`) are drawn procedurally by a bset/bclr renderer at
+`0x61B1/0x61B7/0x617B` — there is no font table and no single RAM "number" byte, so the clean way to
+change the number is this codeplug field, not a RAM poke.
 
-Two methods proven on the real radio (cam-verified 322 → 456 → 712 → 322):
-1. **Vendor DPS** (`C:\MRSS\MPT\DPSWDP\WDPS_DP.EXE`, R00.05.04, English menus, in the Win3.1 QEMU VM,
-   serial bridged to the applet): File→Read Radio, Edit→Trunking→MPT Personality Data, set Own Unit
-   No., OK, File→Write Radio. Driven headless via `tools/mouse_ctl.py` (closed-loop mouse) +
-   `/tmp/typestr.py` (QWERTZ typing); menu nav via `sendkey`.
-2. **Direct SBEP data write** (no DPS): `0x17` write 0x0F0B/0x0F0C (BE16) + recompute checksum 0x0FF4
-   + `0x10` reset. Tool: `~/captures/setunit.py <n>`. Diff of a DPS 322→456 write is exactly two
-   bytes (0x0F0C and the 0x0FF4 checksum), which is what cracked it.
+### Direct stub driving of arbitrary `0x37AC` content — NOT working yet
+A RAM stub (`tools/lab/lcd_arb.S`, upload `0x17` + launch `0x26`) that replicates SPCR/CS/`0x9102` runs
+(SBEP goes dead = stub active) but the glass stays frozen at the firmware's last render. Leading
+suspects: the stub's CS writes must be **BSET/BCLR** on `0x107E` (not full-byte `staa`), and/or the
+acquire/device-select step is required. The SBEP-`0x17` "race" on `0x37AC` is **unreliable** (RAM
+writes don't return a `0x84` ACK, unlike EEPROM-range writes). **Recovery from a hung `sei` stub =
+PSU power-cycle (`tools/psu_reboot.py`), not `0x10`.** Next: decompile `0x8F1F` + the display paint
+in IDA and either fix CS to BSET/BCLR + exact SPCR, or call the firmware's own refresh with `0x37AC`
+pre-filled. (`0x37AC` is read passively by `tools/gm600_remote.py`; "322" = `8530 18c1 008f d080 e5af
+fe00 a261 8000 6018 020010`.)
 
-**Why the earlier hunt failed — emulator gap:** `emu6811.py` does NOT model the Own-Unit-No.→display
-path. Changing 0x0F0B/0x0F0C in the emulator (checksum-fixed, fresh boot) produced **no** buffer
-change, which wrongly led to "the number is firmware-determined / not a clean codeplug field." On
-**real hardware** 0x0F0B–0x0F0C is the displayed number. Lesson: the emulator is unreliable for the
-trunking-idle identity render; verify display-source claims on hardware. (The procedural bset/bclr
-renderer and the icon-field/backlight findings above remain correct.)
-
-### LCD push protocol — exact wire sequence (emulator-traced) + .S status
-Goal: a RAM stub (`.S`) that writes arbitrary content to the glass. The firmware refresh of the
-21-byte 0x37AC buffer to the control-head LCD controller (SPI) is:
-- **SPI send primitive 0x9102**(X=buf, B=count): for each byte — wait SPSR(0x1029) SPIF (`tst
-  $1029; bpl`), then `staa $102A` (SPDR); after the last, read SPDR to clear. **No COP kick inside.**
-- **Command phase:** SPCR(0x1028)=0x57, then **BSET 0x107E #0x41** (CS; read-modify-write, NOT a
-  full-byte store), send 3 cmd bytes `02 50 3F` via 0x9102, then **BCLR 0x107E #0x61**.
-- **Data phase:** SPCR=0x50, **BSET 0x107E #0x01**, send 21 bytes of 0x37AC via 0x9102, then clear.
-- The CS lines live in port **0x107E** and are driven with **BSET/BCLR** to preserve the other
-  device-select bits (LED, etc.) — a plain `staa` of 0x41/0x01/0x00 (what `lcd_cmd.S`/`lcd_arb.S`
-  did) is wrong and is the leading suspect for why stub pushes don't land.
-
-**.S status: NOT working yet.** `lcd_arb.S`/`lcd_fftest.S` (upload 0x17 + launch 0x26, replicate
-SPCR/CS/0x9102) run (SBEP goes dead = stub active) but the glass stays frozen at the firmware's last
-render — the raw full-byte CS writes and/or a missing acquire/device-select step. Next: decompile
-0x8F1F dispatcher + the display task's paint routine in **IDA** and either (a) fix CS to BSET/BCLR
-and match SPCR exactly, or (b) have the stub call the firmware's own complete refresh routine with
-0x37AC pre-filled. Recovery from a hung stub = **PSU power-cycle** (`~/captures/psu_reboot.py`), not
-0x10. See the "Lab rig" section in CLAUDE.md.
+### Lessons (why earlier conclusions were wrong)
+- **Emulator gap:** `emu6811.py` reads `0x0F0B`/`0x0F0C` at boot (pc `9D91`, `9E7D`) but renders the
+  SAME `322` for any Own Unit No. (a real 456 codeplug renders identically in the VM). It does not
+  model the trunking-idle "show own ident" display state (RF/synth/ASFIC not modelled → different
+  display branch). This wrongly led to "the number is firmware-determined, not a codeplug field."
+  **Verify display/behaviour claims on HARDWARE.**
+- **Why the "race" looked like it worked:** all-00 (blank) and all-FF (all segments) are extremes that
+  look right regardless, and an early "888" was actually the boot self-test caught mid-animation. The
+  race never gave *clean* control of a chosen value — a sparse buffer blended with the firmware's
+  concurrent `322` render, and RAM `0x17` writes don't even ACK. Treat the race as unproven.

@@ -5,29 +5,29 @@ in this folder; it indexes the docs and has the current status.
 
 ## Lab rig — what you have at your disposal (READ THIS FIRST after a compaction)
 
-Everything is on lab host **`nemanjan00@10.69.1.91`** (passwordless sudo). This repo lives there as
-`~/glasgow-rib` (= local `~/rib`, git-synced; push `git push origin master:main`). The bench radio
-is GM600 serial **807IYA0903**. You can do the ENTIRE loop headless — power, program, and *see* the
-screen — without the owner present:
+Everything runs on a lab host reached over SSH (its address, login and this repo's path there are in
+the git-ignored **`CLAUDE.local.md`** — read that first). The repo there is git-synced with this one
+(push `git push origin master:main`). The bench radio is a GM600. You can do the ENTIRE loop headless
+— power, program, and *see* the screen — without the owner present:
 
 1. **Radio POWER = ISDT MP305B bench PSU, driven by `pymp305`** — set to **12 V / 0.5 A** (radio
    draws ~0.25 A running). **This is the only thing that powers the radio; the applet's `-V 5` is
-   just the rib logic reference and does NOT power it.** Reboot = `~/captures/psu_reboot.py`
+   just the rib logic reference and does NOT power it.** Reboot = `tools/psu_reboot.py`
    (output off→on, keeps V/I). Run with its venv: `cd ~/pymp305/python && ~/pymp305/.venv-hw/bin/python …`.
    API: `from pymp305 import MP305; with MP305.open() as psu: psu.output_off()/output_on()/read_state()`.
    **This is your reliable recovery** when a `sei` RAM-stub hangs the radio (see below).
 2. **SBEP serial to the radio = Glasgow rib applet** on `127.0.0.1:2324` (tmux session `applet`:
    `glasgow run rib -V 5 --bus A0 --baud 9600 socket tcp:127.0.0.1:2324`). **Single client.**
    Restarting it (`tmux send-keys -t applet C-c` then re-run) glitches the rib but is NOT a true
-   power cycle — use the PSU. Tools in `~/captures/`: `dump_codeplug.py` (read 640 B), `setunit.py <n>`
-   (set Own Unit No. = displayed number), `idwrite.py`, `sbep_client.py`; `tools/sbep.py` has the
+   power cycle — use the PSU. Tools in `tools/`: `dump_codeplug.py` (read 640 B), `setunit.py <n>`
+   (set Own Unit No. = displayed number), `sbep_client.py`; `tools/sbep.py` has the
    `Radio` class (read_block/transact/id_string).
 3. **Vendor programming = WDPS_DP / WDPS_NP in a Win3.1 QEMU VM** (tmux `qvm`; disk `~/win31/vm/msdos.raw`).
    DP is `C:\MRSS\MPT\DPSWDP\WDPS_DP.EXE` (R00.05.04, **English menus**), launched via Program-Manager
    Datei→Ausführen. Serial to the radio via a **socat bridge** `TCP-LISTEN:2323→2324` (tmux `bridge`);
    start it only for DPS, kill it for direct SBEP (QEMU re-grabs the single applet slot otherwise).
    Drive the GUI headless: `tools/mouse_ctl.py {click,dbl,move} X Y` (closed-loop mouse on the 640×480
-   framebuffer; needs WIN.INI MouseSpeed=0), `/tmp/typestr.py "text"` / `--clear` (German QWERTZ map),
+   framebuffer; needs WIN.INI MouseSpeed=0), `tools/typestr.py "text"` / `--clear` (German QWERTZ map),
    and QEMU monitor `/tmp/qmon` (`sendkey`, `screendump /tmp/x.ppm`). `screendump` scale: resize PPM
    to 760w → multiply displayed coords by 0.842 for framebuffer coords. Owner can VNC `:5901` for
    clicks you can't land.

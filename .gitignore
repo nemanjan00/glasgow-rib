@@ -6,3 +6,4 @@ build/
 *.vcd
 gm600/datasheets/
 gm600/tools/flash_backups/
+CLAUDE.local.md
