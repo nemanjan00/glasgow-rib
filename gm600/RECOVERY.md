@@ -37,6 +37,17 @@ golden boots to the main loop (`PC=0xCE98`) and never reaches `0x8EE4`; the reco
 image reaches the `0x8EE4` spin; **restoring `0xC000` from the golden dump boots identically to
 golden.** The recovery content is therefore known and verified: `motofix.BIN[0xC000:0xC100]`.
 
+### Verified against the physical chip
+The desoldered chip was read back (`broken.BIN`) and diffed against golden. **Exactly two 256-byte
+sectors differ, both holding the `(i^0x3C)` test pattern** — both from the bank bug:
+- **device `0x2800`** (page 0): the earlier write aimed at CPU `0x6800` that reported "link closed" —
+  it *did* program (raw-bank `BANK=1` → page 0, window `0x6800` → device `0x2800`). Golden is all-FF
+  here (unused); booting the VM with *only* `0x2800` corrupted **boots clean → harmless**.
+- **device `0xC000`** (page 3): the boot-path code; booting with *only* `0xC000` corrupted **crashes**.
+
+Booting `broken.BIN` itself in the VM reproduces the `0x8EE4` crash; booting golden is clean. So the
+full golden reflash restores both sectors and fully recovers the radio.
+
 ## Outcome
 
 **Recovered by T48** (route 3, below). In-circuit bootstrap (route 2) was attempted and came up
