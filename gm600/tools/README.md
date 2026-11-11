@@ -237,6 +237,7 @@ python3 lcd_text.py HI                      # upload + launch, show "HI"
 python3 lcd_text.py --no-launch --scroll HELLO 322   # stub already running: scroll text
 python3 lcd_text.py --no-launch --raw e67676         # raw segment bytes (here "322")
 python3 lcd_text.py --standalone --backlight 53X     # lcd_raw.S: own SPI driver, no firmware code
+python3 lcd_text.py --standalone --icons 0040 322     # icon bytes b0b1 (default 0000 = icons off)
 python3 lcd_photos.py /tmp/out [--only wire|struct|glyphs]  # photograph every segment (webcam)
 ```
 

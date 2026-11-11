@@ -20,7 +20,8 @@ import asm6811
 import sbep
 
 SYNC = 0xA5
-B0, B1 = 0x00, 0x40          # firmware's idle values for the two non-digit struct bytes
+B0, B1 = 0x00, 0x00          # icon bytes (struct b0/b1); default all icons off. The firmware's idle
+#                              screen uses 00 40 (b1 bit 6 = upper-right icon). Map: images/lcd_segments.
 
 # 7-seg bit -> segment, from a one-bit-at-a-time sweep photographed on the radio (bit 3 is unused):
 #   bit0 f (top-left)  bit1 a (top)  bit2 b (top-right)  bit4 e (bottom-left)
@@ -144,6 +145,7 @@ def main():
     ap.add_argument("--standalone", action="store_true",
                     help="use lcd_raw.S: drive the controller with no firmware calls (host packs)")
     ap.add_argument("--delay", type=float, default=1.0)
+    ap.add_argument("--icons", default="0000", help="icon bytes b0b1 in hex (e.g. 0040 = idle icon)")
     ap.add_argument("--backlight", action="store_true", help="turn the backlight on (--standalone)")
     ap.add_argument("--scroll", action="store_true", help="scroll the joined text through 3 digits")
     args = ap.parse_args()
@@ -154,6 +156,7 @@ def main():
             if not args.standalone:
                 raise SystemExit("--backlight needs --standalone")
             led(r, 0xC0)
+        icons = tuple(bytes.fromhex(args.icons))
         screens = args.screens
         if args.scroll:
             t = "   " + " ".join(screens) + "   "
@@ -163,9 +166,9 @@ def main():
                 time.sleep(args.delay)
             if args.raw:
                 b = bytes.fromhex(s)
-                push(r, b[-3:], *(b[:2] if len(b) == 5 else (B0, B1)), standalone=args.standalone)
+                push(r, b[-3:], *(b[:2] if len(b) == 5 else icons), standalone=args.standalone)
             else:
-                push(r, text_to_segs(s), standalone=args.standalone)
+                push(r, text_to_segs(s), *icons, standalone=args.standalone)
             print("pushed", s)
 
 

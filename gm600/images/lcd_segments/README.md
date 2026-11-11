@@ -46,4 +46,6 @@ mirrored order). The firmware only ever fills bytes 5–9 and sends 0–4 as zer
 ## `glyphs/`, `text_53X*.jpg`, `text_BNS*.jpg`
 
 The `lcd_text.py` font, 3 glyphs per shot (`sheet_glyphs.png`), "53X" (X uses the conventional
-7-segment stand-in, the same shape as H) and "BNS" (shows as `bnS`: B and N only exist in lowercase).
+7-segment stand-in, the same shape as H) and "BNS" (shows as `bnS`: B and N only exist in lowercase). The glyph sheets and 53X were taken with the
+icon bytes at the firmware's idle `00 40`, so the upper-right icon (`b1` bit 6) is lit in them;
+`text_BNS*.jpg` uses `lcd_text.py`'s default of all icons off (`--icons 0040` turns it back on).
