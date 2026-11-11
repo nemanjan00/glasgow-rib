@@ -47,6 +47,7 @@ session writes a complete, valid-framed codeplug with a controlled change. Modes
   [../CODEPLUG.md](../CODEPLUG.md)).
 - `--write` — send the patched stream. `PROBE_SET=<name>` picks the patch table (see the top of the
   file); an unknown name is an error.
+- `--fix` / `--force` (with `--write`) — see the checksum guard below.
 
 Every frame is checked like DPS would expect: matching echo, ACK, and for each `17` a result frame
 `84` for the same address. **The stream aborts on the first failure**, so a failed or unanswered
@@ -54,16 +55,32 @@ block is never followed by more writes; the radio may then be partly written, an
 to run `--restore` once the cause is fixed. `--write` also refuses to send anything if the capture
 doesn't contain every address in the chosen `PROBE_SET`.
 
-How the probes stay valid: each block has an **additive** checksum (see
-[../CODEPLUG.md](../CODEPLUG.md)), so a changed byte is balanced by an equal, opposite change to
-**another byte in the same block** (the probe sets do this with a spare byte or a Tx-PL index),
-leaving the block's sum unchanged. This works *only* because the net change is zero — it does not
-reproduce the actual checksum, so it can't be used to write an arbitrary (net-nonzero) change. A
-non-zero net delta is rejected by DPS on read with a block checksum error; off-step frequencies or
-an Inhibit-with-PL combo are rejected as invalid values.
+**Checksum guard.** Before a `--write`, the tool reconstructs the resulting codeplug (the radio's
+current image + the pending writes) and verifies all five block checksums (`gm600_codeplug.py`). A
+write that would leave any block wrong is **refused with nothing sent** — DPS would otherwise reject
+the radio on its next read. `--fix` corrects them instead (it appends `0x17` writes for the affected
+checksum bytes); `--force` sends anyway. The probe sets here keep each block's sum unchanged (a
+changed byte balanced by an equal, opposite change elsewhere in the same block), so they pass the
+guard untouched; the guard is what makes an arbitrary, net-nonzero edit safe to write. Off-step
+frequencies or an Inhibit-with-PL combo are still rejected by DPS as invalid *values*, independent
+of the checksum.
 
 The patch addresses in `sbep_write.py` are specific to this radio's layout and its captured
 `sniff-write.log`; adapt both for another radio/codeplug.
+
+## `gm600_codeplug.py` — codeplug checksums
+
+The five per-block additive checksums, reversed from the firmware validator (`(Σ data − 0x55) & 0xFF`;
+see [../CODEPLUG.md](../CODEPLUG.md)). Importable — `verify_checksums(cp)` returns the mismatching
+blocks, `fix_checksums(cp)` rewrites all five in a 640-byte buffer — and a CLI:
+
+```
+python3 gm600_codeplug.py my-codeplug.bin             # report each block OK / MISMATCH
+python3 gm600_codeplug.py edited.bin --fix out.bin    # repair the checksums into out.bin
+```
+
+Any tool that edits the codeplug (an open CPS, a field patch) recomputes the affected block here
+before writing it back; `sbep_write.py`'s guard uses it directly.
 
 ## `dump_codeplug.py` — full read-back
 
@@ -124,13 +141,16 @@ checks the core, no firmware needed.
 
 ## `gm600_vm_bridge.py` — the emulated radio as a serial SBEP endpoint
 
-Where `mock_radio.py` synthesises replies from an image, `gm600_vm_bridge.py` puts the **actual
-GM600 firmware** on the wire: it boots `motofix.BIN` in the `emu6811` emulator and serves SBEP on a
-socket. The VM *is* the radio — it receives and validates each frame and, for an identity query
-(`0x23`), builds the authoritative reply in its own RAM; the bridge reads that back out (the final
-byte-out the firmware's RTOS TX task would do, which the cooperative scheduler doesn't dispatch in
-emulation). Reads (`0x11`) come from the VM's live EEPROM, writes (`0x17`) apply to it, `0x13` is the
-hardcoded transfer constant, `0x10` ACKs.
+Where `mock_radio.py` synthesises replies from an image, `gm600_vm_bridge.py` runs the **actual GM600
+firmware** for the one opcode that benefits: it boots `motofix.BIN` in the `emu6811` emulator and
+serves SBEP on a socket. For an identity query (`0x23`) the VM *is* the radio — it receives and
+validates the frame and builds the authoritative reply in its own RAM, which the bridge reads back
+out (the final byte-out the firmware's RTOS TX task would do, which the cooperative scheduler doesn't
+dispatch in emulation). The other opcodes are bridge logic over the VM's EEPROM image, **not** the
+firmware's own handlers: reads (`0x11`) come from that EEPROM, writes (`0x17`) apply to it (range-
+checked to the 640-byte codeplug, so an out-of-range write is refused rather than silently growing or
+wrapping the image), `0x13` is the hardcoded transfer constant, `0x10` ACKs. Enough for DPS/NPS and a
+dump/write round-trip; not a full firmware-in-the-loop radio.
 
 ```
 python3 gm600_vm_bridge.py ../../motofix.BIN my-codeplug.bin 2399   # ~75 s to boot, then listens
@@ -142,6 +162,25 @@ byte-identical to the source in ~1 s, and a `0x17` write round-trips (write `AA�
 Boot is a one-time ~75 s; each `0x23` runs the VM briefly; reads/writes are instant EEPROM ops. Use
 this when you want real-firmware behaviour (frame validation, firmware-computed query replies); use
 `mock_radio.py` when you just want a fast image-backed radio.
+
+## `gm600_remote.py` — read the radio's screen (and press keys)
+
+Remote-control the control head over the wire. The firmware renders the LCD into a 21-byte shadow
+buffer in RAM at `0x37AC` (three 7-segment digits + status icons) with an LED shadow at `0x34AE`,
+and SBEP `0x11` reads any address on a running radio — so `read_screen()` mirrors the live display
+without prog mode or hardware mods. The digit/icon byte split was reversed in the emulator (see
+`gm600_remote.py` header). Two backends, same decode:
+
+```
+python3 gm600_remote.py --radio            # the real GM600 (SBEP_ADDR); --mirror to poll continuously
+python3 gm600_remote.py --emu ../../motofix.BIN my-codeplug.bin line1   # the emu6811 VM, for dev
+```
+
+Pressing buttons is honest about hardware: the keypad is an analog A/D ladder the firmware
+re-samples every cycle, so there is **no clean serial keypress** on the real radio (a `0x17` RAM
+poke is overwritten before the round-trip lands, and GM600 firmware exposes no keypad-inject opcode)
+— real injection needs the keypad line driven in hardware or a RAM-stub takeover. The `--emu`
+backend presses for real by setting the A/D levels.
 
 ## `mock_radio.py` and `test_tools.py` — no hardware needed
 

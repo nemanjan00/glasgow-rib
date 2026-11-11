@@ -64,34 +64,45 @@ Full table: motorola-cps `docs/DPS_EMEA_600SERIES_R00.03.02/FIELD_DICTIONARY.md`
 is editable in `WDPS_DP.EXE` (which also does Read/Write Radio), so the proven GUI-edit→write→dump→diff
 method applies to it just as it did to the personality options.
 
-## Checksums
+## Checksums — solved
 
 DPS checks one checksum per block when it reads the radio, and rejects the whole read on a
 mismatch with a block-specific message: `Radio / Network / Personality Data Checksum Failure`.
-The radio itself checks nothing: every `17` gets `84` (OK) whatever the data.
+The radio itself validates on boot (a bad checksum shows an error display); over SBEP every `17`
+still gets `84` (OK) whatever the data, so nothing stops you writing a codeplug DPS will later reject.
 
-- **Additive.** A net-zero change inside a block (`+1` on one byte, `−1` on another) passes; any
-  non-zero net change fails with that block's message. Changing `0x0F06` gives `Network Data
-  Checksum Failure`, so it's in the Network block; the channel region `0x0F6D`–`0x0F74` is in the
-  Personality block.
-- **A net-zero test proves additivity and nothing more.** It passes for any target value and any
-  block boundaries, so it can't locate either.
-- **Not "sum to `0xFF`".** Measured on the reference radio's pre-write dump: `0x0D80`–`0x0E12`
-  sums to `0xD1`, `0x0E13`–`0x0F32` to `0xDD`, `0x0F33`–`0x0FFB` to `0x06`. No split of
-  `0x0E13`–`0x0FFB` into two ranges gives two `0xFF` sums, and the whole image sums to `0xB0`.
-  The `0x0F33`–`0x0FFB` sum also changes across a DPS write (`0x06` → `0xF2`, because DPS blanks
-  `0x0FF5`–`0x0FFB`), so a personality range ending at `0x0FFB` can't be right.
-- **Personality checksum byte: `0x0FF4`**, the stored low byte of a running sum. Setting Monitor
-  on channel 1 raised its data byte by `0x10` and `0x0FF4` by the same amount (`E6 → F6`). The
-  summed range is **not pinned**. It covers the channel table and ends before `0x0FF4`. On the
-  reference radio `0x0F1D`–`0x0FE0` sums to `0xE5` and `0x0F1D`–`0x0FDF` to exactly `0xE6`, but
-  `0x0FE0`–`0x0FF3` is all `FF`, so every cut point in that run shifts the sum by 1 and the sum
-  alone can't place the end. A contrast write just inside and just outside
-  `0x0FDF` would settle it.
-- **Network and Radio checksum bytes: not located.**
+**There are five per-block additive checksums.** Each checksum byte sits immediately after its
+block's data and equals:
 
-To write a modified personality, add the net change of its data bytes to `0x0FF4`. Keep the
-Network and Radio blocks' sums unchanged (that is what `tools/sbep_write.py`'s balancing does).
+```
+checksum = (sum(block_data_bytes) − 0x55) & 0xFF
+```
+
+Reversed from the radio firmware (`motofix.BIN`): the per-block validator at `0xB8E1`/`0xB900` sums
+each block byte-by-byte and checks `stored == 0xAA − ~sum` (= `sum − 0x55`). The `0x55` is a firmware
+constant. Confirmed against the live `native-eeprom.bin` (all five blocks) and in the 68HC11
+emulator (a wrong checksum shows the error display; the corrected image boots normally).
+
+| Block | Data range (radio addr) | Checksum byte | DPS message on mismatch |
+|---|---|---|---|
+| Serial / header 1 | `0x0D80`–`0x0D84` | `0x0D85` | *(read-time, factory region)* |
+| Header 2 | `0x0D86`–`0x0D92` | `0x0D93` | |
+| **Radio** | `0x0D94`–`0x0E11` | `0x0E12` | `Radio Data Checksum Failure` |
+| **Network** | `0x0E13`–`0x0F06` | `0x0F07` | `Network Data Checksum Failure` |
+| **Personality** | `0x0F08`–`0x0FF3` | `0x0FF4` | `Personality Data Checksum Failure` |
+
+Consistent with the earlier contrast probes: changing `0x0F06` gave `Network Data Checksum Failure`
+(it's the last Network data byte), and the channel region `0x0F6D`–`0x0F74` and Monitor bit sit in
+the Personality block (raising a channel byte by `0x10` raised `0x0FF4` by `0x10`).
+
+**`0x0FF5`–`0x0FFF` is outside every block** — it follows the last checksum byte (`0x0FF4`) and is
+summed by nothing. This is the 7-byte factory field DPS blanks to `FF` on write (see below); because
+it is not in any block, blanking it does not disturb a checksum.
+
+To write a modified codeplug, recompute the affected block's checksum.
+[`tools/gm600_codeplug.py`](tools/gm600_codeplug.py) does this (`verify_checksums`, `fix_checksums`,
+and a `--fix` CLI), and [`tools/sbep_write.py`](tools/sbep_write.py) verifies all five before a
+`--write` and refuses (or, with `--fix`, repairs) any write that would leave a block wrong.
 
 ## DPS clears a 7-byte trailing field on write
 
@@ -129,9 +140,9 @@ rejected unless Tx PL is set (so bit2 pairs with a tone).
 
 ## How much is reversed
 
-- Read/write wire protocol: **~90–95 %**, proven live. Container (block map, checksums): partial —
-  additive per-block checksums; only the personality checksum byte is located, and its range isn't
-  pinned.
+- Read/write wire protocol: **~90–95 %**, proven live. Container (block map, checksums): the block
+  map and all five additive per-block checksums are solved (`(Σ − 0x55) & 0xFF`, see Checksums
+  above), firmware-verified and implemented in `tools/gm600_codeplug.py`.
 - Conventional channel programming (freq, PL, channel table, identity, timeout, per-channel option
   bits): **~90–95 %** — the meaningful programmable surface, byte-bound.
 - **MPT1327 trunking network block (`0x0E13`–`0x0F07`): out of scope.** Its fields are fully

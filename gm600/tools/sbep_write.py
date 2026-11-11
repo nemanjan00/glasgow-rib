@@ -6,7 +6,7 @@ patching the four channel +6 option bytes so one write session binds up to
 4 candidate bits (distinct bit per channel). Fully reversible: --restore
 replays the stream unmodified to return the radio to baseline.
 
-usage: sbep_write.py [--dry | --write | --restore] [CAPTURE_LOG]
+usage: sbep_write.py [--dry | --write | --restore] [--fix | --force] [CAPTURE_LOG]
 
 Modes:
   --dry       (default) parse + print patched frames, send NOTHING
@@ -15,6 +15,13 @@ Modes:
 
 CAPTURE_LOG is the socat sniff log of a DPS write session (default: sniff-write.log in the current
 directory). PROBE_SET=<name> picks a patch table below; SBEP_ADDR=host:port the applet socket.
+
+Checksum safety (--write only): before sending, the resulting codeplug is reconstructed (the
+radio's current image + the pending writes) and its five block checksums are verified (see
+gm600_codeplug.py). A write that would leave any block checksum wrong is REFUSED with nothing sent —
+the radio would then fail DPS's next read. `--fix` corrects them instead (appends 0x17 writes for
+the affected checksum bytes); `--force` sends anyway. `--restore` is a trusted replay of DPS's own
+valid stream and isn't re-checked.
 
 Every frame's echo, ACK and reply are checked, and the stream ABORTS on the first problem (echo
 mismatch, no ACK, or a 17 whose result isn't 84 for the same address), so a failed block is never
@@ -25,9 +32,11 @@ import re
 import sys
 import time
 
-from sbep import Radio, SBEPError, ACK, checksum, frame_length
+from sbep import Radio, SBEPError, ACK, checksum, frame_length, encode, decode
+from gm600_codeplug import verify_checksums, fix_checksums, RADIO_BASE
 
 LOG = "sniff-write.log"
+EEPROM_LO, EEPROM_HI = 0x0D80, 0x1000       # the 640-byte codeplug, [lo, hi)
 
 # channel +6 byte radio addresses and the probe bit to OR in (default byte = 0x08)
 # PROBE table selectable via env PROBE_SET; default = checksum-neutral test
@@ -113,10 +122,63 @@ def check(fr, status, op, data):
 RESTORE_HINT = ("The radio may be partly written. Fix the cause, then run "
                 "`sbep_write.py --restore <capture log>` to put the captured codeplug back.")
 
-def send_stream(frames, label):
-    print("== sending %s (%d frames) ==" % (label, len(frames)))
+
+def read_image(radio):
+    """Dump the current 640-byte codeplug (0x0D80-0x1000) over 0x11 reads."""
+    img = bytearray()
+    while len(img) < EEPROM_HI - EEPROM_LO:
+        img += radio.read_block(EEPROM_LO + len(img), min(64, EEPROM_HI - EEPROM_LO - len(img)))
+    return img
+
+
+def apply_writes(img, frames):
+    """Apply every frame's 0x17 payload onto `img` (radio addresses), in place."""
+    for fr in frames:
+        op, data = decode(fr)
+        if op != 0x17:
+            continue
+        a = int.from_bytes(data[:3], "big")
+        for i, b in enumerate(data[3:]):
+            off = a + i - EEPROM_LO
+            if 0 <= off < len(img):
+                img[off] = b
+    return img
+
+
+def checksum_guard(radio, frames, fix, force):
+    """Refuse (or repair) a write that would leave a block checksum wrong.
+
+    Reads the radio's current codeplug, simulates the pending writes, and runs verify_checksums on
+    the result. Returns the frames to send — unchanged if the checksums hold, or with corrective
+    0x17 writes appended under --fix. Aborts (nothing sent) otherwise, unless --force."""
+    img = read_image(radio)
+    apply_writes(img, frames)
+    bad = verify_checksums(img)
+    if not bad:
+        print("checksum guard: all 5 block checksums valid after the write.")
+        return frames
+    where = ", ".join("0x%04X (stored %02X, want %02X)" % b for b in bad)
+    if fix:
+        fixed = bytearray(img)
+        fix_checksums(fixed)
+        extra = [encode(0x17, ca.to_bytes(3, "big") + bytes([fixed[ca - RADIO_BASE]]))
+                 for ca, _, _ in bad]
+        print("checksum --fix: correcting %d block(s): %s" % (len(bad), where))
+        return frames + extra
+    if force:
+        print("WARNING: write breaks %d block checksum(s): %s — --force given, sending anyway."
+              % (len(bad), where))
+        return frames
+    sys.exit("ABORT, nothing sent: write would break %d block checksum(s): %s\n"
+             "Re-run with --fix to correct them, or --force to send regardless." % (len(bad), where))
+
+
+def send_stream(frames, label, *, verify=False, fix=False, force=False):
     writes = 0
     with Radio() as radio:
+        if verify:
+            frames = checksum_guard(radio, frames, fix, force)
+        print("== sending %s (%d frames) ==" % (label, len(frames)))
         for k, fr in enumerate(frames):
             op = fr[1]
             # 10 restarts the radio: only a status byte comes back.
@@ -135,9 +197,14 @@ def send_stream(frames, label):
 
 def main():
     args = sys.argv[1:]
-    mode = args.pop(0) if args and args[0].startswith("--") else "--dry"
-    if mode not in ("--dry", "--write", "--restore"):
-        sys.exit(__doc__)
+    flags = []
+    while args and args[0].startswith("--"):
+        flags.append(args.pop(0))
+    unknown = set(flags) - {"--dry", "--write", "--restore", "--fix", "--force"}
+    if unknown:
+        sys.exit("unknown flag(s): %s\n%s" % (" ".join(sorted(unknown)), __doc__))
+    mode = next((f for f in ("--dry", "--write", "--restore") if f in flags), "--dry")
+    fix, force = "--fix" in flags, "--force" in flags
     sent = parse_sent(args[0] if args else LOG)
     frames = split_frames(sent)
     patched = []; all_changes = []
@@ -162,9 +229,9 @@ def main():
         print("DRY RUN - nothing sent. %d frames ready." % len(patched))
         return
     if mode == "--write":
-        send_stream(patched, "PROBE (patched)")
+        send_stream(patched, "PROBE (patched)", verify=True, fix=fix, force=force)
     else:
-        send_stream(patched, "RESTORE (baseline)")
+        send_stream(patched, "RESTORE (baseline)")   # trusted replay of DPS's own valid stream
 
 if __name__ == "__main__":
     main()

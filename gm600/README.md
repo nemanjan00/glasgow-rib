@@ -57,9 +57,10 @@ the applet, under QEMU.
   Conventional channels, PL tones, MPT identity, per-channel option bits and timers are decoded.
 - **The codeplug is the CPU's 640-byte internal EEPROM, `0x0D80`–`0x0FFF`.** There is no separate
   personality region. DPS writes only `0x0E13`–`0x0FFB`.
-- **Not yet safe to write freely:** the checksums are additive, but only the personality checksum
-  byte (`0x0FF4`) is located, and its exact range isn't pinned. Edits that keep each block's sum
-  unchanged are safe; anything else may make DPS reject the radio on the next read.
+- **Codeplug checksums are solved:** five per-block additive sums, `checksum = (Σ data − 0x55) & 0xFF`
+  (firmware-verified; see [CODEPLUG.md](CODEPLUG.md)). `tools/gm600_codeplug.py` computes and fixes
+  them, and `tools/sbep_write.py` verifies/repairs before a write, so edited codeplugs can be written
+  without DPS rejecting the radio on the next read.
 - **Not decoded:** the MPT1327 network block (`0x0E13`–`0x0F07`, fields enumerated but not
   byte-bound) and the factory alignment area.
 - **Firmware flashing is a separate, untried problem** (68HC11 bootstrap via MODA/MODB, or writing

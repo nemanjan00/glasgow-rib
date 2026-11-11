@@ -7,12 +7,15 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mock_radio import MockRadio
 from sbep import Radio, SBEPError, encode, decode, frame_length
+from gm600_codeplug import verify_checksums, fix_checksums, blocks, CHECKSUM_ADDRS, RADIO_BASE
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMAGE = bytes((i * 7 + 3) & 0xFF for i in range(640))
@@ -217,6 +220,114 @@ class EmulatorTest(unittest.TestCase):
         c.run(stop_pc=0x200 + len(prog) - 2)
         self.assertEqual(c.X, 1000 // 7)
         self.assertEqual(c.D, 1000 % 7)
+
+
+class CodeplugChecksumTest(unittest.TestCase):
+    """The five additive per-block checksums (gm600_codeplug.py)."""
+
+    @staticmethod
+    def _valid():
+        img = bytearray((i * 7 + 3) & 0xFF for i in range(640))
+        fix_checksums(img)
+        return img
+
+    def test_reference_image_verifies(self):
+        self.assertEqual(verify_checksums(self._valid()), [])
+
+    def test_flipped_byte_fails_only_its_block(self):
+        img = self._valid()
+        img[0x0E20 - RADIO_BASE] ^= 0xFF              # a byte in the Network block (0x0E13-0x0F06)
+        self.assertEqual([ca for ca, _, _ in verify_checksums(img)], [0x0F07])
+
+    def test_fix_repairs_a_broken_block(self):
+        img = self._valid()
+        img[0x0E20 - RADIO_BASE] ^= 0xFF
+        fix_checksums(img)
+        self.assertEqual(verify_checksums(img), [])
+
+    def test_tail_bytes_belong_to_no_block(self):
+        # The last checksum byte is 0x0FF4; 0x0FF5-0x0FFF falls outside every block's data+checksum.
+        self.assertEqual(CHECKSUM_ADDRS[-1], 0x0FF4)
+        covered = set()
+        for ds, de, ca in blocks():
+            covered.update(range(ds, de))
+            covered.add(ca)
+        self.assertTrue(covered.isdisjoint(range(0x0FF5, 0x1000)))
+
+
+class SbepWriteChecksumGuardTest(unittest.TestCase):
+    """sbep_write's pre-write guard: refuse/repair a write that breaks a block checksum."""
+
+    def setUp(self):
+        self.img = CodeplugChecksumTest._valid()
+        self.radio = MockRadio(bytes(self.img))
+
+    def tearDown(self):
+        self.radio.close()
+
+    def _conn(self):
+        return Radio(f"127.0.0.1:{self.radio.port}")
+
+    def _write(self, addr, byte):
+        return encode(0x17, addr.to_bytes(3, "big") + bytes([byte]))
+
+    def test_guard_passes_a_sum_neutral_write(self):
+        import sbep_write
+        frames = [self._write(0x0E20, (self.img[0x0E20 - RADIO_BASE] + 1) & 0xFF),
+                  self._write(0x0E21, (self.img[0x0E21 - RADIO_BASE] - 1) & 0xFF)]
+        with self._conn() as r:
+            out = sbep_write.checksum_guard(r, frames, fix=False, force=False)
+        self.assertEqual(out, frames)
+
+    def test_guard_refuses_a_breaking_write(self):
+        import sbep_write
+        frames = [self._write(0x0E20, self.img[0x0E20 - RADIO_BASE] ^ 0xFF)]
+        with self._conn() as r, self.assertRaises(SystemExit) as cm:
+            sbep_write.checksum_guard(r, frames, fix=False, force=False)
+        self.assertIn("0x0F07", str(cm.exception))
+
+    def test_guard_fix_appends_corrections(self):
+        import sbep_write
+        frames = [self._write(0x0E20, self.img[0x0E20 - RADIO_BASE] ^ 0xFF)]
+        with self._conn() as r:
+            out = sbep_write.checksum_guard(r, frames, fix=True, force=False)
+            self.assertGreater(len(out), len(frames))
+            img2 = sbep_write.read_image(r)
+        sbep_write.apply_writes(img2, out)
+        self.assertEqual(verify_checksums(img2), [])
+
+
+class VmBridgeWriteRangeTest(unittest.TestCase):
+    """gm600_vm_bridge's 0x17 must reject writes outside the 640-byte EEPROM (no grow, no wrap)."""
+
+    @staticmethod
+    def _bridge():
+        import gm600_vm_bridge as vb
+        r = vb.VMRadio.__new__(vb.VMRadio)            # skip the (slow) firmware boot; only test 0x17
+        r.base = 0x0D80
+        r.lock = threading.Lock()
+        r.m = types.SimpleNamespace(eeprom=bytearray(640))
+        return r
+
+    def test_in_range_write_ok(self):
+        r = self._bridge()
+        reply = r.answer(encode(0x17, (0x0D80).to_bytes(3, "big") + b"\xAA\xBB"))
+        self.assertEqual(r.m.eeprom[:2], b"\xAA\xBB")
+        self.assertEqual(len(r.m.eeprom), 640)
+        self.assertEqual(decode(reply[1:])[0], 0x84)
+
+    def test_high_write_does_not_grow_image(self):
+        r = self._bridge()
+        reply = r.answer(encode(0x17, (0x2000).to_bytes(3, "big") + b"\x01"))   # ramdump stub addr
+        self.assertEqual(len(r.m.eeprom), 640)
+        self.assertEqual(decode(reply[1:])[0], 0x85)
+
+    def test_low_write_does_not_wrap(self):
+        r = self._bridge()
+        reply = r.answer(encode(0x17, (0x0000).to_bytes(3, "big") + b"\x01"))
+        self.assertEqual(len(r.m.eeprom), 640)
+        self.assertNotEqual(r.m.eeprom[-1], 0x01)      # a negative offset must not write from the end
+        self.assertEqual(decode(reply[1:])[0], 0x85)
 
 
 if __name__ == "__main__":

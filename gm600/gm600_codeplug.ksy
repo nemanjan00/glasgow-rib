@@ -217,19 +217,37 @@ instances:
       Remaining personality bytes (radio 0x0F9A-0x0FF3): more signalling/timers and
       undecoded config inside the 0x0FF4 checksum domain. Not byte-bound.
 
-  # ---- 0x274 / 0x275 / 0x27C : checksum + trailers ----
+  # ---- block checksums: five additive per-block sums ----
+  # Each is  (sum(block_data_bytes) - 0x55) & 0xFF , stored right after its block's data.
+  # Firmware validator 0xB8E1/0xB900: stored == sum(block_data) - 0x55 (the 0x55 is a constant).
+  # A host that edits any block must recompute its checksum; tools/gm600_codeplug.py does all five.
+  # Note 0x0FF5-0x0FFF (after the last checksum byte) is summed by no block.
+  header1_checksum:
+    pos: 0x05
+    type: u1
+    doc: Serial/header-1 checksum (radio 0x0D85); covers data 0x0D80-0x0D84.
+  header2_checksum:
+    pos: 0x13
+    type: u1
+    doc: Header-2 checksum (radio 0x0D93); covers data 0x0D86-0x0D92.
+  radio_checksum:
+    pos: 0x92
+    type: u1
+    doc: Radio Data Checksum (radio 0x0E12); covers 0x0D94-0x0E11. DPS "Radio Data Checksum Failure".
+  network_checksum:
+    pos: 0x187
+    type: u1
+    doc: Network Data Checksum (radio 0x0F07); covers 0x0E13-0x0F06. DPS "Network Data Checksum Failure".
+
+  # ---- 0x274 / 0x275 / 0x27C : personality checksum + trailers ----
   personality_checksum:
     pos: 0x274
     type: u1
     doc: |
-      Personality checksum byte (radio 0x0FF4). ADDITIVE: stored low byte of a running
-      sum of the personality data (NOT 0xFF-sum). A host writing a modified personality
-      must recompute it (+= sum of its data-byte deltas). Tracked across every contrast
-      (e.g. Monitor=Yes moved data +0x10 and this byte E6->F6). Summed extent ends before
-      0x0FF4; NOT pinned — inclusive 0x0F1D-0x0FE0 sums to 0xE5 (!= stored 0xE6) and
-      0x0F1D-0x0FDF sums to 0xE6, but 0x0FE0-0x0FF3 is all 0xFF so the sum cannot pin the
-      boundary in that run; 0x0FDF is only a candidate. Settle it with a contrast write to
-      a byte just inside vs just outside 0x0FDF and see which moves 0x0FF4.
+      Personality Data Checksum (radio 0x0FF4): (sum(0x0F08..0x0FF3) - 0x55) & 0xFF. DPS shows
+      "Personality Data Checksum Failure" on mismatch. Tracked across every contrast (e.g.
+      Monitor=Yes moved a data byte +0x10 and this byte E6->F6). A host writing a modified
+      personality recomputes it; tools/gm600_codeplug.py does all five.
   trailing_field:
     pos: 0x275
     size: 7
