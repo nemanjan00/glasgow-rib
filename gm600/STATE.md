@@ -21,11 +21,18 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
      is **ASCII @0x34BD** ("686"/"322") → **per-digit 7-seg @0x3497** (686=`F3 F7 F3`, 322=`E6 76 76`)
      → multiplex → push. The multiplexed buffer pushed for digits is transient/elsewhere, so I can't
      just read a target pattern — need to reverse the 21-byte→segment map by sweeping.
-  2. The **segment sweep** (`tools/lab/lcd_sweep2.S` cycling, and `batch_sweep.py` preload+reboot per
-     byte via `lcd_disp4.S`) is **confounded**: stubs crash (COP-reset → boot **self-test 888**, which
-     the cam then captures) so results alias. `lcd_disp4` (push from preloaded 0x2100) is unreliable
-     where `lcd_disp2` (fill 0x37AC) was reliable — debug why (RAM region? timing?). Capture must wait
-     past the boot self-test and verify SBEP-dead before trusting a frame.
+  2. The **segment sweep** is **confounded and the webcam can't verify a push reliably**. Tried:
+     own COP-kicking SPI send (`lcd_segstub2.S` `mysend`, replacing 0x9102) per the "make push
+     reliable" plan — did NOT fix it. Key observation that breaks the whole approach: with the stub
+     **confirmed running (SBEP dead)**, pushing a buffer with only byte8=FF still shows **322**, while
+     all-FF showed 888. So either the push is **additive (OR-ing onto the controller's existing
+     content, not replacing)** — in which case a partial buffer barely changes 322 and only all-FF
+     reaches 888 — OR the all-FF "888" was itself a boot-self-test alias. Three states (self-test 888,
+     firmware 322, blank) alias everything, and the SBEP-dead verify is itself flaky. **Conclusion:
+     webcam + flaky stub cannot reliably prove arbitrary `.S`-driven content.** To make progress need
+     either: a way to CLEAR the controller RAM before a partial push (if additive), or decompile the
+     page-4 push (0x5384 caller) to learn the exact command that sets replace-mode/address, or accept
+     a non-webcam verification. `lcd_disp2`-style all-FF push is the only semi-repeatable result.
 - **Partial 7-seg bit map** (from 0x3497: 6=F3,8=F7,3=E6,2=76): bit7=seg c, bit4=seg e, bit2=seg b,
   bit0=seg f, bit3=unused; {bit6,bit5,bit1}={a,d,g} (need digits 1/4/7 to split). This is the
   per-digit font, NOT the controller multiplex.
