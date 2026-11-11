@@ -43,7 +43,7 @@ Every segment answers to one bit in bytes 0–4 **and** one in bytes 5–9 (the 
 mirrored order). The firmware only ever fills bytes 5–9 and sends 0–4 as zeros.
 ¹ byte 5 bit 7 is set in every frame the firmware sends; clearing it showed `d0.f`. Not understood yet.
 
-## `glyphs/`, `text_53X*.jpg`
+## `glyphs/`, `text_53X*.jpg`, `text_BNS*.jpg`
 
-The `lcd_text.py` font, 3 glyphs per shot (`sheet_glyphs.png`), and "53X" (X uses the conventional
-7-segment stand-in, the same shape as H).
+The `lcd_text.py` font, 3 glyphs per shot (`sheet_glyphs.png`), "53X" (X uses the conventional
+7-segment stand-in, the same shape as H) and "BNS" (shows as `bnS`: B and N only exist in lowercase).
