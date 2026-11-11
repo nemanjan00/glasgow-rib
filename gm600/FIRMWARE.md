@@ -239,7 +239,9 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
   byte from RAM shadow **`0x34AE`** to the front-panel **LED** shift register (so
   `ldab #10; jsr $8F1F` = "update LEDs"); **entry 8** sends the 21-byte **LCD** buffer from `0x37AC`.
   - **LED shift-register bit map** (byte at `0x34AE`), verified on the real radio by driving each bit
-    from a RAM stub (`tools/led_cmd.S` + `tools/led_demo.py`) and watching the panel over a webcam:
+    from a RAM stub (`tools/led_cmd.S` + `tools/led_demo.py`) and watching the panel over a webcam
+    (per-bit photos: [images/led_bitmap.jpg](images/led_bitmap.jpg); all LEDs on:
+    [images/front_panel_all_leds.jpg](images/front_panel_all_leds.jpg)):
 
     | bit | mask | front-panel element |
     |-----|------|---------------------|
@@ -252,6 +254,20 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
     The left indicator is a tri-color stack (red/amber/green). Direct `0x17` writes to `0x34AE` do
     **not** show — the firmware only pushes the shadow on its own events and overwrites it — so driving
     the LEDs needs a stub that calls the push itself (or the self-healing timer-ISR hook below).
+  - **The LCD push chain** (reversed from the display task in page 4 at `0x5378`): the firmware brackets
+    each update with a SPI-bus **acquire/release** — `0x5013` (pre) and `0x5032` (post), which call the
+    device-manager `0x9FFB`/`0xA01A` with `D = 0x0245` (the control-head SPI device struct) — and in
+    between does `LDAB #8; JSR 0x8F1F` (entry 8) to stream the 21-byte `0x37AC` buffer. Boot inits the
+    controller with entries **5,4,3** once; steady state alternates **8/10** with periodic **5**.
+  - ***Active* LCD segment driving is still OPEN.** A takeover stub reproducing acquire→entry 8→release
+    (with or without re-running the 5/4/3 init) does **not** change the segments: the controller holds
+    its last state statically and ignores the stub's `0x37AC` data (init entries *do* reach it — they
+    blank it). The missing piece is the controller's own data/command protocol (likely a register-select
+    / command-vs-data line) not yet reversed. Tools: `tools/lcd_cmd.S` (stub), `tools/lcd_sweep.py`.
+  - **The LCD is read *passively* instead** — `0x37AC` (21 bytes) is a live mirror decoded by
+    `tools/gm600_remote.py` (channel "1" = `0530 00c1 008f d085 e5af ea00 a661 0000 6008 020010`,
+    "322" = `8530 18c1 008f d080 e5af fe00 a261 8000 6018 020010`). Segment decoding is best done this
+    way: capture `0x37AC` for known displays and correlate.
 - **In-circuit patching over BUS+, self-healing.** The OC3/4/5 timer ISRs (`0x92A1`/`0x92AA`/
   `0x9298`) clear their flag and `jmp` through **RAM pointers `$A4`/`$A6`/`$A2`**. Write a stub's
   address into one with a `0x17` RAM write → periodic execution with no flash change (reset re-inits
