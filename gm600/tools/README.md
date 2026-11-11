@@ -122,6 +122,27 @@ Next: find the displayed-number variable and decode the digit encoding, then inj
 task (unused OC ISR RAM pointers `$A4`/`$A6`) for remote control. `test_tools.py::EmulatorTest`
 checks the core, no firmware needed.
 
+## `gm600_vm_bridge.py` — the emulated radio as a serial SBEP endpoint
+
+Where `mock_radio.py` synthesises replies from an image, `gm600_vm_bridge.py` puts the **actual
+GM600 firmware** on the wire: it boots `motofix.BIN` in the `emu6811` emulator and serves SBEP on a
+socket. The VM *is* the radio — it receives and validates each frame and, for an identity query
+(`0x23`), builds the authoritative reply in its own RAM; the bridge reads that back out (the final
+byte-out the firmware's RTOS TX task would do, which the cooperative scheduler doesn't dispatch in
+emulation). Reads (`0x11`) come from the VM's live EEPROM, writes (`0x17`) apply to it, `0x13` is the
+hardcoded transfer constant, `0x10` ACKs.
+
+```
+python3 gm600_vm_bridge.py ../../motofix.BIN my-codeplug.bin 2399   # ~75 s to boot, then listens
+# then SBEP_ADDR=127.0.0.1:2399 for any tool, or bridge it to a DPS/NPS VM like the mock below
+```
+
+Verified end to end: `sbep_client` → serial `807IYA0903` (VM-computed), `dump_codeplug` → 640 B
+byte-identical to the source in ~1 s, and a `0x17` write round-trips (write `AA…`, read back `AA…`).
+Boot is a one-time ~75 s; each `0x23` runs the VM briefly; reads/writes are instant EEPROM ops. Use
+this when you want real-firmware behaviour (frame validation, firmware-computed query replies); use
+`mock_radio.py` when you just want a fast image-backed radio.
+
 ## `mock_radio.py` and `test_tools.py` — no hardware needed
 
 `mock_radio.py` is a fake GM600 behind a fake applet socket: it echoes, ACKs, and answers `23`
