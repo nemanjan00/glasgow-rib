@@ -20,9 +20,9 @@ are radio addresses. Ground truth: a live DPS "Read Radio" of serial `807IYA0903
 | `0x0FF5`–`0x0FFB` | Factory field | blanked by DPS | see "DPS clears a 7-byte trailing field" |
 | `0x0FFC`–`0x0FFF` | — | untouched | never written by DPS |
 
-Exact offsets for every bound field are in [gm600_codeplug.ksy](gm600_codeplug.ksy). The block
-boundaries marked `~` come from field positions and checksum probes, not from a pinned checksum
-range.
+Exact offsets for every bound field are in [gm600_codeplug.ksy](gm600_codeplug.ksy). The five
+block boundaries are pinned by the solved per-block checksums (see "Checksums — solved" below);
+any remaining `~` on a sub-field boundary comes from field positions, not the block checksum.
 
 DPS's write touches only `0x0E13`–`0x0FFB`; `0x0D80`–`0x0E12` (serial + alignment) and
 `0x0FFC`–`0x0FFF` are left alone.

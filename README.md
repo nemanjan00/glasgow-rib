@@ -199,7 +199,8 @@ idle. **Send one whole message per call.**
   RI/CTS won't see it. The applet targets host software that uses this API, or a socket bridge.
 - `sniff` timestamps come from the host, so they are only accurate to a few milliseconds.
 - The GM600 work covers the codeplug, not the radio's firmware. Writing a modified codeplug also
-  needs correct checksums, which aren't fully pinned yet; see [gm600/README.md](gm600/README.md).
+  needs correct checksums; these are solved — five per-block additive sums, `(Σ − 0x55) & 0xFF`
+  (`gm600/tools/gm600_codeplug.py`) — see [gm600/README.md](gm600/README.md).
 
 ## Tests
 

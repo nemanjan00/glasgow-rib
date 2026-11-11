@@ -194,8 +194,8 @@ this `17`-write stream straight through the applet socket — every `17` returne
 read-back showed the bytes landed. The radio writes whatever it is told: it `84`s each block
 **regardless of codeplug validity**. DPS validates only on *read* (per-block checksums and field
 constraints), so a host that writes the radio must reproduce those checksums for a later DPS read to
-accept it — the checksum is additive per block, but its exact target/boundaries aren't pinned yet.
-See [CODEPLUG.md](CODEPLUG.md) and [tools/](tools/).
+accept it — five per-block additive checksums, each `(Σ block_data − 0x55) & 0xFF`, solved and
+firmware-verified. See [CODEPLUG.md](CODEPLUG.md) and [tools/](tools/) (`gm600_codeplug.py`).
 
 DPS has no "leave programming mode" command. The radio drops out on a timeout or a power cycle.
 
@@ -259,8 +259,8 @@ First session, Glasgow revC3 on J0400-6/7, 9 V on HOOK (2026-11-03):
 
 - The EEPROM starts `02 50 7F EA 4E B4 02 09 "807IYA0903CG" …`. Bytes 6–7 are the
   `02 09` that `23 00` returns, so the ID queries read from this EEPROM. DPS checks **per-block**
-  checksums (Radio / Network / Personality), not one over the image; write-probes show the scheme is
-  additive but its exact target/boundaries/checksum-byte are not yet established — see
+  checksums (Radio / Network / Personality), not one over the image; the scheme is solved — five
+  per-block additive sums `(Σ block_data − 0x55) & 0xFF`, each byte right after its block — see
   [CODEPLUG.md](CODEPLUG.md).
 - The board only has a 256 KB flash (U0102), a 32 KB "hybrid" SRAM (U0103, probably
   battery-backed) and the CPU EEPROM. The codeplug is the CPU EEPROM (see "Reading and writing a

@@ -30,8 +30,9 @@ in this folder; it indexes the docs and has the current status.
 - **The codeplug is the 640-byte internal EEPROM, `0x0D80`–`0x0FFF`.** DPS reads it as 20 × 32
   bytes and writes only `0x0E13`–`0x0FFB` (15 × 32 bytes, then 2 and 7). It never sends `21` or
   `19` to a GM600.
-- Checksums are additive per block. The personality checksum byte is `0x0FF4`; its range isn't
-  pinned. The network block's checksum byte isn't located.
+- Checksums are solved: five per-block additive sums, `checksum = (Σ block_data − 0x55) & 0xFF`,
+  firmware-verified (validator 0xB8E1/0xB900). Checksum bytes: 0x0D85, 0x0D93, 0x0E12 (Radio),
+  0x0F07 (Network), 0x0FF4 (Personality); 0x0FF5–0x0FFF is in no block. See `tools/gm600_codeplug.py`.
 - DPS blanks the factory field `0x0FF5`–`0x0FFB` (`20 00 00 00 00 11 DC` on the reference radio) on
   every write. The pre-write dump `docs/gm600-807IYA0903-2026-11-03-alignment-0D80.bin` is the
   only copy of the original.

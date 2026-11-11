@@ -69,7 +69,7 @@ python3 -m unittest discover -s gm600/tools          # tools vs mock radio, ~2 s
 
 Done: applet with pty, socket and sniff operations; BUSY modes (none, manual, auto, with
 setup/hold); transfer timeout. The applet and component suites pass (15 tests, 2 of them
-synthesis); the GM600 tool suite passes (10 tests).
+synthesis); the GM600 tool suite passes (31 tests).
 **Tested on a real radio: GM600** (Glasgow revC3, 9600 baud, read and write); see
 `gm600/README.md`. BUSY handling is still simulation-only, because the GM600 has no BUSY line.
 
