@@ -4,9 +4,12 @@ version = "0.1.0"
 description = "Glasgow applet: half-duplex open-drain UART with BUSY line for Motorola SB9600/SBEP radios (RIB replacement)"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
-  "glasgow",
-]
+license = "MIT"
+license-files = ["LICENSE"]
+# Glasgow is NOT a PyPI dependency: the `glasgow` name on PyPI is an unrelated placeholder. Install
+# Glasgow from git (see README.md); this applet is loaded into that environment. The GM600 host
+# tools under gm600/tools/ are pure-Python and need nothing beyond the stdlib.
+dependencies = []
 
 [project.entry-points."glasgow.applet"]
 rib = "glasgow_rib:RIBApplet"

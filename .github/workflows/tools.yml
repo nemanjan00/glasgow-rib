@@ -1,0 +1,19 @@
+name: tools
+
+# The GM600 host tools (gm600/tools/) are pure-Python and test against a mock radio, so they run
+# with no hardware and no Glasgow install. (The applet/gateware suites need Glasgow from git and are
+# not run here.)
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run GM600 tool tests
+        run: python -m unittest discover -s gm600/tools -v
