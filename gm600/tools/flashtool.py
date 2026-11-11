@@ -49,6 +49,10 @@ def upload_and_launch(radio, org, code, chunk=32):
         raise sbep.SBEPError("stub read-back mismatch — upload failed")
     frame = sbep.launch_stub(radio, org, code)      # re-verify right before the jump
     _expect(radio, len(frame) + 1, 2.0)             # echo of the 26 frame + one launch ACK
+    # Let the stub finish its self-check and clear the ACK's echo from the SCI before the first
+    # command: a byte sent too early overruns the receiver and is lost (the probe then times out).
+    time.sleep(0.3)
+    radio.drain()
     # the stub is now in its command loop
 
 

@@ -1,7 +1,8 @@
 """A tiny 68HC11 assembler — just the subset the GM600 RAM stubs need.
 
 Enough to assemble ``ramdump.S``: labels, ``NAME = expr`` equates, ``.org``, ``.cksum`` (one byte
-that makes the whole image sum to 0 mod 256, for a stub's self-check), and a dozen
+that makes the whole image sum to 0 mod 256) / ``.cksum16`` (two bytes that zero both Fletcher-style
+running sums, sum1 += byte, sum2 += sum1 — for a stub's self-check), and a dozen
 mnemonics across the inherent / immediate / extended / indexed / relative addressing modes. Not a
 general assembler; it exists so the stub can live as readable ``.S`` source with no external
 toolchain. Use it as a module (``assemble_file``) or a CLI:
@@ -32,7 +33,7 @@ INSTR = {
     "stab": {"EXT": 0xF7, "IDX": 0xE7},
     "anda": {"IMM8": 0x84, "EXT": 0xB4},
     "oraa": {"IMM8": 0x8A, "EXT": 0xBA},
-    "adda": {"IMM8": 0x8B}, "addb": {"IMM8": 0xCB},
+    "adda": {"IMM8": 0x8B, "IDX": 0xAB, "EXT": 0xBB}, "addb": {"IMM8": 0xCB},
     "cmpa": {"IMM8": 0x81}, "cmpb": {"IMM8": 0xC1},
     "ldx": {"IMM16": 0xCE, "EXT": 0xFE}, "stx": {"EXT": 0xFF}, "cpx": {"IMM16": 0x8C},
     "lds": {"IMM16": 0x8E, "EXT": 0xBE},
@@ -118,6 +119,10 @@ def assemble(source, symbols=None):
                 insns.append((addr, ".cksum", None))
                 addr += 1
                 continue
+            if toks[0] == ".cksum16":
+                insns.append((addr, ".cksum16", None))
+                addr += 2
+                continue
             mnemonic, operand = toks[0], (toks[1] if len(toks) > 1 else None)
             if mnemonic not in INSTR:
                 raise AsmError(f"unknown mnemonic: {mnemonic}")
@@ -130,11 +135,15 @@ def assemble(source, symbols=None):
         raise AsmError("no .org directive")
 
     out = bytearray()
-    cksum_at = None
+    cksum_at = cksum16_at = None
     for at, mnemonic, operand in insns:
         if mnemonic == ".cksum":
             cksum_at = len(out)
             out.append(0)
+            continue
+        if mnemonic == ".cksum16":
+            cksum16_at = len(out)
+            out += b"\0\0"
             continue
         mode = _mode(mnemonic, operand)
         op = INSTR[mnemonic][mode]
@@ -154,6 +163,13 @@ def assemble(source, symbols=None):
             out += bytes([op, rel & 0xFF])
     if cksum_at is not None:                      # make the whole image sum to 0 (mod 256)
         out[cksum_at] = -sum(out) & 0xFF
+    if cksum16_at is not None:                    # Fletcher-style: both running sums end at 0
+        a = b = 0
+        for v in out[:cksum16_at]:
+            a = (a + v) & 0xFF
+            b = (b + a) & 0xFF
+        out[cksum16_at] = -(a + b) & 0xFF         # then a -> -b, b -> 0
+        out[cksum16_at + 1] = b                   # then a -> 0,  b stays 0
     return Assembled(org, bytes(out), sym)
 
 

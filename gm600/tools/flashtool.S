@@ -33,26 +33,37 @@ DDRA    = $1001         ; DDA6 = PA6 direction
 TCTL1   = $1020         ; OM2:OL2 (bits 7:6) = OC2 action on PA6; clear to use PA6 as a plain output
 WEMASK  = $40           ; PA6 bit
 
-CNT16   = $2280         ; loop counter (16-bit, saved across X reuse)
+CNT16   = $2280         ; loop counter (16-bit, saved across X reuse); 0x2280-0x2286: same reasoning as BUF
 WINPTR  = $2282         ; working window pointer (hi)
 WINLO   = $2283         ; working window pointer (lo)
 BUFPTR  = $2284         ; working buffer pointer
 PAGE    = $2286         ; target page of a 'W' command (whitelist-checked)
-BUF     = $2300         ; 256-byte sector buffer
+BUF     = $2300         ; 256-byte sector buffer. Inside the firmware's 0x2000 buffer pool on purpose:
+;                         stub (~450 B) + buffer (256 B) don't fit in the free 0x3D80-0x3FFF, and the
+;                         buffer is only touched after the 0x26 launch, when the firmware is halted
+;                         for good (sei, never resumes) - so nothing else can use the pool by then.
 
 ; ------------------------------------------------------------------ command loop
 start:  sei
-        ldx     #start          ; self-check: the image (incl. its .cksum byte) must sum to 0 -
-        clra                    ; if the firmware overwrote any of it after the host verified it,
-selfck: ldab    0,x             ; don't run it
-        aba
+        ldx     #start          ; self-check (Fletcher-style, A = sum1, B = sum2, both must end at 0
+        clra                    ; over the image incl. its .cksum16 bytes): if the firmware
+        clrb                    ; overwrote any of it after the host verified it, don't run it
+selfck: adda    0,x             ; sum1 += byte
+        psha
+        aba                     ; A = sum1 + sum2
+        tab                     ; sum2 += sum1
+        pula
         inx
         cpx     #codeend
         bne     selfck
         tsta
+        bne     damaged
+        tstb
         beq     selfok
 damaged: bra    damaged         ; no COP kick -> watchdog reset -> the radio reboots (safe)
 selfok:
+        ldaa    SCSR            ; drop any stale received byte (e.g. the echo of the radio's own 0x26
+        ldab    SCDR            ; launch ACK): reading SCSR then SCDR clears RDRF and overrun
         jsr     we_setup        ; free PA6 from OC2, make it an output, start in read mode (/OE low)
 loop:   jsr     cop
         jsr     rxb             ; B = command byte
@@ -251,5 +262,5 @@ wdi:    dex
         jsr     txb
         jmp     loop
 
-        .cksum                  ; balances the image to 0 (mod 256) for the self-check above
+        .cksum16                ; zeroes both self-check sums (see the self-check at start)
 codeend:

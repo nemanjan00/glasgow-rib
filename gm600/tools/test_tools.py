@@ -176,12 +176,12 @@ class DPSReadTest(unittest.TestCase):
 class RamdumpAssemblerTest(unittest.TestCase):
     """asm6811 must reproduce the hardware-verified dumper stub from ramdump.S."""
 
-    # Verified in-circuit (relocated to 0x3D80 with the self-check, 2026-11-11): this stub dumped all
-    # 256 KB with SHA-256 identical to the golden motofix.BIN.
+    # Verified in-circuit (0x3D80, 16-bit self-check, 2026-11-12): this stub dumped all 256 KB with
+    # SHA-256 identical to the golden motofix.BIN.
     PROVEN = bytes.fromhex(
-        "0fce3d804fe6001b088c3ddc26f74d270220fec600f71058ce40008655b7103a86aab7103ab6"
-        "1074848027f9a600b71077088c800026e4cb04c13826d8ce80008655b7103a86aab7103ab610"
-        "74848027f9a600b710770826e720fe82")
+        "0fce3d804f5fab00361b1632088c3de426f44d26035d270220fec600f71058ce40008655b710"
+        "3a86aab7103ab61074848027f9a600b71077088c800026e4cb04c13826d8ce80008655b7103a"
+        "86aab7103ab61074848027f9a600b710770826e720fe2233")
 
     def test_ramdump_S_assembles_to_verified_bytes(self):
         import ramdump
@@ -209,11 +209,11 @@ class LcdTextTest(unittest.TestCase):
     """lcd_text.S/.py: the hardware-verified 7-seg stub and its font."""
 
     # Verified on the radio: the original at 0x2000 pushed 322 over a 686 codeplug, then HI/HEL/...;
-    # this relocated build (0x3D80, self-check) showed "HI" on the radio (2026-11-11).
+    # this build (0x3D80, 16-bit self-check) showed "HI" on the radio (2026-11-12).
     PROVEN = bytes.fromhex(
-        "0fce3d804fe6001b088c3de326f74d270220fe8e3fffbd3dc9c1a526f9bd3dc9f73f80bd3dc9"
-        "f73f81bd3dc9f73f82bd3dc9f73f83bd3dc9f73f84ce3f803c3cc605bd8f1f383820cdbd3dd7"
-        "b61074842027f6f61077398655b7103a86aab7103a39d6")
+        "0fce3d804f5fab00361b1632088c3deb26f44d26035d270220fe8e3fffbd3dd0c1a526f9bd3d"
+        "d0f73f80bd3dd0f73f81bd3dd0f73f82bd3dd0f73f83bd3dd0f73f84ce3f803c3cc605bd8f1f"
+        "383820cdbd3ddeb61074842027f6f61077398655b7103a86aab7103a39c6b2")
 
     def test_stub_assembles_to_verified_bytes(self):
         import asm6811
@@ -371,7 +371,7 @@ class BannerTest(unittest.TestCase):
 
 
 class StubSelfCheckTest(unittest.TestCase):
-    """Every RAM stub sums to 0 and refuses to run if any byte changed after the host's verify."""
+    """Every RAM stub carries a 16-bit (Fletcher-style) self-check and refuses to run if damaged."""
 
     STUBS = ("ramdump.S", "flashtool.S", "lcd_text.S", "led_cmd.S", "lcd_raw.S")
 
@@ -381,19 +381,27 @@ class StubSelfCheckTest(unittest.TestCase):
         m.ram[a.org:a.org + len(code)] = code
         c = emu6811.CPU(m)
         c.SP, c.PC = 0x3FFF, a.org
-        c.run(max_insns=20000, stop_pc=a.symbols["selfok"])
+        c.run(max_insns=40000, stop_pc=a.symbols["selfok"])
         return c.PC
 
     def test_intact_stub_passes_and_damaged_stub_halts(self):
         import asm6811
         for name in self.STUBS:
             a = asm6811.assemble_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), name))
-            self.assertEqual(sum(a.code) & 0xFF, 0, name)
+            s1 = s2 = 0
+            for v in a.code:
+                s1 = (s1 + v) & 0xFF
+                s2 = (s2 + s1) & 0xFF
+            self.assertEqual((s1, s2), (0, 0), name)                    # Fletcher-style, both zero
             self.assertGreaterEqual(a.org, 0x3D80, name)              # not the firmware's 0x2000 pool
             self.assertEqual(self._run(a, a.code), a.symbols["selfok"], name)
             bad = bytearray(a.code)
             bad[-5] ^= 0x01                                             # one bit flipped near the end
             self.assertEqual(self._run(a, bytes(bad)), a.symbols["damaged"], name)
+            swapped = bytearray(a.code)                                 # a plain 8-bit sum misses this
+            i = next(i for i in range(len(a.code) - 8, 0, -1) if a.code[i] != a.code[i + 1])
+            swapped[i], swapped[i + 1] = swapped[i + 1], swapped[i]
+            self.assertEqual(self._run(a, bytes(swapped)), a.symbols["damaged"], name)
 
 
 class VmBootTest(unittest.TestCase):

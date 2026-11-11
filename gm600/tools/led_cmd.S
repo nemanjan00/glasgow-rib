@@ -17,14 +17,20 @@ LEDSH   = $34AE         ; LED shadow byte
 PUSH    = $8F1F         ; SPI device dispatcher; B=10 -> push LEDs
 
 start:  sei
-        ldx     #start          ; self-check: the image (incl. its .cksum byte) must sum to 0 -
-        clra                    ; if the firmware overwrote any of it after the host verified it,
-selfck: ldab    0,x             ; don't run it
-        aba
+        ldx     #start          ; self-check (Fletcher-style, A = sum1, B = sum2, both must end at 0
+        clra                    ; over the image incl. its .cksum16 bytes): if the firmware
+        clrb                    ; overwrote any of it after the host verified it, don't run it
+selfck: adda    0,x             ; sum1 += byte
+        psha
+        aba                     ; A = sum1 + sum2
+        tab                     ; sum2 += sum1
+        pula
         inx
         cpx     #codeend
         bne     selfck
         tsta
+        bne     damaged
+        tstb
         beq     selfok
 damaged: bra    damaged         ; no COP kick -> watchdog reset -> the radio reboots (safe)
 selfok:
@@ -49,5 +55,5 @@ cop:    ldaa    #$55
         staa    COPRST
         rts
 
-        .cksum                  ; balances the image to 0 (mod 256) for the self-check above
+        .cksum16                ; zeroes both self-check sums (see the self-check at start)
 codeend:
