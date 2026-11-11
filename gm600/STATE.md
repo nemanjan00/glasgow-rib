@@ -5,18 +5,31 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 `CLAUDE.local.md`.
 
 ## Now
-- **Current task:** GOAL = make a RAM stub (`.S`) write arbitrary content to the glass. (Review fixes
-  from 2026-11-11 are done & pushed: FIRMWARE.md LCD section consolidated, STATE.md + SessionStart
-  hook added, host details in git-ignored CLAUDE.local.md, tools committed, experiments in tools/lab/.)
-- **Last verified on hardware (2026-11-11):** displayed idle number = MPT1327 **Own Unit No.** =
-  codeplug **0x0F0B–0x0F0C** (big-endian 16-bit), block checksum **0x0FF4**. Changed it 322→456 (DPS)
-  and 322→712→322 (`tools/setunit.py`, direct SBEP). Radio left at **322**, responding.
-- **Next step (the `.S` goal):** the stub (`tools/lab/lcd_arb.S`) replicates SPCR/CS/0x9102 but the
-  glass stays frozen (stub runs — SBEP goes dead). Fix: CS on 0x107E must be **BSET/BCLR**
-  (read-modify-write), not a full-byte store; and/or the firmware's acquire/device-select (0x5013/
-  0x5032, dev 0x0245) may be required. Use **IDA** (motofix.BIN, 6811) to decompile 0x8F1F dispatcher
-  + the display paint, then either fix the stub or call the firmware's own refresh with 0x37AC
-  pre-filled. **Recover a hung stub with `tools/psu_reboot.py` (PSU), not 0x10.**
+- **Current task:** GOAL = make a RAM stub (`.S`) write ARBITRARY content to the glass (prove with a
+  specific number like 686, NOT 888 — all-segments aliases the boot self-test). Radio left at **322**.
+- **PROVEN (2026-11-11):** the `.S` push works. `tools/lab/lcd_disp2.S` (sei-stub, fill 0x37AC=FF,
+  push) lit all segments ("888") with **SBEP confirmed dead = firmware halted**, so it was a real
+  push, not the self-test. `lcd_disp3.S` pushed the "322" buffer → showed 322. **The missing pieces
+  that made the push work: the control-head enable `0x107C` (=0x14 before, 0x10 after) + `0x1024`
+  (=0x00/0x40), plus busy-wait delays replacing the firmware's OC4-timed delays. CS on 0x107E via RMW
+  (oraa/anda).** The full push: enable 0x1024=0/0x107C=0x14 → dly → cmd (SPCR=0x57, CS|=0x41, send
+  `02 50 3F` via 0x9102, CS&=~0x61) → dly → data (SPCR=0x50, CS|=0x01, send 21 bytes, CS&=~0x01) →
+  0x107C=0x10/0x1024=0x40 → dly.
+- **BLOCKERS to clean arbitrary content (next step):**
+  1. The DIGIT segment buffer is **not 0x37AC** on the real radio (0x37AC reads identical for 686 and
+     322 — it's icons/fixed; the emulator wrongly models it as the digits). The number source pipeline
+     is **ASCII @0x34BD** ("686"/"322") → **per-digit 7-seg @0x3497** (686=`F3 F7 F3`, 322=`E6 76 76`)
+     → multiplex → push. The multiplexed buffer pushed for digits is transient/elsewhere, so I can't
+     just read a target pattern — need to reverse the 21-byte→segment map by sweeping.
+  2. The **segment sweep** (`tools/lab/lcd_sweep2.S` cycling, and `batch_sweep.py` preload+reboot per
+     byte via `lcd_disp4.S`) is **confounded**: stubs crash (COP-reset → boot **self-test 888**, which
+     the cam then captures) so results alias. `lcd_disp4` (push from preloaded 0x2100) is unreliable
+     where `lcd_disp2` (fill 0x37AC) was reliable — debug why (RAM region? timing?). Capture must wait
+     past the boot self-test and verify SBEP-dead before trusting a frame.
+- **Partial 7-seg bit map** (from 0x3497: 6=F3,8=F7,3=E6,2=76): bit7=seg c, bit4=seg e, bit2=seg b,
+  bit0=seg f, bit3=unused; {bit6,bit5,bit1}={a,d,g} (need digits 1/4/7 to split). This is the
+  per-digit font, NOT the controller multiplex.
+- **Recover a hung stub with `tools/psu_reboot.py` (PSU), not 0x10.**
 
 ## Invariants (never violate)
 - **12 V on pin 12 only AFTER boot; off before any power-cycle.** 12 V at reset = CPU bootstrap mode.
@@ -39,6 +52,6 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
   renders identically to 322 in the VM. Where do real vs emulated boots diverge? Likely the
   trunking display-state (RF/synth/ASFIC not modelled) → firmware takes a different display branch.
   Matters because the keypad patch was "validated in the emulator".
-- `.S` push: is the firmware's acquire (0x5013/0x5032, dev 0x0245) required, or is BSET/BCLR CS the
-  whole fix? (see Next step)
-- Personality checksum byte range (0x0FF4) not fully pinned; network-block checksum byte not located.
+- `.S` push: RMW CS (oraa/anda on 0x107E) alone did NOT fix it — the push also writes 0x107C
+  (=0x14/0x10), 0x1024, and OC4-timed delays. Decide: replicate all of that in a sei-stub, OR use a
+  co-resident OC-ISR that keeps 0x37AC=my buffer and lets the firmware push (preferred — IRQs stay on).
