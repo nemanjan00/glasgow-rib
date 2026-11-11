@@ -238,6 +238,20 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
   dispatcher `0x8F1F` jumps through a word table at `0x8F44`. **Entry 10 → `0x8F64`** pushes one
   byte from RAM shadow **`0x34AE`** to the front-panel **LED** shift register (so
   `ldab #10; jsr $8F1F` = "update LEDs"); **entry 8** sends the 21-byte **LCD** buffer from `0x37AC`.
+  - **LED shift-register bit map** (byte at `0x34AE`), verified on the real radio by driving each bit
+    from a RAM stub (`tools/led_cmd.S` + `tools/led_demo.py`) and watching the panel over a webcam:
+
+    | bit | mask | front-panel element |
+    |-----|------|---------------------|
+    | 0 | `0x01` | **amber** status LED (middle of the left-column stack) |
+    | 1 | `0x02` | **red** status LED (top) |
+    | 2 | `0x04` | **green** status LED (bottom) |
+    | 3–6 | | no visible LED (unused outputs / control bits; bit 6 is set in the idle baseline `40`) |
+    | 7 | `0x80` | **LCD + keypad EL backlight** (green) |
+
+    The left indicator is a tri-color stack (red/amber/green). Direct `0x17` writes to `0x34AE` do
+    **not** show — the firmware only pushes the shadow on its own events and overwrites it — so driving
+    the LEDs needs a stub that calls the push itself (or the self-healing timer-ISR hook below).
 - **In-circuit patching over BUS+, self-healing.** The OC3/4/5 timer ISRs (`0x92A1`/`0x92AA`/
   `0x9298`) clear their flag and `jmp` through **RAM pointers `$A4`/`$A6`/`$A2`**. Write a stub's
   address into one with a `0x17` RAM write → periodic execution with no flash change (reset re-inits
