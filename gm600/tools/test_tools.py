@@ -479,5 +479,57 @@ class VmFlashWriteModelTest(unittest.TestCase):
         self.assertEqual(bytes(m.flash[0x1000:0x1100]), flash[0x1000:0x1100])
 
 
+class FlashStubIntegrationTest(unittest.TestCase):
+    """Run the flashtool stub in the VM against the modelled flash: probe, apply, whitelist."""
+
+    def setUp(self):
+        import emu6811, asm6811
+        import os
+        fw = "/home/nemanjan00/storage/motorola/motofix.BIN"
+        if not os.path.exists(fw):
+            self.skipTest("motofix.BIN not present")
+        self.flash = open(fw, "rb").read()
+        self.stub = asm6811.assemble_file(os.path.join(HERE, "flashtool.S")).code
+        self.m, self.c = self._boot(emu6811)
+
+    def _boot(self, emu6811):
+        cp = b"\xff" * 0x280
+        m = emu6811.Mem(self.flash, cp)
+        c = emu6811.CPU(m)
+        c.reset(); c.run(max_insns=6_000_000, cop_timeout=150000)
+        m.ram[0x2000:0x2000 + len(self.stub)] = self.stub
+        c.PC = 0x2000; c.sf(emu6811.I, True); c.SP = 0x01FF
+        m.pin12_12v = True
+        return m, c
+
+    def _cmd(self, payload, n, budget=3_000_000):
+        self.m.sci_out.clear(); self.m.feed_rx(bytes(payload))
+        self.c.run(max_insns=budget, cop_timeout=0)
+        return bytes(self.m.sci_out[:n])
+
+    def test_probe_and_apply_and_whitelist(self):
+        import gm600_keypad_patch as kp
+        from collections import defaultdict
+        self.assertEqual(self._cmd(b"I", 4, 500_000), bytes([0x1F, 0xDA, 0xFE, 0xFE]))
+        # window-bypass to the fixed region must be refused, leaving pages 14/15 intact
+        before = bytes(self.m.flash[0x3D500:0x3D600])
+        self.assertEqual(self._cmd([ord("W"), 0, 0xD5, 0x00] + [0xAA] * 256, 1), b"\x85")
+        self.assertEqual(bytes(self.m.flash[0x3D500:0x3D600]), before)
+        # full keypad patch apply (stub sector first), verify == patch_image
+        sect = defaultdict(dict)
+        for off, orig, new in kp.patch_diff():
+            for i, b in enumerate(new):
+                sect[(off + i) & ~0xFF][(off + i) & 0xFF] = b
+        for base in (0x1E00, 0x1000, 0x1100):
+            w = 0x4000 | (base & 0x3FFF); p, wh, wl = base >> 14, w >> 8, w & 0xFF
+            cur = self._cmd([ord("R"), p, wh, wl], 256)
+            want = bytearray(cur)
+            for o, b in sect[base].items():
+                want[o] = b
+            self.assertEqual(self._cmd([ord("W"), p, wh, wl] + list(want), 1), b"\x84")
+            self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), bytes(want))
+        self.assertEqual(bytes(self.m.flash), kp.patch_image(self.flash))
+
+
 if __name__ == "__main__":
     unittest.main()

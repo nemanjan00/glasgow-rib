@@ -176,14 +176,22 @@ wrxlp:  stx     CNT16
         ldx     CNT16
         dex
         bne     wrxlp
-        ldab    PAGE            ; WHITELIST: only program page 0 (patch) or pages 12/13 (erased test)
+        ldab    PAGE            ; WHITELIST page: only 0 (patch) or 12/13 (erased test pages)
         cmpb    #0
-        beq     wpok
+        beq     wpg
         cmpb    #12
-        beq     wpok
+        beq     wpg
         cmpb    #13
-        beq     wpok
-        ldab    #$85            ; refuse: program nothing, reply fail status
+        bne     wrej
+wpg:    ldab    WINPTR          ; window hi MUST be 0x40-0x7F (the bank window) — never the fixed
+        cmpb    #$40            ; region ($80+), or a bad header byte could program pages 14/15
+        bcs     wrej            ; (vectors/reset) while PAGE still read 0.
+        cmpb    #$80
+        bcc     wrej
+        ldab    WINLO           ; and sector-aligned (low byte 0)
+        bne     wrej
+        bra     wpok
+wrej:   ldab    #$85            ; refuse: program nothing, reply fail status
         jsr     txb
         jmp     loop
 wpok:   jsr     we_on           ; PA6 high: enable flash writes for the prefix + sector load

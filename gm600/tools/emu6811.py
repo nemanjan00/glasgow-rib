@@ -164,6 +164,10 @@ class Mem:
         return 0x38000 + (a - 0x8000)
 
     def _flash_write(self, chip, v):
+        # Models SDP ENABLED: a write only takes effect as part of a recognised command sequence
+        # (the AA/55/A0 program prefix, or ID entry/exit); a bare write with no prefix is ignored.
+        # The chip's factory SDP state is unknown, but the stub always sends the prefix, which works
+        # either way, and leaves SDP on. (No sdp_enabled=False path is modelled.)
         ca = chip & 0x7FFF                               # AT29C020 commands decode only A0-A14
         self._fl_seq.append((ca, v)); self._fl_seq = self._fl_seq[-3:]
         s = self._fl_seq
