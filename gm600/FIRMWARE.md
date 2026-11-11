@@ -275,11 +275,22 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
     (21 B + 9 B), `CS=0x61` (10 B cmd), `CS=0x60` (`de`,`df`), `CS=0x01` (9 B), then per update
     `CS=0x41` (`00 00 3f` addr cmd) + `CS=0x01` (21 B data). Tool: `tools/lcd_replay.S` (a generic
     phase-replay interpreter: host sends `[cs][spcr][nlen][data…]`) + `tools/lcd_replay.py`.
-  - **Still OPEN: clean per-segment control for decoding.** The per-byte sweep is inconsistent (`322`
-    reappears, backlight flips on/off — images/lcd_drive_byte_sweep.jpg), which points to the firmware's
-    display ISR still contending on the shared SPI, and/or the `00 00 3f` address not placing data at a
-    known offset. Next: ensure sole bus control (stub only) and reverse the controller's command/address
-    set (what `00 00 3f` and the `CS=0x61`/`CS=0x60` commands mean) so arbitrary data lands predictably.
+  - **Re-checked rigorously (don't trust the earlier "888"):** that `888` was the **boot self-test**
+    (all-segments), caught mid-animation — not driven data. A controlled test (full boot, stub launched,
+    then idle/blank/full captures) shows:
+    - **The stub HAS sole control** — with it running and no data sent, the display is frozen (`322`,
+      backlight off); the firmware is halted. (So no SPI contention — my earlier contention guess was
+      wrong.)
+    - **My init/config DOES reach the control head** — it turns the backlight on.
+    - **But the 21-byte digit-data write (`CS=0x01` after `00 00 3f`) does NOT overwrite the held
+      digits** — `all-00` and `all-FF` both leave `322`. Extra settling (post-boot, post-provision)
+      did not change this, so it's an **addressing/data-format** issue, not timing.
+  - **Still OPEN: writing the digit RAM.** The held digits aren't refreshed (static), yet my `CS=0x01`
+    data doesn't replace them — likely `00 00 3f` isn't the digit-RAM address, or the 21-byte buffer is
+    structured (not raw consecutive segments; `tools/gm600_remote.py` *decodes* it, so it has fields).
+    This is slow to crack over a webcam; **a logic analyzer on the control-head SPI** (SCK/MOSI + the
+    `0x107E` CS nibble) would show the firmware's exact address/command/data to replicate. Passive
+    decode via `0x37AC` remains the reliable route to the segment map.
   - **The LCD is read *passively* instead** — `0x37AC` (21 bytes) is a live mirror decoded by
     `tools/gm600_remote.py` (channel "1" = `0530 00c1 008f d085 e5af ea00 a661 0000 6008 020010`,
     "322" = `8530 18c1 008f d080 e5af fe00 a261 8000 6018 020010`). Segment decoding is best done this
