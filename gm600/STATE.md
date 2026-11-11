@@ -5,15 +5,18 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 `CLAUDE.local.md`.
 
 ## Now
-- **Current task:** address review — consolidate FIRMWARE.md LCD section, repo hygiene, and the
-  `.S`-drives-the-glass goal.
+- **Current task:** GOAL = make a RAM stub (`.S`) write arbitrary content to the glass. (Review fixes
+  from 2026-11-11 are done & pushed: FIRMWARE.md LCD section consolidated, STATE.md + SessionStart
+  hook added, host details in git-ignored CLAUDE.local.md, tools committed, experiments in tools/lab/.)
 - **Last verified on hardware (2026-11-11):** displayed idle number = MPT1327 **Own Unit No.** =
   codeplug **0x0F0B–0x0F0C** (big-endian 16-bit), block checksum **0x0FF4**. Changed it 322→456 (DPS)
   and 322→712→322 (`tools/setunit.py`, direct SBEP). Radio left at **322**, responding.
-- **Next step:** make a RAM stub (`.S`) push an arbitrary 21-byte 0x37AC buffer to the glass. Blocker:
-  stub replicates SPCR/CS/0x9102 but the glass stays frozen — CS on 0x107E must be **BSET/BCLR**
-  (read-modify-write), not a full-byte store; also check if the firmware's acquire/device-select
-  step is required. Decompile 0x8F1F + display paint in IDA, or call the firmware's own refresh.
+- **Next step (the `.S` goal):** the stub (`tools/lab/lcd_arb.S`) replicates SPCR/CS/0x9102 but the
+  glass stays frozen (stub runs — SBEP goes dead). Fix: CS on 0x107E must be **BSET/BCLR**
+  (read-modify-write), not a full-byte store; and/or the firmware's acquire/device-select (0x5013/
+  0x5032, dev 0x0245) may be required. Use **IDA** (motofix.BIN, 6811) to decompile 0x8F1F dispatcher
+  + the display paint, then either fix the stub or call the firmware's own refresh with 0x37AC
+  pre-filled. **Recover a hung stub with `tools/psu_reboot.py` (PSU), not 0x10.**
 
 ## Invariants (never violate)
 - **12 V on pin 12 only AFTER boot; off before any power-cycle.** 12 V at reset = CPU bootstrap mode.
