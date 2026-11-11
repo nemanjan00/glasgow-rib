@@ -267,15 +267,19 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
     The firmware's first real display push is preceded by the command **`00 00 3f`** at `CS=0x41`
     (sets the controller's address pointer); then it streams 21 data bytes at `CS=0x01` and, in steady
     state, repeats entry 8 (the controller auto-wraps after 21 bytes).
-  - ***Active* LCD segment driving is still OPEN.** A takeover stub reproducing the apparent sequence —
-    the `00 00 3f` address command (entry 3) then entry-8 data, with/without acquire/release and the
-    5/4/3 init — does **not** change the segments: the controller keeps its last state and ignores the
-    stub's `0x37AC` data, while *init* entries do reach it (they blank it). A remaining protocol/timing
-    nuance is unresolved, and the emulator's SPI capture is **not cycle-accurate on the CS port** (it
-    logged the entry-10 backlight byte at `CS=0x00` though entry 10 asserts `0x21`), so the exact wire
-    can't be trusted from emulation. **Resolving this needs a logic analyzer on the control-head SPI**
-    (SCK/MOSI + the `0x107E` CS lines) to compare the firmware's real wire against the stub's. Tools:
-    `tools/lcd_cmd.S` (stub with the entry-3 address command), `tools/lcd_sweep.py`.
+  - ***Active* LCD driving — CONFIRMED (with the FULL init).** The earlier failures were because the
+    stub only sent the `00 00 3f` address command + data; the controller actually needs the full init
+    **config** first. Replaying the exact captured phase sequence byte-for-byte drives the control head
+    (the display visibly changed `322` → `888`, and a `byte0=0xFF` data write blanked it). The init
+    phases (captured at steady boot, `tools/lcd_replay.py`): `CS=0x20` ×2 (26 B config), `CS=0x01`
+    (21 B + 9 B), `CS=0x61` (10 B cmd), `CS=0x60` (`de`,`df`), `CS=0x01` (9 B), then per update
+    `CS=0x41` (`00 00 3f` addr cmd) + `CS=0x01` (21 B data). Tool: `tools/lcd_replay.S` (a generic
+    phase-replay interpreter: host sends `[cs][spcr][nlen][data…]`) + `tools/lcd_replay.py`.
+  - **Still OPEN: clean per-segment control for decoding.** The per-byte sweep is inconsistent (`322`
+    reappears, backlight flips on/off — images/lcd_drive_byte_sweep.jpg), which points to the firmware's
+    display ISR still contending on the shared SPI, and/or the `00 00 3f` address not placing data at a
+    known offset. Next: ensure sole bus control (stub only) and reverse the controller's command/address
+    set (what `00 00 3f` and the `CS=0x61`/`CS=0x60` commands mean) so arbitrary data lands predictably.
   - **The LCD is read *passively* instead** — `0x37AC` (21 bytes) is a live mirror decoded by
     `tools/gm600_remote.py` (channel "1" = `0530 00c1 008f d085 e5af ea00 a661 0000 6008 020010`,
     "322" = `8530 18c1 008f d080 e5af fe00 a261 8000 6018 020010`). Segment decoding is best done this
