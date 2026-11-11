@@ -277,6 +277,19 @@ pressing the bench radio:
 | AN1 | `14` A · `15` B · `16` C · `17` D |
 | AN2 | `06` scroll down · `07` scroll up · `08` on/off |
 
+## `ctcss_tx.py` / `squelch_test.py` — open a conventional channel's tone squelch (HackRF)
+
+```
+python3 ctcss_tx.py                         # 446.06875 MHz, PL 123.0 Hz + 1 kHz audio, Ctrl-C to stop
+python3 ctcss_tx.py --no-tone --seconds 10  # same without PL: a PL channel must stay squelched
+python3 squelch_test.py --out /tmp/sqt      # baseline / no PL / PL / off, logs LEDs + display + webcam
+```
+
+Narrowband FM (2.5 kHz audio deviation, 500 Hz PL), HackRF tuned 250 kHz below the channel so its LO
+leak is out of band, amp off and TX VGA 0 by default. The generator self-checks its IQ by
+FM-demodulating it (`CtcssTxTest`). The radio must be put on the conventional channel by hand first
+(long-hold A ~7 s, then 001) — there is no SBEP or codeplug way to do it (see ../FAQ.md).
+
 ## `gm600_keypad_patch.py` — press real keys via a firmware patch
 
 Reading the screen is easy; *pressing* a key is not — the keypad is an analog A/D ladder the

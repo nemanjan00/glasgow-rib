@@ -30,6 +30,13 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 - **Recover a hung stub with `tools/psu_reboot.py` (PSU), not 0x10.** On the lab host set
   `PYMP305_PATH=~/pymp305/python` if running the script from outside that directory.
 
+- **Tone-squelch test ready, radio not yet conventional (2026-11-12).** `tools/ctcss_tx.py` +
+  `tools/squelch_test.py` (HackRF on the lab PC, 446.06875 MHz / 123.0 Hz, IQ self-verified,
+  dry-run OK). Conventional can't be entered remotely: VM shows the long-hold A latch is RAM-only (no
+  EEPROM write), no Conventional Mode value boots conventional, and pin-12 12 V (keypad patch) is a
+  manual supply. **Next at the bench:** long-hold A ~7 s → `001`, then `python3 squelch_test.py`.
+  Also: dump codeplug before/after the long-hold to settle the RECOVERY.md "3-byte" note.
+
 ## Invariants (never violate)
 - **12 V on pin 12 only AFTER boot; off before any power-cycle.** 12 V at reset = CPU bootstrap mode.
 - **Radio power = ISDT MP305B bench PSU (12 V / 0.5 A) via pymp305.** The rib applet's `-V 5` does

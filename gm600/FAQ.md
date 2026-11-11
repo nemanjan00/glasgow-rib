@@ -45,9 +45,24 @@ You selected conventional *momentarily* (short press) rather than latching it. U
 long-hold. A blinking LED means the radio is still hunting a trunked control channel; a latched
 conventional channel stops the hunt.
 
+## Does the long-hold write anything to the codeplug?
+
+Not in the emulator, which now boots like the real radio. Holding A latches conventional channel
+`  1` with **no EEPROM write**: the firmware's EEPROM-write routine (page 0 `0x5259`–`0x5293`) never
+runs, during the hold or for 5 M instructions after it. Booting with every value of the
+Conventional Mode field (`0x0E45` bits 6:5 — Inhibit/Dealer/All/RegioNet43, checksums fixed) still
+comes up trunked (`322`). So as far as the firmware shows, conventional is RAM state, consistent with
+the power-cycle reverting it. [RECOVERY.md](RECOVERY.md) attributes a 3-byte EEPROM difference to the
+mode switch, but its addresses were never recorded; to settle it on hardware, dump the codeplug
+(`dump_codeplug.py`) in trunked mode, long-hold A, dump again, and diff.
+
 ## Squelch won't open on a conventional channel.
 
 The channel's **RxPL** must match the PL (CTCSS) on the incoming signal, or squelch stays closed.
+With a HackRF: `tools/ctcss_tx.py` transmits narrowband FM on 446.06875 MHz with 123.0 Hz PL and
+1 kHz audio at minimum power (`--no-tone` for the same signal without PL), and
+`tools/squelch_test.py` runs no-signal / no-PL / PL / off phases while logging the LEDs and display
+over SBEP and photographing them.
 `001` on the reference radio expects **123.0 Hz (3Z)**. Feed a carrier on the channel frequency
 with 123.0 Hz PL and squelch opens. (The recovered sub-audible PL tone is present in the receive
 audio path whenever that carrier is received, independent of the squelch decision — handy for
