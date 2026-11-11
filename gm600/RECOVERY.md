@@ -95,6 +95,27 @@ flash differs from golden only in the one corrupted sector, so a full reflash re
 **The codeplug is in the CPU's internal EEPROM (`0x0D80–0x0FFF`), not this chip — T48 doesn't touch
 it.** After `0xC000` the sector should read `34 c6 01 30 e7 00 f6 34 7a c4 01 27 06 bd b8 ba`.
 
+## Post-recovery validation (on the real radio)
+
+After reflashing, the radio boots and answers SBEP (serial `807IYA0903`). Three checks confirmed a
+clean recovery and a correct fix:
+
+1. **Firmware is byte-perfect.** An in-circuit `ramdump.py --with-eeprom` was diffed against golden:
+   **0 bytes differ in the 256 KB flash**; both former corruption sites (`0x2800`, `0xC000`) match
+   golden. (The only NV difference is 3 bytes in the 640 B EEPROM codeplug — the trunking→conventional
+   mode switch — which is not in the flash; `motofix.BIN` is a flash-only *trunking* dump.)
+2. **The `page<<2` bank fix works in-circuit.** `flash_write_test.py` (with 12 V on pin 12): probe
+   `1F DA FE FE` → write a pattern to page 13 (`0x34000`) → read-back matches → **`0xC000` (page 3)
+   unchanged** → restore `0x34000` to FF. A "page 13" write now lands at page 13, not page 3. The old
+   stale stub, briefly left on the lab host, reproduced the bug one last time (its "read 0x34000"
+   returned `0xC000`'s contents) — a reminder to deploy the fixed stub before any write.
+3. **The safety guards fire.** Every write auto-backed-up the live sector to `flash_backups/`, and
+   `require_erased=True` confirmed page 13 was erased before writing.
+
+⚠️ Order for an in-circuit write: boot with **12 V OFF** (12 V at reset = bootstrap, no firmware),
+*then* apply 12 V, run the tool, remove 12 V, power-cycle. If the probe reads `0F CE…` instead of
+`1F DA…`, the 12 V isn't effective (sagging below ~11 V, or dropped out).
+
 ## Firmware reset register-setup table (authoritative, K4 names)
 
 The reset handler at `0xD45A` copies this table (`LDY #$D437`, write-loop, `0xFF`-terminated) into the

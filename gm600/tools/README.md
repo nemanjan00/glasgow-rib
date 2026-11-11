@@ -118,7 +118,7 @@ identical (same SHA-256) to the off-board T48 read (`motofix.BIN`), all 16 pages
 `.S`, no hardware needed. The `0x26` jump runs arbitrary code with interrupts off — only ever launch
 the address you just uploaded.
 
-## `flashtool.py` / `flashtool.S` — AT29C020 probe / read / **program** (DANGER, UNTESTED)
+## `flashtool.py` / `flashtool.S` — AT29C020 probe / read / **program** (DANGER)
 
 ramdump's read-write sibling. Where `ramdump` streams the flash and halts, `flashtool` uploads a
 **resident** command stub (`flashtool.S`, via `0x17` + `0x26`) and drives it over the raw link to
@@ -135,12 +135,29 @@ python3 flashtool.py revert flash.bin      # restore the original bytes
 **In-circuit flash write needs ~12 V on accessory pin-12** (releases the `/OE` write-lock so it
 follows PA6; see [../FLASH_WRITE.md](../FLASH_WRITE.md)). `probe`/`read` are safe; `patch`/`revert`
 ERASE AND PROGRAM, refuse unless `probe` reports an AT29C020 with the boot blocks unlocked, program
-the stub sector before the read_adc jsr sites, and read-back-verify. Confirmed on the radio: probe
-`1F DA FE FE` (writes reach the chip). The full apply is validated end-to-end in the emulator, which
-now models the write path (`test_tools.py::VmFlashWriteModelTest`). Open item: the 256-byte
-host→radio write burst drops the applet link (transport), so a real sector program on the radio is
-pending that fix. `test_tools.py::FlashToolTest` checks it assembles and
-the address mapping; `../datasheets/` holds the AT29C020 and 68HC11K4 datasheets (gitignored).
+the stub sector before the read_adc jsr sites, and read-back-verify.
+
+The stub encodes the bank register as **`page<<2`** (`aslb;aslb`), matching `ramdump.S`. An earlier
+raw-page bug sent a "page 13" write to page 3 and bricked a radio — see
+[../RECOVERY.md](../RECOVERY.md). Guards added after that: `write_sector` always reads and
+**auto-backs-up the live sector** to `flash_backups/` before programming, and `require_erased=True`
+refuses a test write unless the live sector is all-FF. Chunked transfer (32-byte bursts, drain each
+echo) fixes the applet link-drop on a 256-byte write.
+
+**Validated on the radio** (12 V on pin-12): probe `1F DA FE FE`, a page-13 (`0x34000`) write +
+read-back with **`0xC000` left untouched** (proves the bank fix), then restored to FF — run by
+`flash_write_test.py`. The full keypad-patch apply is validated in the emulator, which models the
+write path including `page<<2` (`test_tools.py::VmFlashWriteModelTest`,
+`FlashStubIntegrationTest::test_nonzero_page_bank_encoding`). `../datasheets/` holds the AT29C020 and
+68HC11K4 datasheets (gitignored).
+
+## `flash_write_test.py` — on-hardware bank-fix validation (needs 12 V on pin-12)
+
+Uploads the fixed stub and, with 12 V applied, writes page 13 (`0x34000`), verifies the read-back,
+asserts page 3 (`0xC000`) is unchanged (the `page<<2` proof), and restores `0x34000` to FF. Safe:
+page 13 is erased, `require_erased` enforces it, and every write is auto-backed-up. Boot with 12 V
+OFF, then apply 12 V; if the probe reads `0F CE…` the 12 V isn't effective. Radio is halted after —
+power-cycle. See [../RECOVERY.md](../RECOVERY.md) "Post-recovery validation".
 
 ## `emu6811.py` and `asm6811.py` — firmware emulator + assembler
 
