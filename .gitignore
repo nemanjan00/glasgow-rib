@@ -4,3 +4,4 @@ __pycache__/
 build/
 .venv/
 *.vcd
+gm600/datasheets/

@@ -118,6 +118,28 @@ identical (same SHA-256) to the off-board T48 read (`motofix.BIN`), all 16 pages
 `.S`, no hardware needed. The `0x26` jump runs arbitrary code with interrupts off — only ever launch
 the address you just uploaded.
 
+## `flashtool.py` / `flashtool.S` — AT29C020 probe / read / **program** (DANGER, UNTESTED)
+
+ramdump's read-write sibling. Where `ramdump` streams the flash and halts, `flashtool` uploads a
+**resident** command stub (`flashtool.S`, via `0x17` + `0x26`) and drives it over the raw link to
+probe the chip, read a sector, or **program** one — enough to apply/revert the keypad firmware patch
+(see [../FLASH_WRITE.md](../FLASH_WRITE.md), [../FIRMWARE.md](../FIRMWARE.md)).
+
+```
+python3 flashtool.py probe                 # SAFE: AT29C020 ID (1F/DA) + boot-block lockout
+python3 flashtool.py read 0x1000 out.bin   # read the 256-byte sector at a device address
+python3 flashtool.py patch flash.bin       # apply the keypad patch (2 sectors, read-back verified)
+python3 flashtool.py revert flash.bin      # restore the original bytes
+```
+
+**No flash write has been done on this radio — `probe`/`read` are safe, `patch`/`revert` ERASE AND
+PROGRAM.** `patch`/`revert` refuse unless `probe` reports an AT29C020 with the **lower boot block
+unlocked** (`0xFE`) — `read_adc` and the patch both live in that block, so if Motorola locked it the
+patch can't be flashed (use the hardware keypad-line drive). The stub framework (SCI command loop,
+banking, 256-byte transfer) is validated against the real firmware in the emulator via the read path;
+the AT29C020 program timing is bench-pending. `test_tools.py::FlashToolTest` checks it assembles and
+the address mapping; `../datasheets/` holds the AT29C020 and 68HC11K4 datasheets (gitignored).
+
 ## `emu6811.py` and `asm6811.py` — firmware emulator + assembler
 
 `asm6811.py` is a tiny 68HC11 assembler (used by `ramdump.S`). `emu6811.py` is a 68HC11 **core

@@ -1,0 +1,87 @@
+# GM600 flash write — AT29C020 in-system programming
+
+The GM600 firmware lives in an external **Atmel AT29C020** (256K×8, `motofix.BIN`). We can already
+*read* it in-circuit (`tools/ramdump.py`, via a RAM stub). Writing it in-circuit would let us apply
+the keypad-remote firmware patch (see [FIRMWARE.md](FIRMWARE.md), "Remote keypress") and revert it.
+This documents the AT29C020 programming interface and how it maps through the GM600's banking.
+
+Datasheet: Atmel `0291N–FLASH–07/02` (saved under `datasheets/AT29C020.pdf`, gitignored;
+e.g. <https://www.farnell.com/datasheets/94379.pdf>). Mfr code `1F`, device code `DA`.
+
+## ⚠️ Check the boot-block lockout FIRST
+
+The AT29C020 has a **boot-block programming lockout**: the first 8 KB (`0x00000–0x01FFF`) and the
+last 8 KB can each be permanently* locked against erase/program. **Everything we need to patch is in
+the lower 8 KB** — `read_adc` at `0x010FE` and the stub slot at `0x01E25`. If Motorola enabled the
+lockout on the lower block (plausible — it's exactly what the feature is for), **the firmware patch
+cannot be written at all**, and remote keypress falls back to the hardware keypad-line drive.
+
+Detect it in software product-ID mode: read `0x00002` → `0xFE` = lower block programmable, `0xFF` =
+locked (and `0x3FFF2` for the upper block). The probe below does this; run it before any write.
+
+(*lockout persists across power cycles and disables chip-erase; there is no software un-lock.)
+
+## Command set (exact, from the datasheet)
+
+All command "loads" are byte writes to these **device** addresses (mapping below). Each is a normal
+write cycle; a command is the exact 3-cycle pattern.
+
+| Operation | Sequence (data → address) |
+|---|---|
+| **Product-ID entry** | `AA→5555`, `55→2AAA`, `90→5555` |
+| &nbsp;&nbsp;read codes | `0x0000`=mfr `1F`, `0x0001`=device `DA`; `0x0002`=lower-lockout, `0x3FFF2`=upper-lockout |
+| **Product-ID exit** | `AA→5555`, `55→2AAA`, `F0→5555`, then wait 10 ms |
+| **Sector program** (SDP prefix) | `AA→5555`, `55→2AAA`, `A0→5555`, then load the 256 sector bytes |
+| SDP enable | `AA→5555`, `55→2AAA`, `A0→5555` (+ a sector load) |
+| SDP disable | `AA→5555`, `55→2AAA`, `80→5555`, `AA→5555`, `55→2AAA`, `20→5555` |
+
+- **Sector = 256 bytes; 1024 sectors.** A8–A17 select the sector, A0–A7 the byte. You must load the
+  **whole** sector (unloaded bytes become indeterminate) — so read the sector first, patch bytes,
+  write all 256 back.
+- **Byte-load timing `tBLC` = 150 µs:** consecutive bytes must be loaded within 150 µs or the load
+  window closes and programming starts. A tight stub loop (interrupts off) is well inside this.
+- **Program time `tWC` = 10 ms** after the last byte.
+- **Completion:** DATA-polling — a read of the last-loaded byte returns the **complement** of its
+  I/O7 until done, then true data; or the **toggle bit** DQ6 toggles until done. A conservative
+  fixed delay (≥15 ms) plus a read-back verify is simplest and robust.
+- **SDP state is unknown on this radio.** SDP ships *disabled*; Motorola may have enabled it. Using
+  the `AA/55/A0` prefix is the correct program command **either way** (it's the recognised command,
+  not three stray data writes), so always send it.
+
+## Device address → GM600 CPU access (through the bank window)
+
+The flash's A0–A13 come from the CPU window `0x4000–0x7FFF`; A14–A17 from the bank register
+`0x1058` (`= page << 2`, page = A14–A17). So for device address `D`:
+
+```
+page   = D >> 14
+window = 0x4000 | (D & 0x3FFF)     # CPU address to touch
+bank:  store (page << 2) to 0x1058
+```
+
+| Device addr | page | CPU window addr | bank reg `0x1058` |
+|---|---|---|---|
+| `0x5555` (cmd) | 1 | `0x5555` | `0x04` |
+| `0x2AAA` (cmd) | 0 | `0x6AAA` | `0x00` |
+| `0x0000/1/2` (ID) | 0 | `0x4000/1/2` | `0x00` |
+| sector `0x1000` (read_adc patch) | 0 | `0x5000–0x50FF` | `0x00` |
+| sector `0x1E00` (stub slot) | 0 | `0x5E00–0x5EFF` | `0x00` |
+
+The command sequence therefore switches the bank between `0x5555` (page 1) and `0x2AAA` (page 0)
+writes. The two patch sectors are both page 0.
+
+## Tooling
+
+`tools/flashtool.py` + `tools/flashtool.S` extend the RAM-stub idea (`ramdump`) to a resident stub
+driven over SCI: **probe** (ID + lockout — safe, no writes), **read** sector, **program** sector.
+The host refuses to program unless the probe reports the lower boot block unlocked. Applying the
+keypad patch = probe → for each of the 2 patch sectors: read it, splice in the patched bytes
+(`gm600_keypad_patch.patch_diff()`), program, read-back verify. Reverting = program the original
+bytes back.
+
+**Status: UNTESTED — bench bring-up required.** No flash write has been done on this radio. Validate
+in order: (1) probe returns `1F DA` and a lockout byte, confirming the command path works; (2) read a
+sector and compare to the known dump; (3) program one sector and read it back; only then the patch.
+A botched page-0 write is recoverable (boot/SBEP live in the fixed region `0x8000+` and page 1, so
+the radio still answers and can be re-flashed) — but a locked boot block or a wrong command sequence
+could brick it, so do this deliberately.

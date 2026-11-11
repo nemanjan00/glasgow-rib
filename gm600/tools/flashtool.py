@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""In-circuit AT29C020 flash probe / read / program for the GM600 — ramdump's big sibling.
+
+Where ramdump.py uploads a one-shot RAM stub that streams the flash out and halts, this uploads the
+resident command stub flashtool.S (via SBEP 0x17 + the 0x26 backdoor) and then drives it over the
+raw serial link: probe the chip, read a sector, program a sector. That's enough to apply (and revert)
+the keypad-remote firmware patch (see ../FIRMWARE.md and ../FLASH_WRITE.md).
+
+    python3 flashtool.py probe                      # SAFE: AT29C020 ID + boot-block lockout
+    python3 flashtool.py read  0x1000 out.bin       # read the 256-byte sector at a device address
+    python3 flashtool.py patch flash.bin            # apply the keypad patch (reads/writes 2 sectors)
+    python3 flashtool.py revert flash.bin           # restore the original bytes of those 2 sectors
+
+DANGER — UNTESTED on hardware. No flash write has been done on this radio. `probe` is read-only and
+safe; `read` only reads; `patch`/`revert` ERASE AND PROGRAM flash sectors. `patch`/`revert` first
+run `probe` and REFUSE unless the chip is an AT29C020 (1F/DA) with the lower boot block UNLOCKED
+(0xFE) — because `read_adc` and the patch both live in that block. They also read every sector back
+and verify. A botched page-0 write is usually recoverable (boot/SBEP live in the fixed region and
+page 1, so the radio still answers and can be re-flashed), but do this deliberately and keep a dump.
+"""
+import os
+import sys
+import time
+
+import asm6811
+import sbep
+from gm600_keypad_patch import patch_diff
+
+STUB_S = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flashtool.S")
+SECTOR = 256
+
+
+def build_stub():
+    a = asm6811.assemble_file(STUB_S)
+    return a.org, a.code
+
+
+def upload_and_launch(radio, org, code, chunk=32):
+    """Upload the stub with 0x17 (verified), then launch it with the 0x26 backdoor."""
+    for off in range(0, len(code), chunk):
+        addr = org + off
+        status, _, _ = radio.transact(sbep.encode(0x17, addr.to_bytes(3, "big") + code[off:off + chunk]))
+        if status != sbep.ACK:
+            raise sbep.SBEPError(f"stub write @0x{addr:04X} not ACKed ({status:02X})")
+    back = bytearray()
+    for off in range(0, len(code), 64):
+        back += radio.read_block(org + off, min(64, len(code) - off))
+    if bytes(back) != code:
+        raise sbep.SBEPError("stub read-back mismatch — upload failed")
+    frame = sbep.encode(0x26, org.to_bytes(2, "big"))
+    radio.drain()
+    radio.sock.sendall(frame)
+    _expect(radio, len(frame) + 1, 2.0)             # echo of the 26 frame + one launch ACK
+    # the stub is now in its command loop
+
+
+def _expect(radio, n, timeout):
+    """Read exactly n raw bytes from the link (used for echoes and fixed-size replies)."""
+    buf = bytearray()
+    deadline = time.monotonic() + timeout
+    radio.sock.settimeout(timeout)
+    while len(buf) < n:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise sbep.SBEPError(f"timeout: wanted {n} bytes, got {bytes(buf).hex()}")
+        radio.sock.settimeout(left)
+        try:
+            chunk = radio.sock.recv(n - len(buf))
+        except OSError:
+            raise sbep.SBEPError("link closed")
+        if not chunk:
+            raise sbep.SBEPError("link closed")
+        buf += chunk
+    return bytes(buf)
+
+
+def _cmd(radio, out, nresp, timeout=3.0):
+    """Send raw command bytes, swallow their single-wire echo, return nresp response bytes."""
+    radio.sock.sendall(out)
+    _expect(radio, len(out), timeout)               # our own echo, discarded
+    return _expect(radio, nresp, timeout) if nresp else b""
+
+
+def _win(dev_addr):
+    """Device address -> (page, window_hi, window_lo) for the stub's R/W commands."""
+    page = dev_addr >> 14
+    window = 0x4000 | (dev_addr & 0x3FFF)
+    return page, (window >> 8) & 0xFF, window & 0xFF
+
+
+def probe(radio):
+    """Return (mfr, device, lower_lockout, upper_lockout)."""
+    r = _cmd(radio, b"I", 4)
+    return r[0], r[1], r[2], r[3]
+
+
+def read_sector(radio, dev_addr):
+    page, wh, wl = _win(dev_addr & ~0xFF)
+    return _cmd(radio, bytes([ord("R"), page, wh, wl]), SECTOR, timeout=4.0)
+
+
+def write_sector(radio, dev_addr, data):
+    assert len(data) == SECTOR
+    page, wh, wl = _win(dev_addr & ~0xFF)
+    r = _cmd(radio, bytes([ord("W"), page, wh, wl]) + data, 1, timeout=4.0)
+    if r != b"\x84":
+        raise sbep.SBEPError(f"program @0x{dev_addr:05X}: status {r.hex()}")
+
+
+def _require_writable(radio):
+    mfr, dev, lo, up = probe(radio)
+    print(f"probe: mfr={mfr:02X} device={dev:02X} lower-lockout={lo:02X} upper-lockout={up:02X}")
+    if (mfr, dev) != (0x1F, 0xDA):
+        sys.exit(f"ABORT: not an AT29C020 (expected 1F/DA, got {mfr:02X}/{dev:02X}).")
+    if lo != 0xFE:
+        sys.exit("ABORT: lower boot block is LOCKED (lockout != FE); the read_adc patch lives there "
+                 "and cannot be flashed. Use the hardware keypad-line drive instead.")
+    print("lower boot block is programmable.")
+
+
+def _apply(radio, revert):
+    """Apply (or revert) the keypad patch's sector edits, with read-back verify."""
+    _require_writable(radio)
+    # group patch_diff edits by their 256-byte sector
+    sectors = {}
+    for off, orig, new in patch_diff():
+        for i in range(len(new)):
+            a = off + i
+            sectors.setdefault(a & ~0xFF, {})[a & 0xFF] = (orig[i] if revert else new[i])
+    for base, edits in sorted(sectors.items()):
+        cur = bytearray(read_sector(radio, base))
+        want = bytearray(cur)
+        for boff, val in edits.items():
+            want[boff] = val
+        if cur == want:
+            print(f"sector 0x{base:05X}: already correct, skipping")
+            continue
+        print(f"sector 0x{base:05X}: programming {len(edits)} byte(s)...")
+        write_sector(radio, base, bytes(want))
+        back = read_sector(radio, base)
+        if bytes(back) != bytes(want):
+            sys.exit(f"VERIFY FAILED @0x{base:05X}: read back {bytes(back)[:8].hex()}...; "
+                     "the radio may be partly written — re-run after fixing the cause.")
+        print(f"sector 0x{base:05X}: verified.")
+    print("done ('revert')." if revert else "done — keypad patch applied; press keys with "
+          "gm600_keypad_patch.arm()/press()/release().")
+
+
+def main(argv):
+    if len(argv) < 2 or argv[1] not in ("probe", "read", "patch", "revert"):
+        sys.exit(__doc__)
+    org, stub = build_stub()
+    with sbep.Radio() as radio:
+        print(f"serial {radio.id_string(1)}; uploading {len(stub)}-byte stub, launching...")
+        upload_and_launch(radio, org, stub)
+        cmd = argv[1]
+        if cmd == "probe":
+            mfr, dev, lo, up = probe(radio)
+            print(f"mfr={mfr:02X} device={dev:02X} lower-lockout={lo:02X} upper-lockout={up:02X}  "
+                  f"({'AT29C020' if (mfr,dev)==(0x1F,0xDA) else 'UNKNOWN'}; lower block "
+                  f"{'programmable' if lo==0xFE else 'LOCKED' if lo==0xFF else '?'})")
+        elif cmd == "read":
+            if len(argv) < 4:
+                sys.exit("usage: flashtool.py read <dev_addr_hex> <out.bin>")
+            addr = int(argv[2], 0)
+            data = read_sector(radio, addr)
+            open(argv[3], "wb").write(data)
+            print(f"read sector 0x{addr & ~0xFF:05X} ({SECTOR} B) -> {argv[3]}")
+        else:
+            _apply(radio, revert=(cmd == "revert"))
+    print("power-cycle the radio now (the stub left it halted).")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

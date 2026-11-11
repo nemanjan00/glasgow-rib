@@ -403,5 +403,25 @@ class KeypadPatchTest(unittest.TestCase):
         self.assertEqual(bytes(rev), img)
 
 
+class FlashToolTest(unittest.TestCase):
+    """flashtool: the resident AT29C020 stub assembles, and the address mapping is right."""
+
+    def test_stub_assembles_deterministically(self):
+        import flashtool
+        org, code = flashtool.build_stub()
+        self.assertEqual(org, 0x2000)
+        self.assertGreater(len(code), 0)
+        org2, code2 = flashtool.build_stub()
+        self.assertEqual(code, code2)                 # deterministic
+
+    def test_device_address_to_window_mapping(self):
+        import flashtool
+        self.assertEqual(flashtool._win(0x1000), (0, 0x50, 0x00))   # read_adc patch sector
+        self.assertEqual(flashtool._win(0x1E00), (0, 0x5E, 0x00))   # stub slot sector
+        self.assertEqual(flashtool._win(0x5555), (1, 0x55, 0x55))   # command address
+        self.assertEqual(flashtool._win(0x2AAA), (0, 0x6A, 0xAA))   # command address
+        self.assertEqual(flashtool._win(0x3FFF2), (15, 0x7F, 0xF2)) # upper lockout byte
+
+
 if __name__ == "__main__":
     unittest.main()
