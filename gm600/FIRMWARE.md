@@ -291,6 +291,17 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
     This is slow to crack over a webcam; **a logic analyzer on the control-head SPI** (SCK/MOSI + the
     `0x107E` CS nibble) would show the firmware's exact address/command/data to replicate. Passive
     decode via `0x37AC` remains the reliable route to the segment map.
+
+  - ***Active* LCD driving SOLVED (pure data, no flash / no 12 V).** The firmware renders the 21-byte
+    `0x37AC` shadow then pushes it to the LCD each cycle. **Tight-loop SBEP `0x17` writes to `0x37AC`
+    race that render**, so the firmware's own (fully-set-up) push displays *your* bytes. Verified on the
+    real radio (webcam): `all-00` blanks the display, `all-FF` shows `888` — i.e. full control from
+    empty to all-segments, overriding the firmware's "322". No checksum on `0x37AC`. Tool:
+    `tools/lcd_drive.py` (a writer thread races `0x37AC`; images/lcd_driven_blank_888_dig.jpg).
+    The display is multiplexed (digit segments in bytes 12-20 by COM line); showing an arbitrary
+    *specific* number additionally needs the multiplex bit-map decoded (the race blends a sparse buffer
+    with the firmware's concurrent 322 render — extremes win cleanly, sparse numbers need the co-render
+    suppressed via the self-healing OC-ISR hook, 0xA2/0xA4/0xA6).
   - **The LCD is read *passively* instead** — `0x37AC` (21 bytes) is a live mirror decoded by
     `tools/gm600_remote.py` (channel "1" = `0530 00c1 008f d085 e5af ea00 a661 0000 6008 020010`,
     "322" = `8530 18c1 008f d080 e5af fe00 a261 8000 6018 020010`). Segment decoding is best done this
