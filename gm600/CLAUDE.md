@@ -55,7 +55,11 @@ the git-ignored **`CLAUDE.local.md`** — read that first). The repo there is gi
   pushing it never changes the number. Find display buffers by RAM-diffing two known states.
   `tools/lcd_raw.S` does the same with its own SPI code (no firmware calls) + backlight; segment
   photos and data-bit map in `images/lcd_segments/`. Live view of the emulated head:
-  `gm600_vm_bridge.py … --ui` (http://127.0.0.1:8600/, `gm600_display.py`).
+  `gm600_vm_bridge.py … --ui` (http://127.0.0.1:8600/, `gm600_display.py`) — boots to 322 like the radio,
+  buttons clickable. The emulator models the bench radio's input pins + A/D levels; without them the
+  VM never leaves the channel scan.
+- **RAM stubs load at `0x3D80`** (`lcd_raw.S` at `0x3E40`), never `0x2000` (live firmware buffer pool),
+  self-check their own checksum (`.cksum`), and are re-verified right before `0x26` (`sbep.launch_stub`).
 
 ## Hardware facts (from the schematic; confirmed on a radio unless noted)
 

@@ -176,15 +176,17 @@ class DPSReadTest(unittest.TestCase):
 class RamdumpAssemblerTest(unittest.TestCase):
     """asm6811 must reproduce the hardware-verified dumper stub from ramdump.S."""
 
-    # Verified in-circuit: this stub dumped all 256 KB byte-identical to the off-board T48 read.
+    # Verified in-circuit (relocated to 0x3D80 with the self-check, 2026-11-11): this stub dumped all
+    # 256 KB with SHA-256 identical to the golden motofix.BIN.
     PROVEN = bytes.fromhex(
-        "0fc600f71058ce40008655b7103a86aab7103ab61074848027f9a600b71077088c800026e4"
-        "cb04c13826d8ce80008655b7103a86aab7103ab61074848027f9a600b710770826e720fe")
+        "0fce3d804fe6001b088c3ddc26f74d270220fec600f71058ce40008655b7103a86aab7103ab6"
+        "1074848027f9a600b71077088c800026e4cb04c13826d8ce80008655b7103a86aab7103ab610"
+        "74848027f9a600b710770826e720fe82")
 
     def test_ramdump_S_assembles_to_verified_bytes(self):
         import ramdump
         org, code = ramdump.build_stub()
-        self.assertEqual(org, 0x2000)
+        self.assertEqual(org, 0x3D80)
         self.assertEqual(code, self.PROVEN)
 
     def test_modes_and_relative_branch(self):
@@ -206,16 +208,17 @@ class RamdumpAssemblerTest(unittest.TestCase):
 class LcdTextTest(unittest.TestCase):
     """lcd_text.S/.py: the hardware-verified 7-seg stub and its font."""
 
-    # Verified on the radio: pushed 322 over a 686 codeplug, then HI/HEL/LO/AbC/PSU/147/-9-.
+    # Verified on the radio: the original at 0x2000 pushed 322 over a 686 codeplug, then HI/HEL/...;
+    # this relocated build (0x3D80, self-check) showed "HI" on the radio (2026-11-11).
     PROVEN = bytes.fromhex(
-        "0f8e21ffbd2037c1a526f9bd2037f72100bd2037f72101bd2037f72102bd2037f72103bd2037"
-        "f72104ce21003c3cc605bd8f1f383820cdbd2045b61074842027f6f61077398655b7103a86aa"
-        "b7103a39")
+        "0fce3d804fe6001b088c3de326f74d270220fe8e3fffbd3dc9c1a526f9bd3dc9f73f80bd3dc9"
+        "f73f81bd3dc9f73f82bd3dc9f73f83bd3dc9f73f84ce3f803c3cc605bd8f1f383820cdbd3dd7"
+        "b61074842027f6f61077398655b7103a86aab7103a39d6")
 
     def test_stub_assembles_to_verified_bytes(self):
         import asm6811
         a = asm6811.assemble_file(os.path.join(os.path.dirname(__file__), "lcd_text.S"))
-        self.assertEqual(a.org, 0x2000)
+        self.assertEqual(a.org, 0x3D80)
         self.assertEqual(a.code, self.PROVEN)
 
     def test_font_matches_firmware_digit_cache(self):
@@ -277,6 +280,7 @@ class LcdTextTest(unittest.TestCase):
             log = []
             m.watch = lambda ad, v: log.append((ad, v)) if ad in (0x1028, 0x107E, 0x102A) else None
             c.SP, c.PC = 0x3FFF, a.org
+            c.run(max_insns=20000, stop_pc=a.symbols["selfok"])
             m.feed_rx(payload)
             c.run(max_insns=300000)
             return log, bytes(m.sci_out), m.reg[0x7E]
@@ -339,6 +343,7 @@ class DisplayModelTest(unittest.TestCase):
         a = asm6811.assemble_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lcd_raw.S"))
         m.ram[a.org:a.org + len(a.code)] = a.code
         c.SP, c.PC = 0x3FFF, a.org
+        c.run(max_insns=20000, stop_pc=a.symbols["selfok"])   # past the self-check, as on the radio
         cmds = b""
         text = bytes(5) + lcd_text.pack(b"\x00\x00" + lcd_text.text_to_segs("HI"))
         for sync, body in ((0x5A, b"\x84"), (0xA5, text)):
@@ -363,6 +368,62 @@ class BannerTest(unittest.TestCase):
         spec.loader.exec_module(mod)
         with open(os.path.join(root, "banner.svg")) as f:
             self.assertEqual(mod.panel_svg(), f.read())
+
+
+class StubSelfCheckTest(unittest.TestCase):
+    """Every RAM stub sums to 0 and refuses to run if any byte changed after the host's verify."""
+
+    STUBS = ("ramdump.S", "flashtool.S", "lcd_text.S", "led_cmd.S", "lcd_raw.S")
+
+    def _run(self, a, code):
+        import emu6811
+        m = emu6811.Mem()
+        m.ram[a.org:a.org + len(code)] = code
+        c = emu6811.CPU(m)
+        c.SP, c.PC = 0x3FFF, a.org
+        c.run(max_insns=20000, stop_pc=a.symbols["selfok"])
+        return c.PC
+
+    def test_intact_stub_passes_and_damaged_stub_halts(self):
+        import asm6811
+        for name in self.STUBS:
+            a = asm6811.assemble_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), name))
+            self.assertEqual(sum(a.code) & 0xFF, 0, name)
+            self.assertGreaterEqual(a.org, 0x3D80, name)              # not the firmware's 0x2000 pool
+            self.assertEqual(self._run(a, a.code), a.symbols["selfok"], name)
+            bad = bytearray(a.code)
+            bad[-5] ^= 0x01                                             # one bit flipped near the end
+            self.assertEqual(self._run(a, bytes(bad)), a.symbols["damaged"], name)
+
+
+class VmBootTest(unittest.TestCase):
+    """With the bench radio's port/A-D levels modelled, the VM boots to the idle own-ident screen."""
+
+    def test_vm_shows_own_unit_number_and_presses_keys(self):
+        import emu6811
+        import gm600_display
+        fw, cp = os.environ.get("GM600_FW"), os.environ.get("GM600_CP")
+        if not fw or not cp:
+            self.skipTest("set GM600_FW=motofix.BIN and GM600_CP=<640-byte codeplug> to run this")
+        with open(fw, "rb") as f:
+            flash = f.read()
+        with open(cp, "rb") as f:
+            code = bytearray(f.read())
+        unit = code[0x0F0B - 0x0D80] << 8 | code[0x0F0C - 0x0D80]
+        m = emu6811.Mem(flash, bytes(code))
+        tap = gm600_display.SpiTap(m)
+        c = emu6811.CPU(m)
+        c.reset()
+        c.run(max_insns=3_000_000, cop_timeout=150000)
+        want = "%3d" % unit
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]).decode(), want)
+        self.assertEqual(set(tap.state()["segments"]), gm600_display.segments_for_text(want, 0x00, 0x40))
+        # select C toggles the external-alarm icons
+        m.adc = gm600_display.adc_for(gm600_display.BUTTONS["C"])
+        c.run(max_insns=300_000, cop_timeout=150000)
+        m.adc = list(emu6811.IDLE_ADC)
+        c.run(max_insns=300_000, cop_timeout=150000)
+        self.assertTrue({"b0.0", "b1.0"} <= set(tap.state()["segments"]))
 
 
 class EmulatorTest(unittest.TestCase):
@@ -582,7 +643,7 @@ class FlashToolTest(unittest.TestCase):
     def test_stub_assembles_deterministically(self):
         import flashtool
         org, code = flashtool.build_stub()
-        self.assertEqual(org, 0x2000)
+        self.assertEqual(org, 0x3D80)
         self.assertGreater(len(code), 0)
         org2, code2 = flashtool.build_stub()
         self.assertEqual(code, code2)                 # deterministic
@@ -662,7 +723,8 @@ class FlashStubIntegrationTest(unittest.TestCase):
         if not fw or not os.path.exists(fw):
             self.skipTest("set GM600_FW=/path/to/motofix.BIN (a flash dump) to run this")
         self.flash = open(fw, "rb").read()
-        self.stub = asm6811.assemble_file(os.path.join(HERE, "flashtool.S")).code
+        a = asm6811.assemble_file(os.path.join(HERE, "flashtool.S"))
+        self.org, self.stub = a.org, a.code
         self.m, self.c = self._boot(emu6811)
 
     def _boot(self, emu6811):
@@ -670,8 +732,8 @@ class FlashStubIntegrationTest(unittest.TestCase):
         m = emu6811.Mem(self.flash, cp)
         c = emu6811.CPU(m)
         c.reset(); c.run(max_insns=6_000_000, cop_timeout=150000)
-        m.ram[0x2000:0x2000 + len(self.stub)] = self.stub
-        c.PC = 0x2000; c.sf(emu6811.I, True); c.SP = 0x01FF
+        m.ram[self.org:self.org + len(self.stub)] = self.stub
+        c.PC = self.org; c.sf(emu6811.I, True); c.SP = 0x01FF
         m.pin12_12v = True
         return m, c
 

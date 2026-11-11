@@ -29,6 +29,18 @@ RX_BYTE_INSNS = 250                           # ~instructions per byte at the em
 # > one state-handler's run (~80 insns, so re-reads of SCDR in a handler see the same byte).
 
 
+IDLE_ADC = (0xFF, 0xFF, 0xFF, 0x9B)       # AN0-AN3 at rest (bench radio)
+# 68HC11K4 ports: data register offset -> DDR offset (None = input-only PORTE). A read returns the
+# output latch for DDR=1 bits and the pin level for DDR=0 bits. Pin levels default to what the bench
+# radio's ports read at idle (SBEP 0x11 of 0x1000-0x107F); before this every input read 0, which
+# kept the firmware scanning channels instead of reaching the idle own-ident screen.
+PORT_DDR = {0x00: 0x01, 0x04: 0x02, 0x05: 0x03, 0x06: 0x07, 0x08: 0x09, 0x0A: None,
+            0x7C: 0x7D, 0x7E: 0x7F}
+IDLE_PINS = {0x00: 0x89, 0x04: 0x74, 0x05: 0x51, 0x06: 0x93, 0x08: 0x1C, 0x0A: 0x4F,
+             0x7C: 0x71, 0x7E: 0x98}
+IDLE_ADC_HI = (0x0E, 0x3A, 0xAA, 0x01)    # AN4-AN7 (bench radio)
+
+
 class Mem:
     def __init__(self, flash=None, eeprom=None):
         self.ram = bytearray(0x4000)
@@ -48,7 +60,12 @@ class Mem:
         self.tcnt_prev = 0
         self.cop_arm = False               # COP watchdog kick sequence (0x55 then 0xAA -> 0x103A)
         self.cop_kicks = 0
-        self.adc = [0xFF, 0xFF, 0xFF, 0xFF]  # ADR1-4 (keypad idle = 5V = 0xFF, no key)
+        # A/D inputs, measured on the bench radio (ADCTL 0x10 / 0x14 conversions read over SBEP):
+        # AN0-AN2 = the three keypad ladders (idle 0xFF), AN3 ~0x9B; AN4-AN7 = 0E 3A AA 01 (radio
+        # analog inputs). Feeding 0xFF to AN4-AN7 (the old model) kept the firmware hunting forever.
+        self.adc = list(IDLE_ADC)            # AN0-AN3 (keypad presses change AN0-AN2)
+        self.adc_hi = list(IDLE_ADC_HI)      # AN4-AN7
+        self.pins = dict(IDLE_PINS)          # input pin levels per port
         self.spi_xfers = []                  # list of (cs_value, bytes) grouped by chip-select
         self._cur_xfer = None
         self.force_oc1 = False               # debug: force OC1 interrupt enabled (tick), see docs
@@ -112,6 +129,9 @@ class Mem:
             if o == 0x0F: return self.tcnt & 0xFF             # TCNT low
             if o == SCSR:                                     # the emulated transmitter is always ready:
                 return self.reg[SCSR] | SCSR_TDRE | 0x40      # report TDRE + TC set (plus live RX flags)
+            if o in PORT_DDR:                                 # port: latch for outputs, pins for inputs
+                ddr = self.reg[PORT_DDR[o]] if PORT_DDR[o] is not None else 0
+                return (self.reg[o] & ddr) | (self.pins.get(o, 0) & ~ddr & 0xFF)
             if o == 0x77:                                     # reading SCDR returns the RX latch and
                 self.reg[SCSR] &= ~(SCSR_RDRF | SCSR_IDLE)    # clears RDRF+IDLE; the byte stays latched
                 return self.sci_rx_byte                       # (re-reads return the same byte)
@@ -156,7 +176,12 @@ class Mem:
                 else: self.cop_arm = False
             elif o == 0x30:                    # ADCTL write starts a conversion -> instantly complete
                 self.reg[0x30] = v | 0x80      # set CCF (conversions complete flag)
-                self.reg[0x31:0x35] = bytes(self.adc)   # ADR1-4 results
+                an = list(self.adc) + list(self.adc_hi)          # AN0..AN7
+                if v & 0x10:                   # MULT: four channels, group selected by CC (bit 2)
+                    res = an[4:8] if v & 0x04 else an[0:4]
+                else:                          # single channel CD:CA, converted four times
+                    res = [an[v & 0x07]] * 4
+                self.reg[0x31:0x35] = bytes(res)   # ADR1-4 results
             elif o in (0x23, 0x25):            # TFLG1/TFLG2: writing a 1 CLEARS that flag
                 self.reg[o] = (self.reg[o] & ~v) & 0xFF
             return

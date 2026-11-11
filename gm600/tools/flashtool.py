@@ -47,9 +47,7 @@ def upload_and_launch(radio, org, code, chunk=32):
         back += radio.read_block(org + off, min(64, len(code) - off))
     if bytes(back) != code:
         raise sbep.SBEPError("stub read-back mismatch — upload failed")
-    frame = sbep.encode(0x26, org.to_bytes(2, "big"))
-    radio.drain()
-    radio.sock.sendall(frame)
+    frame = sbep.launch_stub(radio, org, code)      # re-verify right before the jump
     _expect(radio, len(frame) + 1, 2.0)             # echo of the 26 frame + one launch ACK
     # the stub is now in its command loop
 

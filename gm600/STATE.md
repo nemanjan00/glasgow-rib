@@ -47,11 +47,8 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
   `26` jumps to a request-supplied address).
 
 ## Open questions
-- **VM display (2026-11-11, `gm600_vm_bridge.py --ui`):** the VM's digit controller cycles numbers
-  (12, 11, 10, 9, 7, 3, 2 …) with the green LED blinking — looks like a channel hunt, which would
-  explain why the VM never shows the own-unit number. Earlier "VM renders 322" claims were reading
-  `0x37AC`, which never holds the digits. Not yet confirmed what the cycling numbers are.
-- **Emulator 0x0F0B gap:** 0x0F0B/0x0F0C ARE read at boot (pc 9D91, 9E7D) but a real 456 codeplug
-  renders identically to 322 in the VM. Where do real vs emulated boots diverge? Likely the
-  trunking display-state (RF/synth/ASFIC not modelled) → firmware takes a different display branch.
-  Matters because the keypad patch was "validated in the emulator".
+- **Emulator 0x0F0B gap — CLOSED (2026-11-11).** The VM sat in a channel scan (cycling numbers, green
+  LED flashing) because every CPU input pin read 0 and every A/D channel read 0xFF. `emu6811` now
+  models PORTA/B/C/D/E/F/G/H input pins and both A/D groups with the bench radio's idle levels (read
+  live over SBEP). The VM then boots to the idle own-ident screen exactly like the radio: 322 for the
+  bench codeplug, 456 for a 456 codeplug, green LED flashing, backlight timing out. Test `VmBootTest`.

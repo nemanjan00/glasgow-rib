@@ -28,7 +28,7 @@ DATA_BITS = {
 }
 FRAME_BITS = 33
 DISPLAY_SELECT = 0x61        # 0x107E bits asserted while the display controller is clocked
-LED_STROBE = 0x20            # 0x107E bit pulsed (with 0x01) to latch the LED shift register
+LED_STROBE = 0x21            # 0x107E bits raised together to latch the LED shift register
 SPCR, SPDR, CSPORT = 0x1028, 0x102A, 0x107E
 
 
@@ -61,8 +61,8 @@ class Controller:
 class SpiTap:
     """Watches an emu6811.Mem's register writes and keeps the display + LED state current.
 
-    Display bytes: written to SPDR while 0x107E has all of 0x61 asserted. LEDs: the last SPDR byte
-    sent with no display select is latched when the 0x20 strobe rises (firmware entry 10)."""
+    Display bytes: written to SPDR while 0x107E (PORTG) has all of 0x61 asserted. LEDs: the last SPDR
+    byte sent with no select asserted is latched when 0x21 rises (firmware entry 10)."""
 
     def __init__(self, mem):
         self.display = Controller()
@@ -80,19 +80,66 @@ class SpiTap:
             if self._cs & DISPLAY_SELECT == DISPLAY_SELECT:
                 with self.lock:
                     self.display.feed([value])
-            else:
+            elif self._cs & DISPLAY_SELECT == 0:      # LED byte: shifted out with nothing selected
                 self._last_other = value
         elif addr == CSPORT:
             rising = value & ~self._cs
-            if rising & LED_STROBE and not value & 0x40 and self._last_other is not None:
+            # LED latch = 0x20 and 0x01 rising together after the byte (entry 10). Entry 2 raises
+            # 0x20 alone *before* its own 13-byte transfer, so a lone 0x20 is not a latch.
+            if rising & 0x21 == 0x21 and not value & 0x40 and self._last_other is not None:
                 with self.lock:
                     self.leds = self._last_other
             self._cs = value
+
+    def __getstate__(self):                 # snapshots (copy.deepcopy of a booted VM): no lock
+        st = dict(self.__dict__)
+        del st["lock"]
+        return st
+
+    def __setstate__(self, st):
+        self.__dict__.update(st)
+        self.lock = threading.Lock()
 
     def state(self):
         with self.lock:
             return {"segments": sorted(self.display.segments), "leds": self.leds,
                     "frames": self.display.frames}
+
+
+# --- keypad --------------------------------------------------------------------------------------
+
+# The keypad is three analog ladders on A/D channels ADR1-ADR3. The firmware's decoders (page 0, CPU
+# 0x4FBB / 0x4F79 / 0x4FFD) turn a reading into a key code by window: <=0x29, 0x39-0x48, 0x79-0x88,
+# 0xB9-0xC8 (ADR3 has no 0x39-0x48 key); anything else (idle reads 0xFF) is "no key". A press has to
+# read the same code twice in a row (debounce). code -> (A/D channel, level in the middle of its window):
+KEY_CODES = {
+    0x10: (0, 0x10), 0x11: (0, 0x40), 0x12: (0, 0x80), 0x13: (0, 0xC0),     # ADR1 -> 0x4FBB
+    0x14: (1, 0x10), 0x15: (1, 0x40), 0x16: (1, 0x80), 0x17: (1, 0xC0),     # ADR2 -> 0x4F79
+    0x08: (2, 0x10), 0x06: (2, 0x80), 0x07: (2, 0xC0),                      # ADR3 -> 0x4FFD
+}
+
+# Physical button -> key code, identified in the emulator from the radio's idle (own-ident) state by
+# what each code does — not yet checked by pressing the bench radio's buttons:
+#   07 / 06  scroll through shortform entries up (04, 06, 11 ...) / down (976, 975, 969 ...)
+#   11 / 10  volume up / down (stepped values to the audio chip over SPI, rising / falling)
+#   12       clear (key click only, nothing to clear)          13  base call (shows "306")
+#   14       select A (shows "---": the trunked/conventional mode change)
+#   15       select B (call-in-absence; nothing to show)       16  select C (toggles alarm icons)
+#   17       select D (dedicated call, shows "400")            08  on/off (no effect on a short press)
+BUTTONS = {
+    "A": 0x14, "B": 0x15, "C": 0x16, "D": 0x17,
+    "scroll_up": 0x07, "scroll_down": 0x06,
+    "vol_down": 0x10, "vol_up": 0x11, "clear": 0x12, "call": 0x13, "power": 0x08,
+}
+
+
+def adc_for(code):
+    """AN0-AN3 readings that make the firmware decode ``code`` (the others at their idle level)."""
+    import emu6811
+    adc = list(emu6811.IDLE_ADC)
+    line, level = KEY_CODES[code]
+    adc[line] = level
+    return adc
 
 
 # --- SVG ---------------------------------------------------------------------------------------
@@ -112,14 +159,14 @@ def _panel():
 _PANEL = None
 
 
-def render_svg(segments, leds=0):
+def render_svg(segments, leds=0, hotspots=False):
     """SVG of the front panel showing ``segments`` lit and the LED byte ``leds`` (bit 0 amber,
     1 red, 2 green, 7 backlight), drawn with the banner's panel (assets/make_banner.py)."""
     global _PANEL
     if _PANEL is None:
         _PANEL = _panel()
     return _PANEL.panel_svg(set(segments), leds, caption=False,
-                            title="<title>GM600 display (live)</title>")
+                            title="<title>GM600 display (live)</title>", hotspots=hotspots)
 
 
 def segments_for_text(text, b0=0x00, b1=0x00):
@@ -134,29 +181,68 @@ def segments_for_text(text, b0=0x00, b1=0x00):
 
 _PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>GM600 display</title>
 <style>body{background:#111;color:#ccc;font:14px monospace;display:flex;flex-direction:column;
-align-items:center;margin-top:30px}#d svg{width:min(1100px,96vw);height:auto}</style></head>
-<body><div id="d"></div><div id="s"></div><script>
+align-items:center;margin-top:30px}#d svg{width:min(1100px,96vw);height:auto}
+#d .hot:hover{fill-opacity:.12}#k button{background:#2a2c31;color:#ddd;border:1px solid #555;
+border-radius:6px;margin:3px;padding:4px 8px;font:13px monospace;cursor:pointer}
+#k button:hover{background:#3a3d44}#s,#p{margin:6px}</style></head>
+<body><div id="d"></div><div id="s"></div><div id="p"></div>
+<div id="k">raw key codes: CODES</div><script>
+async function press(q){document.getElementById('p').textContent='pressing '+q+' ...';
+const r=await fetch('/press?'+q,{method:'POST'});document.getElementById('p').textContent=await r.text()}
+document.getElementById('d').addEventListener('click',e=>{const k=e.target.closest('[data-key]');
+if(k)press('key='+k.dataset.key)});
 async function tick(){try{const r=await fetch('/display.svg',{cache:'no-store'});
 document.getElementById('d').innerHTML=await r.text();
 const j=await (await fetch('/state.json',{cache:'no-store'})).json();
-document.getElementById('s').textContent='frames '+j.frames+' · '+(j.segments.join(' ')||'(blank)');
+document.getElementById('s').textContent='frames '+j.frames+' \u00b7 '+(j.segments.join(' ')||'(blank)');
 }catch(e){document.getElementById('s').textContent='disconnected'}setTimeout(tick,200)}tick();
 </script></body></html>"""
 
 
-def serve_ui(get_state, port=8600):
+def serve_ui(get_state, port=8600, press=None):
     """Serve the live display at http://127.0.0.1:<port>/. ``get_state`` returns a dict with
-    ``segments``, ``leds`` and ``frames``. Runs in a daemon thread; returns the bound port."""
+    ``segments``, ``leds`` and ``frames``; ``press(code)`` (optional) presses a key code, and makes
+    the panel's buttons clickable. Runs in a daemon thread; returns the bound port."""
+    import urllib.parse
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            url = urllib.parse.urlparse(self.path)
+            q = urllib.parse.parse_qs(url.query)
+            if url.path != "/press" or press is None:
+                self.send_error(404)
+                return
+            try:
+                if "key" in q:
+                    name = q["key"][0]
+                    code = BUTTONS[name]
+                    label = f"{name} (code {code:02X})"
+                else:
+                    code = int(q["code"][0], 16)
+                    label = f"code {code:02X}"
+                if code not in KEY_CODES:
+                    raise KeyError(code)
+            except (KeyError, ValueError, IndexError):
+                self.send_error(400, "unknown key")
+                return
+            press(code)
+            body = f"pressed {label}".encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
             st = get_state()
             if self.path.startswith("/display.svg"):
-                body, ctype = render_svg(st["segments"], st["leds"]).encode(), "image/svg+xml"
+                body = render_svg(st["segments"], st["leds"], hotspots=press is not None).encode()
+                ctype = "image/svg+xml"
             elif self.path.startswith("/state.json"):
                 body, ctype = json.dumps(st).encode(), "application/json"
             elif self.path in ("/", "/index.html"):
-                body, ctype = _PAGE.encode(), "text/html; charset=utf-8"
+                codes = " ".join(f'<button onclick="press(\'code={c:02X}\')">{c:02X}</button>'
+                                 for c in sorted(KEY_CODES)) if press else "(read-only)"
+                body, ctype = _PAGE.replace("CODES", codes).encode(), "text/html; charset=utf-8"
             else:
                 self.send_error(404)
                 return

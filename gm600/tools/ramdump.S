@@ -17,7 +17,10 @@
 ; lower). ramdump.py proves it is writable RAM by reading the stub back and comparing before it
 ; launches; the stub then runs with interrupts off and never returns, so it only has to not overlap
 ; itself — whatever firmware data lived at $2000 is irrelevant once we have jumped in.
-        .org    $2000
+        .org    $3D80           ; free RAM: 0x3D80-0x3FFF reads zero in every RAM dump and nothing in the
+;                                 firmware references it. NOT $2000 - that is the firmware's live
+;                                 message-buffer pool, which can overwrite a stub between the host's
+;                                 verify and the 0x26 launch (hence also the self-check below).
 
 ; ---- 68HC11 K-series register HAL (pinned from the firmware, see ../FIRMWARE.md) ----
 BANKREG = $1058         ; bank select — value = page << 2
@@ -31,7 +34,18 @@ WINHI   = $8000         ; window end / start of the fixed region (pages 14,15)
 LASTREG = $38           ; loop end: last banked page is 13 (reg $34); $34 + 4 = $38
 
 ; ---------------------------------- the dumper ----------------------------------
-        sei                     ; no interrupts: we own the CPU until power-off
+start:  sei                     ; no interrupts: we own the CPU until power-off
+        ldx     #start          ; self-check: the image (incl. its .cksum byte) must sum to 0 -
+        clra                    ; if the firmware overwrote any of it after the host verified it,
+selfck: ldab    0,x             ; don't run it
+        aba
+        inx
+        cpx     #codeend
+        bne     selfck
+        tsta
+        beq     selfok
+damaged: bra    damaged         ; no COP kick -> watchdog reset -> the radio reboots (safe)
+selfok:
         ldab    #0              ; B = bank-register value for the current page (page << 2)
 
 bank:   stab    BANKREG         ; map this page at $4000
@@ -65,3 +79,6 @@ wtx2:   ldaa    SCSR
         inx
         bne     fix             ; X wraps $FFFF -> $0000 -> done
 done:   bra     done            ; halt; the host power-cycles to recover
+
+        .cksum                  ; balances the image to 0 (mod 256) for the self-check above
+codeend:

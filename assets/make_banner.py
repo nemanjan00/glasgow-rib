@@ -56,6 +56,22 @@ ICONS = {
 }
 
 
+# click targets over the drawn buttons (radio-group coordinates), for panel_svg(hotspots=True)
+BUTTONS = {
+    "vol_down": 'rect x="56" y="64" width="78" height="92" rx="40"',
+    "vol_up": 'rect x="136" y="64" width="78" height="92" rx="40"',
+    "scroll_up": 'rect x="318" y="76" width="50" height="64" rx="22"',
+    "scroll_down": 'rect x="318" y="166" width="50" height="64" rx="22"',
+    "clear": 'ellipse cx="790" cy="108" rx="42" ry="27"',
+    "call": 'ellipse cx="790" cy="186" rx="42" ry="27"',
+    "power": 'circle cx="304" cy="294" r="26"',
+    "A": 'rect x="394" y="270" width="92" height="50" rx="25"',
+    "B": 'rect x="514" y="270" width="92" height="50" rx="25"',
+    "C": 'rect x="634" y="270" width="92" height="50" rx="25"',
+    "D": 'rect x="754" y="270" width="92" height="50" rx="25"',
+}
+
+
 def lcd_contents(e, lit):
     """Digits + icons for a live display state (``lit`` = set of segment names)."""
     lit = set(lit)
@@ -70,12 +86,13 @@ def lcd_contents(e, lit):
     e('<g filter="url(#glow)">' + "".join(p for p in shapes if "seg-on" in p) + '</g>')
 
 
-def panel_svg(lit=None, leds=None, caption=True, title=TITLE):
+def panel_svg(lit=None, leds=None, caption=True, title=TITLE, hotspots=False):
     """The GM600 front panel as SVG. Defaults draw assets/banner.svg ("rib", all LEDs lit, caption).
 
     lit: set of lit display segments ("d0.a".."d2.g", icons "b0.0".."b1.6"; see
     gm600/images/lcd_segments) -- draws the live LCD instead of "rib". leds: the firmware LED byte
-    (bit 0 amber, 1 red, 2 green, 7 backlight) or None for all lit. caption=False crops to the radio."""
+    (bit 0 amber, 1 red, 2 green, 7 backlight) or None for all lit. caption=False crops to the radio.
+    hotspots=True adds a transparent click target (data-key="<name>") over each button (BUTTONS)."""
     out = []
     def e(s): out.append(s)
     backlit = leds is not None and bool(leds & 0x80)
@@ -215,6 +232,10 @@ def panel_svg(lit=None, leds=None, caption=True, title=TITLE):
         for x0, x1 in segs:
             e(f'<rect x="{x0}" y="{y - 7}" width="{x1 - x0}" height="14" rx="7" class="slot"/>')
 
+    if hotspots:
+        for name, shape in BUTTONS.items():
+            e(f'<{shape} data-key="{name}" class="hot" fill="#fff" fill-opacity="0" '
+              f'style="cursor:pointer"><title>{name}</title></{shape.split()[0]}>')
     e('</g>')
 
     if caption:

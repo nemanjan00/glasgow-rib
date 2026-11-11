@@ -171,3 +171,20 @@ class Radio:
         if status != ACK or op != 0x8B:
             raise SBEPError(f"ID {index}: status {status:02X}, op {op}")
         return data[1:].rstrip(b"\0").decode("ascii", "replace")
+
+
+def launch_stub(radio, org, code):
+    """Re-read a RAM stub immediately before jumping to it with the ``26`` backdoor.
+
+    The firmware keeps running between an upload and the launch, so a verify done at upload time
+    can be stale by the time ``26`` jumps in. Raises SBEPError on any difference. Returns the
+    ``26`` frame it sent (the caller reads the echo and launch ACK)."""
+    back = bytearray()
+    for off in range(0, len(code), 64):
+        back += radio.read_block(org + off, min(64, len(code) - off))
+    if bytes(back) != bytes(code):
+        raise SBEPError(f"stub at 0x{org:04X} changed before launch - not jumping into it")
+    frame = encode(0x26, org.to_bytes(2, "big"))
+    radio.drain()
+    radio.sock.sendall(frame)
+    return frame

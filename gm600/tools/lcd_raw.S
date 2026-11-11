@@ -37,6 +37,17 @@ SUM     = $3F8B         ; running checksum
 LEDB    = $3F8C         ; LED byte
 
 start:  sei
+        ldx     #start          ; self-check: the image (incl. its .cksum byte) must sum to 0 -
+        clra                    ; if the firmware overwrote any of it after the host verified it,
+selfck: ldab    0,x             ; don't run it
+        aba
+        inx
+        cpx     #codeend
+        bne     selfck
+        tsta
+        beq     selfok
+damaged: bra    damaged         ; no COP kick -> watchdog reset -> the radio reboots (safe)
+selfok:
         lds     #$3FFF
 
 loop:   jsr     rxb             ; wait for a sync byte; anything else is skipped
@@ -155,3 +166,6 @@ cop:    ldaa    #$55
         ldaa    #$AA
         staa    COPRST
         rts
+
+        .cksum                  ; balances the image to 0 (mod 256) for the self-check above
+codeend:

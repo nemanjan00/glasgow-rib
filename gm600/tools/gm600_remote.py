@@ -88,6 +88,7 @@ class EmuBackend:
 
     def __init__(self, flash_path, codeplug_path):
         import emu6811
+        self.emu6811 = emu6811
         self.m = emu6811.Mem(open(flash_path, "rb").read(), open(codeplug_path, "rb").read())
         self.c = emu6811.CPU(self.m)
         self.c.reset()
@@ -104,9 +105,9 @@ class EmuBackend:
     def press(self, key, hold=None):
         hold = hold or self.HOLD_INSNS
         a1, a2 = self.KEYS[key] if isinstance(key, str) else key
-        self.m.adc = [a1, a2, 0xFF, 0xFF]            # key down
+        self.m.adc = [a1, a2] + list(self.emu6811.IDLE_ADC[2:])   # key down
         self.c.run(max_insns=hold, cop_timeout=150000)
-        self.m.adc = [0xFF, 0xFF, 0xFF, 0xFF]        # release
+        self.m.adc = list(self.emu6811.IDLE_ADC)     # release
         self.c.run(max_insns=hold // 2, cop_timeout=150000)
 
     def close(self):

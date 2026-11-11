@@ -11,29 +11,43 @@
 ; Command loop: read a 0xA5 sync byte, then 5 bytes from the SCI (b0 b1 d0 d1 d2; the firmware's idle value is
 ; 00 40 xx xx xx), push them. The display holds them until the next command. Power-cycle to stop.
 
-        .org    $2000
+        .org    $3D80           ; free RAM: 0x3D80-0x3FFF reads zero in every RAM dump and nothing in the
+;                                 firmware references it. NOT $2000 - that is the firmware's live
+;                                 message-buffer pool, which can overwrite a stub between the host's
+;                                 verify and the 0x26 launch (hence also the self-check below).
 
 COPRST  = $103A
 SCSR    = $1074         ; SCI status 1 (RDRF = bit5 = 0x20)
 SCDR    = $1077         ; SCI data
 PUSH    = $8F1F         ; SPI device dispatcher; B=5 -> 7-seg digit controller
-BUF     = $2100         ; 5-byte struct
+BUF     = $3F80         ; 5-byte struct
 
 start:  sei
-        lds     #$21FF
+        ldx     #start          ; self-check: the image (incl. its .cksum byte) must sum to 0 -
+        clra                    ; if the firmware overwrote any of it after the host verified it,
+selfck: ldab    0,x             ; don't run it
+        aba
+        inx
+        cpx     #codeend
+        bne     selfck
+        tsta
+        beq     selfok
+damaged: bra    damaged         ; no COP kick -> watchdog reset -> the radio reboots (safe)
+selfok:
+        lds     #$3FFF
 loop:   jsr     rxb             ; sync: wait for 0xA5 (skips stale/echo bytes)
         cmpb    #$A5
         bne     loop
         jsr     rxb
-        stab    $2100
+        stab    $3F80
         jsr     rxb
-        stab    $2101
+        stab    $3F81
         jsr     rxb
-        stab    $2102
+        stab    $3F82
         jsr     rxb
-        stab    $2103
+        stab    $3F83
         jsr     rxb
-        stab    $2104
+        stab    $3F84
         ldx     #BUF
         pshx                    ; struct pointer (callee reads it at $C,y)
         pshx                    ; unused word
@@ -55,3 +69,6 @@ cop:    ldaa    #$55
         ldaa    #$AA
         staa    COPRST
         rts
+
+        .cksum                  ; balances the image to 0 (mod 256) for the self-check above
+codeend:

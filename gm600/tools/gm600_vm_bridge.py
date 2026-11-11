@@ -21,7 +21,8 @@ Everything is echoed first (single-wire half-duplex), then ACK (0x50), then the 
 exactly as a real GM600 answers (byte-for-byte compatible with mock_radio.py / a real capture).
 
 --ui[=PORT] also keeps the firmware running in the background and serves a live view of the
-control head (digits, icons, LEDs, backlight) at http://127.0.0.1:8600/ (gm600_display.py).
+control head (digits, icons, LEDs, backlight) at http://127.0.0.1:8600/ (gm600_display.py); click
+the panel's buttons (or the raw key-code row) to press keys through the keypad A/D.
 
 usage: gm600_vm_bridge.py <motofix.BIN> <codeplug.bin> [PORT] [--ui[=PORT]]   (default port 2399)
 """
@@ -55,11 +56,26 @@ class VMRadio:
         self.c.run(max_insns=BOOT_INSNS, cop_timeout=150000)   # boot the firmware
         self.lock = threading.Lock()
 
+    HOLD_INSNS = 300_000            # key held this long (the firmware debounces over two reads)
+
     def free_run(self, chunk=20_000):
         """Keep the firmware running between queries (for the UI: its display task refreshes)."""
+        self._release_in = None
         while True:
             with self.lock:
                 self.c.run(max_insns=chunk, cop_timeout=150000)
+                if self._release_in is not None:
+                    self._release_in -= chunk
+                    if self._release_in <= 0:
+                        self.m.adc = list(emu6811.IDLE_ADC)
+                        self._release_in = None
+
+    def press(self, code):
+        """Press key ``code`` (gm600_display.KEY_CODES) via the keypad A/D; free_run releases it."""
+        import gm600_display
+        with self.lock:
+            self.m.adc = gm600_display.adc_for(code)
+            self._release_in = self.HOLD_INSNS
 
     def _vm_query_23(self, frame, index):
         """Feed a 0x23 query and read back the reply the firmware builds in RAM."""
@@ -160,7 +176,7 @@ if __name__ == "__main__":
     if ui:
         import gm600_display
         ui_port = int(ui[0].split("=", 1)[1]) if "=" in ui[0] else 8600
-        ui_port = gm600_display.serve_ui(radio.tap.state, ui_port)
+        ui_port = gm600_display.serve_ui(radio.tap.state, ui_port, press=radio.press)
         threading.Thread(target=radio.free_run, daemon=True).start()
         print(f"GM600 VM display: http://127.0.0.1:{ui_port}/", flush=True)
     serve(radio, port)

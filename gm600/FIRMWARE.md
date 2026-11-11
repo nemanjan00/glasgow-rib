@@ -448,11 +448,11 @@ above; the stubs are for showing anything else.
   number on the glass by pushing `0x37AC` (entry 8) was aimed at the icon controller; the "888" seen
   was the boot self-test after a crash. The digits are a separate controller (entry 5). A RAM diff
   between two displayed numbers found it in one step — do that before decoding a buffer by hand.
-- **Emulator gap:** `emu6811.py` reads `0x0F0B`/`0x0F0C` at boot (pc `9D91`, `9E7D`) but renders the
-  SAME `322` for any Own Unit No. (a real 456 codeplug renders identically in the VM). It does not
-  model the trunking-idle "show own ident" display state (RF/synth/ASFIC not modelled → different
-  display branch). This wrongly led to "the number is firmware-determined, not a codeplug field."
-  **Verify display/behaviour claims on HARDWARE.**
+- **Emulator gap (closed):** the VM used to render the same screen for any Own Unit No. because it
+  never reached the idle own-ident state: with all input pins reading 0 and every A/D channel 0xFF it
+  stayed in a channel scan. With the bench radio's pin and A/D levels modelled in `emu6811`, the VM
+  shows the codeplug's Own Unit No. (322, 456) like the hardware. Earlier "the VM renders 322" claims
+  read `0x37AC`, which never holds the digits.
 - **Why the "race" looked like it worked:** all-00 (blank) and all-FF (all segments) are extremes that
   look right regardless, and an early "888" was actually the boot self-test caught mid-animation. The
   race never gave *clean* control of a chosen value — a sparse buffer blended with the firmware's

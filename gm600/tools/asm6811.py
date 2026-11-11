@@ -1,6 +1,7 @@
 """A tiny 68HC11 assembler — just the subset the GM600 RAM stubs need.
 
-Enough to assemble ``ramdump.S``: labels, ``NAME = expr`` equates, ``.org``, and a dozen
+Enough to assemble ``ramdump.S``: labels, ``NAME = expr`` equates, ``.org``, ``.cksum`` (one byte
+that makes the whole image sum to 0 mod 256, for a stub's self-check), and a dozen
 mnemonics across the inherent / immediate / extended / indexed / relative addressing modes. Not a
 general assembler; it exists so the stub can live as readable ``.S`` source with no external
 toolchain. Use it as a module (``assemble_file``) or a CLI:
@@ -113,6 +114,10 @@ def assemble(source, symbols=None):
                 sym[label] = addr
             if not toks:
                 continue
+            if toks[0] == ".cksum":
+                insns.append((addr, ".cksum", None))
+                addr += 1
+                continue
             mnemonic, operand = toks[0], (toks[1] if len(toks) > 1 else None)
             if mnemonic not in INSTR:
                 raise AsmError(f"unknown mnemonic: {mnemonic}")
@@ -125,7 +130,12 @@ def assemble(source, symbols=None):
         raise AsmError("no .org directive")
 
     out = bytearray()
+    cksum_at = None
     for at, mnemonic, operand in insns:
+        if mnemonic == ".cksum":
+            cksum_at = len(out)
+            out.append(0)
+            continue
         mode = _mode(mnemonic, operand)
         op = INSTR[mnemonic][mode]
         if mode == "INH":
@@ -142,6 +152,8 @@ def assemble(source, symbols=None):
             if not -128 <= rel <= 127:
                 raise AsmError(f"branch out of range at 0x{at:04X}: {mnemonic} {operand}")
             out += bytes([op, rel & 0xFF])
+    if cksum_at is not None:                      # make the whole image sum to 0 (mod 256)
+        out[cksum_at] = -sum(out) & 0xFF
     return Assembled(org, bytes(out), sym)
 
 

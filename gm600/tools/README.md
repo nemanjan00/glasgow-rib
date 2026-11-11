@@ -263,9 +263,19 @@ python3 gm600_display.py --text 53X --icons 0040 --backlight out.svg  # static p
 
 `--ui[=PORT]` keeps the firmware running between SBEP queries so its display task refreshes; the
 page polls `/display.svg` and `/state.json`. The codeplug must be the 640-byte EEPROM image
-(`0x0D80`–`0x0FFF`). With the bench radio's codeplug the VM cycles numbers (12, 11, 10, 9, 7, 3, 2 …)
-on the right-hand digits with the green LED blinking ([animation](../images/vm_ui.gif)) — it looks
-like a channel hunt (no RF in the VM), unlike the real radio's steady own-unit number.
+(`0x0D80`–`0x0FFF`). The VM boots to the idle own-ident screen like the radio (322 on the bench
+codeplug), with the LEDs and backlight live. **Click the panel's buttons** (or the raw key-code row) to
+press keys: the bridge drives the keypad A/D ladders the firmware decodes ([idle, C, scroll up](../images/vm_ui_buttons.png)).
+
+Keypad (firmware decoders `0x4FBB`/`0x4F79`/`0x4FFD`, one per A/D ladder; windows ≤`29`, `39`–`48`,
+`79`–`88`, `B9`–`C8`). Button names come from what each code does in the VM; not yet checked by
+pressing the bench radio:
+
+| ladder | codes → buttons |
+|--|--|
+| AN0 | `10` vol down · `11` vol up · `12` clear · `13` base call |
+| AN1 | `14` A · `15` B · `16` C · `17` D |
+| AN2 | `06` scroll down · `07` scroll up · `08` on/off |
 
 ## `gm600_keypad_patch.py` — press real keys via a firmware patch
 

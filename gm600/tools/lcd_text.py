@@ -109,8 +109,7 @@ def launch(r, stub="lcd_text.S"):
         assert st == sbep.ACK, (hex(addr), st)
     back = b"".join(r.read_block(org + o, min(64, len(code) - o)) for o in range(0, len(code), 64))
     assert back == code, "verify mismatch"
-    r.drain()
-    r.sock.sendall(sbep.encode(0x26, org.to_bytes(2, "big")))
+    sbep.launch_stub(r, org, code)                 # re-verify right before the jump
     time.sleep(0.3)
     r.drain()
 

@@ -19,7 +19,10 @@
 ; Far control transfers use jsr/jmp (branches only reach +/-128); only tight local loops are branches.
 ; DANGER: `26` runs this with interrupts off; only ever launch the address you just uploaded.
 
-        .org    $2000
+        .org    $3D80           ; free RAM: 0x3D80-0x3FFF reads zero in every RAM dump and nothing in the
+;                                 firmware references it. NOT $2000 - that is the firmware's live
+;                                 message-buffer pool, which can overwrite a stub between the host's
+;                                 verify and the 0x26 launch (hence also the self-check below).
 
 SCSR    = $1074         ; SCI status 1 (RDRF = bit5 0x20, TDRE = bit7 0x80)
 SCDR    = $1077         ; SCI data
@@ -39,6 +42,17 @@ BUF     = $2300         ; 256-byte sector buffer
 
 ; ------------------------------------------------------------------ command loop
 start:  sei
+        ldx     #start          ; self-check: the image (incl. its .cksum byte) must sum to 0 -
+        clra                    ; if the firmware overwrote any of it after the host verified it,
+selfck: ldab    0,x             ; don't run it
+        aba
+        inx
+        cpx     #codeend
+        bne     selfck
+        tsta
+        beq     selfok
+damaged: bra    damaged         ; no COP kick -> watchdog reset -> the radio reboots (safe)
+selfok:
         jsr     we_setup        ; free PA6 from OC2, make it an output, start in read mode (/OE low)
 loop:   jsr     cop
         jsr     rxb             ; B = command byte
@@ -236,3 +250,6 @@ wdi:    dex
         ldab    #$84            ; status
         jsr     txb
         jmp     loop
+
+        .cksum                  ; balances the image to 0 (mod 256) for the self-check above
+codeend:

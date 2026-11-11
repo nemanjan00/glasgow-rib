@@ -55,14 +55,12 @@ def upload(radio, org, code, chunk=32):
         raise sbep.SBEPError("stub read-back mismatch - RAM upload failed")
 
 
-def launch_and_capture(radio, org, size, out=None, idle=3.0):
-    """Launch the stub at `org` via `26` and stream `size` raw bytes.
+def launch_and_capture(radio, org, code, size, out=None, idle=3.0):
+    """Re-verify the stub at `org`, launch it via `26` and stream `size` raw bytes.
 
     After the `26` frame the radio echoes it, sends one ACK (`50`), then jumps to the stub,
     which streams flash with no framing. Returns (flash_bytes, seconds)."""
-    frame = sbep.encode(0x26, org.to_bytes(2, "big"))
-    radio.drain()
-    radio.sock.sendall(frame)
+    frame = sbep.launch_stub(radio, org, code)      # re-verify right before the jump
     sock = radio.sock
     sock.settimeout(1.0)
     raw = bytearray()
@@ -126,7 +124,7 @@ def main(argv):
         print("uploading stub...")
         upload(radio, org, stub)
         print(f"verified. launching - streaming {FLASH_SIZE // 1024} KB (~4.5 min at 9600)...")
-        flash, secs = launch_and_capture(radio, org, FLASH_SIZE, out=None)
+        flash, secs = launch_and_capture(radio, org, stub, FLASH_SIZE, out=None)
     short = len(flash) != FLASH_SIZE
     with open(args.out, "wb") as f:
         f.write(flash)
