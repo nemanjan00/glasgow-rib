@@ -19,8 +19,10 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 - **DONE: standalone driver, no firmware code** — `tools/lcd_raw.S` (own SPI + select + LED latch; host
   packs with `lcd_text.pack`, a verified port of `0x9018`). Cam-proven (HI/OUr/SPI/COd/586), backlight
   on via `--backlight`. Every segment + glyph photographed: `images/lcd_segments/` (README has the
-  struct-bit and wire-bit maps). Open: wire byte 5 bit 7 (always set by the firmware) — clearing it
-  showed `d0.f`; why each segment has a bit in both wire halves (likely the controller's 2 backplanes).
+  struct-bit and data-bit maps). **Controller = start bit + 33 data bits** (partial frames survive
+  chip-select; the 5 leading zero bytes flush them) — settled by the A/B framing test. `lcd_raw.S` now
+  has a checksum, a status reply (06/15/54) and SPI timeouts, and loads at `0x3E40` (0x2000 is the
+  firmware's live buffer pool — a big upload there crashed the radio).
 - **7-seg font (cam-swept):** bit0 f, bit1 a, bit2 b, bit3 unused, bit4 e, bit5 g, bit6 d, bit7 c.
   Font table in `lcd_text.py`.
 - **Next (optional):** a co-resident (non-halting) variant via the free OC pseudo-vectors, so the

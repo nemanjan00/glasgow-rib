@@ -5,7 +5,7 @@ Taken 2026-11-11 on the bench radio (serial 807IYA0903) with the webcam, backlig
 SPI code (no firmware calls), so nothing else is drawn on the glass.
 
 The glass is one controller (SPI chip-select `0x61` on `0x107E`, SPCR `0x52`) carrying 3 seven-segment
-digits and 10 icons; `all_on.jpg` shows everything, `blank.jpg` nothing.
+digits and 9 icons; `all_on.jpg` shows everything, `blank.jpg` nothing.
 
 ## `struct/` — one bit of the firmware's 5-byte digit struct `[b0 b1 d0 d1 d2]`
 
@@ -18,30 +18,57 @@ Sheets: `sheet_digit_bits.png`, `sheet_icon_bits.png`.
 | `b0` | ▲ lower left | small icon, left middle | ▶ upper left | — | — | — | — | — |
 | `b1` | ▼ lower right | ▼ bottom centre | small mark, lower left | — | dash, right | box, right | icon, upper right (firmware idle: on) | — |
 
-## `wire/` — one bit of the 10 raw bytes on the wire
+## How the controller reads the wire: start bit + 33 data bits
 
-Relative to the blank frame `00 00 00 00 00 | 80 00 00 00 00` (= 5 zero bytes + `pack(00 00 00 00 00)`,
-the frame the firmware would send for a blank struct). Sheets: `sheet_wire_bytes0-4.png`,
-`sheet_wire_bytes5-9.png`. Matched to the struct photos by where the segment appears (the box was too faint
-for the matcher and was read off the sheet by eye). `dN.x` = digit N segment x; icons are named by
-their struct bit.
+The controller is a **start-bit-framed serial driver** (consistent with an MC145453-class 33-segment LCD
+driver; the part is not identified). It ignores `0` bits until it sees a `1` (the **start bit**), takes
+the next **33 bits** as segment data (MSB-first on the wire), latches them, and goes back to waiting for a
+start bit. **A partial frame survives chip-select**: if a push ends inside a frame, the next push's first
+bits complete it. That is why every push (the firmware's included) begins with **5 zero bytes**: 40 zero
+clocks finish any pending frame, so the real start bit (wire byte 5 bit 7, always set) begins an aligned
+frame. The firmware frame is therefore `00×5 | 1 + data bits 0–32 | 6 trailing zeros`.
 
-| byte | bit0 | bit1 | bit2 | bit3 | bit4 | bit5 | bit6 | bit7 |
-|--|--|--|--|--|--|--|--|--|
-| 0 | d0.a | — | — | — | — | — | — | — |
-| 1 | d2.a | d2.f | d2.g | d1.b | d1.a | d1.f | d1.g | d0.b |
-| 2 | d2.c | b1.0 | — | b1.4 | b1.5 | b1.6 | — | d2.b |
-| 3 | d0.d | d0.c | d1.e | b1.1 | d1.d | d1.c | d2.e | d2.d |
-| 4 | d0.f | d0.g | b0.2 | b0.1 | b0.0 | — | b1.2 | d0.e |
-| 5 | b1.2 | — | b0.0 | b0.1 | b0.2 | d0.g | d0.f | d0.f ¹ |
-| 6 | d2.e | d1.c | d1.d | b1.1 | d1.e | d0.c | d0.d | d0.e |
-| 7 | — | b1.6 | b1.5 | b1.4 | — | b1.0 | d2.c | d2.d |
-| 8 | d1.g | d1.f | d1.a | d1.b | d2.g | d2.f | d2.a | d2.b |
-| 9 | — | — | — | — | — | — | d0.a | d0.b |
+Data bit → segment (33 bits: 21 digit segments + 9 icons + 3 unused):
 
-Every segment answers to one bit in bytes 0–4 **and** one in bytes 5–9 (the halves are in roughly
-mirrored order). The firmware only ever fills bytes 5–9 and sends 0–4 as zeros.
-¹ byte 5 bit 7 is set in every frame the firmware sends; clearing it showed `d0.f`. Not understood yet.
+| data bit | wire byte.bit | segment | | data bit | wire byte.bit | segment |
+|--|--|--|--|--|--|--|
+| 0 | 5.6 | d0.f | | 17 | 7.5 | b1.0 |
+| 1 | 5.5 | d0.g | | 18 | 7.4 | — |
+| 2 | 5.4 | b0.2 | | 19 | 7.3 | b1.4 |
+| 3 | 5.3 | b0.1 | | 20 | 7.2 | b1.5 |
+| 4 | 5.2 | b0.0 | | 21 | 7.1 | b1.6 |
+| 5 | 5.1 | — | | 22 | 7.0 | — |
+| 6 | 5.0 | b1.2 | | 23 | 8.7 | d2.b |
+| 7 | 6.7 | d0.e | | 24 | 8.6 | d2.a |
+| 8 | 6.6 | d0.d | | 25 | 8.5 | d2.f |
+| 9 | 6.5 | d0.c | | 26 | 8.4 | d2.g |
+| 10 | 6.4 | d1.e | | 27 | 8.3 | d1.b |
+| 11 | 6.3 | b1.1 | | 28 | 8.2 | d1.a |
+| 12 | 6.2 | d1.d | | 29 | 8.1 | d1.f |
+| 13 | 6.1 | d1.c | | 30 | 8.0 | d1.g |
+| 14 | 6.0 | d2.e | | 31 | 9.7 | d0.b |
+| 15 | 7.7 | d2.d | | 32 | 9.6 | d0.a |
+| 16 | 7.6 | d2.c | | | | |
+
+`dN.x` = digit N (left→right) segment x; icons are named by their struct bit (`b0.2` = struct `b0` bit 2).
+
+### `wire/` — each of the 80 wire bits flipped alone
+
+Relative to the blank frame `00 00 00 00 00 | 80 00 00 00 00`. Sheets: `sheet_wire_bytes0-4.png`,
+`sheet_wire_bytes5-9.png`. Bits in bytes 5–9 are data bits (table above). **Bits in bytes 0–4 only seem
+to "light a segment too":** a `1` there becomes an earlier start bit, so the real start bit (5.7) lands
+in a data slot at distance `40 − p − 1` and lights whatever segment that slot drives. The start-bit model
+reproduces all 79 single-bit photos (5.7 itself: clearing it leaves no frame at all, so that photo just
+shows the previous screen).
+
+### `framing/` — the experiment that settled it
+
+Pattern A (left-digit bits from bytes 0–4) and B (a right-digit "8" in bytes 5–9), pushed alone and
+together. **run1** (no reset between pushes) gave "t" for A and AB: the previous push had left a partial
+frame, which ate the next push's first bits and moved the start bit to wire bit 30. **run2** puts a clean
+reset frame before each test and repeats A three times. All 12 photos match the model, including
+frames that light nothing (`E8`: start bit 7, data bit 22 = unused) and ones that light segments of
+digits neither pattern contains (AB80: `n _ 7`).
 
 ## `glyphs/`, `text_53X*.jpg`, `text_BNS*.jpg`
 

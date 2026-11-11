@@ -249,38 +249,59 @@ class LcdTextTest(unittest.TestCase):
 
     def test_standalone_stub_matches_firmware_on_the_wire(self):
         # lcd_raw.S (own SPI, no firmware calls) must produce the same SPCR / select / SPDR write
-        # sequence as lcd_text.S (which calls firmware entry 5), and the same LED sequence as entry 10.
+        # sequence as lcd_text.S (which calls firmware entry 5) and reply 06; the LED command must
+        # match entry 10; a bad checksum must send nothing (15); a stalled SPI must reply 54.
         import asm6811
         import emu6811
         import lcd_text
+        import sbep
         img = os.environ.get("GM600_FW")
         if not img:
             self.skipTest("set GM600_FW=/path/to/motofix.BIN (a flash dump) to run this")
         flash = open(img, "rb").read()
         here = os.path.dirname(os.path.abspath(__file__))
 
-        def trace(stub, payload):
+        def trace(stub, payload, spi_stalls=False):
             m = emu6811.Mem(flash=flash)
+            if spi_stalls:
+                wb = m.wb
+                def stalled(ad, v):
+                    wb(ad, v)
+                    if ad == 0x102A:
+                        m.reg[0x29] &= 0x7F
+                m.wb = stalled
             c = emu6811.CPU(m)
             a = asm6811.assemble_file(os.path.join(here, stub))
             m.ram[a.org:a.org + len(a.code)] = a.code
             m.reg[0x28] = 0x5C
             log = []
             m.watch = lambda ad, v: log.append((ad, v)) if ad in (0x1028, 0x107E, 0x102A) else None
-            c.SP, c.PC = 0x21FF, a.org
+            c.SP, c.PC = 0x3FFF, a.org
             m.feed_rx(payload)
-            c.run(max_insns=200000)
-            return log
+            c.run(max_insns=300000)
+            return log, bytes(m.sci_out), m.reg[0x7E]
+
+        def cmd(sync, body, good=True):
+            frame = bytes([sync]) + body
+            return frame + bytes([sbep.checksum(frame) ^ (0 if good else 1)])
 
         for text in ("322", "HI", "-9-"):
             st = bytes([0x00, 0x40]) + lcd_text.text_to_segs(text)
-            fw = trace("lcd_text.S", bytes([0xA5]) + st)
-            raw = trace("lcd_raw.S", bytes([0xA5]) + bytes(5) + lcd_text.pack(st))
+            fw, _, _ = trace("lcd_text.S", bytes([0xA5]) + st)
+            raw, reply, _ = trace("lcd_raw.S", cmd(0xA5, bytes(5) + lcd_text.pack(st)))
             self.assertTrue(fw)
             self.assertEqual(raw, fw, text)
-        self.assertEqual(trace("lcd_raw.S", bytes([0x5A, 0xC0])),
-                         [(0x1028, 0x50), (0x1028, 0x51), (0x102A, 0xC0), (0x107E, 0x21),
-                          (0x107E, 0x00), (0x1028, 0x5D)])
+            self.assertEqual(reply, b"\x06")
+        log, reply, _ = trace("lcd_raw.S", cmd(0x5A, b"\xc0"))
+        self.assertEqual(log, [(0x1028, 0x50), (0x1028, 0x51), (0x102A, 0xC0), (0x107E, 0x21),
+                               (0x107E, 0x00), (0x1028, 0x5D)])
+        self.assertEqual(reply, b"\x06")
+        log, reply, _ = trace("lcd_raw.S", cmd(0xA5, bytes(10), good=False))
+        self.assertEqual((log, reply), ([], b"\x15"))
+        log, reply, cs = trace("lcd_raw.S", cmd(0xA5, bytes(10)), spi_stalls=True)
+        self.assertEqual(reply, b"\x54")
+        self.assertEqual([v for ad, v in log if ad == 0x102A], [0])   # gave up on the first byte
+        self.assertEqual(cs & 0x61, 0)                                # select released
 
 
 class EmulatorTest(unittest.TestCase):
@@ -300,6 +321,17 @@ class EmulatorTest(unittest.TestCase):
         c.run(stop_pc=0x200 + len(prog) - 2)
         self.assertEqual(c.X, 1000 // 7)
         self.assertEqual(c.D, 1000 % 7)
+
+    def test_aba(self):
+        import emu6811
+        m = emu6811.Mem()
+        # ldaa #$F0 ; ldab #$20 ; aba -> A=0x10, carry set
+        prog = bytes([0x86, 0xF0, 0xC6, 0x20, 0x1B, 0x20, 0xFE])
+        m.ram[0x200:0x200 + len(prog)] = prog
+        c = emu6811.CPU(m); c.PC = 0x200
+        c.run(stop_pc=0x200 + len(prog) - 2)
+        self.assertEqual(c.A, 0x10)
+        self.assertTrue(c.gf(emu6811.C))
 
 
 class CodeplugChecksumTest(unittest.TestCase):

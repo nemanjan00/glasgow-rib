@@ -117,24 +117,36 @@ def launch(r, stub="lcd_text.S"):
 
 def push(r, segs, b0=B0, b1=B1, standalone=False):
     struct = bytes([b0, b1]) + bytes(segs)
-    r.sock.sendall(bytes([SYNC]) + (bytes(5) + pack(struct) if standalone else struct))
+    if standalone:
+        push_wire(r, bytes(5) + pack(struct))
+        return
+    r.sock.sendall(bytes([SYNC]) + struct)
     time.sleep(0.05)
     r.drain()
+
+
+STATUS = {0x06: "ok", 0x15: "bad checksum", 0x54: "SPI timeout"}
+
+
+def command(r, sync, payload):
+    """lcd_raw.S only: send sync + payload + checksum, return the stub's status byte."""
+    body = bytes([sync]) + bytes(payload)
+    status, _, _ = r.transact(body + bytes([sbep.checksum(body)]), reply=False)
+    if status != 0x06:
+        raise sbep.SBEPError(f"stub replied {status:02X} ({STATUS.get(status, 'unknown')})")
+    return status
 
 
 def push_wire(r, wire):
-    """lcd_raw.S only: send 10 raw wire bytes to the display controller."""
+    """lcd_raw.S only: send the 10 raw wire bytes to the display controller (normally 5 x 00, then
+    the start bit and 33 data bits, i.e. 5 x 00 + pack(struct))."""
     assert len(wire) == 10
-    r.sock.sendall(bytes([SYNC]) + bytes(wire))
-    time.sleep(0.05)
-    r.drain()
+    return command(r, SYNC, wire)
 
 
 def led(r, value):
-    """Set the LED shift register (lcd_raw.S only): bit 7 = backlight, bits 0-2 = status LEDs."""
-    r.sock.sendall(bytes([0x5A, value]))
-    time.sleep(0.05)
-    r.drain()
+    """lcd_raw.S only: set the LED shift register: bit 7 = backlight, bits 0-2 = status LEDs."""
+    return command(r, 0x5A, [value])
 
 
 def main():

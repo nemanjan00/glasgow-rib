@@ -24,6 +24,7 @@ INSTR = {
     "asla": {"INH": 0x48}, "aslb": {"INH": 0x58}, "lsra": {"INH": 0x44}, "lsrb": {"INH": 0x54},
     "rola": {"INH": 0x49}, "rolb": {"INH": 0x59}, "rora": {"INH": 0x46}, "rorb": {"INH": 0x56},
     "coma": {"INH": 0x43}, "comb": {"INH": 0x53}, "tab": {"INH": 0x16}, "tba": {"INH": 0x17},
+    "aba": {"INH": 0x1B},
     "ldaa": {"IMM8": 0x86, "EXT": 0xB6, "IDX": 0xA6},
     "ldab": {"IMM8": 0xC6, "EXT": 0xF6, "IDX": 0xE6},
     "staa": {"EXT": 0xB7, "IDX": 0xA7},

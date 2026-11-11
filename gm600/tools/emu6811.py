@@ -603,6 +603,8 @@ def _xgdx(c): d = c.D; c.D = c.ir(); c.set_ir(d)
 def _(c): c.B = c.A; c.nz8(c.B); c.sf(V, False)
 @op(0x17)
 def _(c): c.A = c.B; c.nz8(c.A); c.sf(V, False)
+@op(0x1B)
+def _aba(c): c.A = c.add8(c.A, c.B)
 @op(0x19)
 def _daa(c):
     a = c.A; corr = 0; cf = c.gf(C)

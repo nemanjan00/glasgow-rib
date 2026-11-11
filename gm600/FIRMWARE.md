@@ -424,11 +424,20 @@ identical to the firmware path in the emulator (test `LcdTextTest`), and it ran 
 SPI / COd / 586 ([images/lcd_raw_stub.png](images/lcd_raw_stub.png)). It also drives the LED shift
 register as entry 10 does (`SPCR = 0x51`, shift 1 byte, strobe `0x107E |= 0x21`, clear `0x61`), so
 `--backlight` turns the backlight on. `lcd_text.py --standalone [--backlight] TEXT`.
+Commands carry a checksum (`A5 <10 wire bytes> <cks>`, `5A <LED byte> <cks>`, whole command sums to
+`0xFF`) and the stub answers one status byte: `06` done, `15` bad checksum (nothing sent), `54` SPI
+timeout (SPIF polled 256× without success; selects released). It lives at **`0x3E40`**: the earlier
+`0x2000` load address is the firmware's live message-buffer pool, and once the stub grew to 255 bytes
+the upload itself crashed the radio. `0x3D80–0x3FFF` reads zero in every RAM dump and is unreferenced.
 
-**The glass is one controller: 3 digits + 10 icons.** `b0`/`b1` in the struct are the icons (`b1` bit 6
-is the upper-right icon the idle screen shows). All 80 wire bits were swept one at a time with the
-backlight on: every segment answers to one bit in wire bytes 0–4 **and** one in 5–9; the firmware only
-fills 5–9. Per-segment photos, both maps and the glyph shots:
+**The glass is one controller: 3 digits + 9 icons, start-bit framed.** `b0`/`b1` in the struct are the
+icons (`b1` bit 6 is the upper-right icon the idle screen shows). The controller ignores zeros until a
+`1` (start bit), latches the next **33 data bits**, then waits for the next start bit; a partial frame
+survives chip-select, which is what the firmware's 5 leading zero bytes flush. (Consistent with an
+MC145453-class 33-segment driver; part not identified.) The early "every segment answers in both wire
+halves" observation was this: a `1` in bytes 0–4 becomes an earlier start bit and shifts the real one
+into a data slot. Settled by an A/B framing experiment; the model reproduces all 79 single-bit photos
+and all 12 framing photos. Data-bit map, per-segment photos, glyph shots and the experiment:
 [images/lcd_segments/](images/lcd_segments/README.md).
 
 The clean way to change the number the *firmware* shows is still the Own Unit No. codeplug field

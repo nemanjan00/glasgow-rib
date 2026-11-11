@@ -242,8 +242,10 @@ python3 lcd_photos.py /tmp/out [--only wire|struct|glyphs]  # photograph every s
 ```
 
 `lcd_raw.S` drives the display controller and the LED/backlight shift register itself; the host sends
-the 10 wire bytes (`lcd_text.pack` ports the firmware's packing). Maps and photos:
-`../images/lcd_segments/`.
+the 10 wire bytes (`lcd_text.pack` ports the firmware's packing). Commands are checksummed and the stub
+replies `06` ok / `15` bad checksum / `54` SPI timeout (`lcd_text.command` raises on anything but `06`).
+Loads at `0x3E40` (not `0x2000`, which is live firmware RAM). Maps, photos, and the framing
+experiment (start bit + 33 data bits): `../images/lcd_segments/`.
 
 ## `gm600_keypad_patch.py` — press real keys via a firmware patch
 

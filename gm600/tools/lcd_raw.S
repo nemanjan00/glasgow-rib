@@ -1,99 +1,153 @@
-; lcd_raw.S — GM600 RAM stub: drive the 3-digit 7-seg controller directly, with NO firmware calls.
+; lcd_raw.S — GM600 RAM stub: drive the display controller directly, with NO firmware calls.
 ;
-; Same job as lcd_text.S, but instead of calling SPI-dispatcher entry 5 (0x9018 / 0x9102) it does the
-; SPI itself, replicating what entry 5 puts on the wire (verified in emu6811 against the firmware):
-;   SPCR &= 0xF3; SPCR = 0x52; 0x107E |= 0x61 (chip select); send 5 x 0x00, then the 5 packed frame bytes;
-;   0x107E &= ~0x61; SPCR |= 0x0C (the dispatcher's epilogue).
-; The host supplies all 10 wire bytes: normally 5 x 00 + lcd_text.pack(struct) (a port of 0x9018),
-; but any bytes can be sent, which reaches segments the firmware's packing never sets.
+; The display controller is a start-bit-framed serial driver (consistent with an MC145453-class
+; 33-segment LCD driver): it ignores 0 bits until a 1 (the start bit), then takes the next 33 bits
+; as segment data and latches them. A partial frame survives chip-select, so every push starts with
+; 5 zero bytes (40 clocks) to flush one; the firmware does the same. See images/lcd_segments/.
 ;
-; Command loop: 0xA5 + 10 wire bytes -> display controller; 0x5A + 1 byte -> LED shift register
-; (bit 7 = LCD/keypad backlight; see FIRMWARE.md LED map). Uploaded with
-; SBEP 0x17, launched with 0x26. Halts the firmware: power-cycle (psu_reboot.py) to stop.
+; Wire sequence (as firmware entry 5, 0x9018, verified in emu6811):
+;   SPCR &= 0xF3; SPCR = 0x52; 0x107E |= 0x61 (select); 10 bytes out; 0x107E &= 0x9E; SPCR |= 0x0C.
+; LED shift register (backlight = bit 7), as entry 10 (0x8F64):
+;   SPCR = 0x51; 1 byte out; strobe 0x107E |= 0x21; short delay; 0x107E &= 0x9E.
+;
+; Host protocol (all over the SBEP line; the stub's replies echo back into its own RX and are skipped
+; because they are not sync bytes):
+;   A5 <10 wire bytes> <cks>   display frame (normally 5 x 00 + start bit + 33 data bits + 6 x 0)
+;   5A <1 LED byte>    <cks>   LED shift register
+;   cks = 0xFF - sum(sync + payload), so the whole command sums to 0xFF (SBEP convention).
+; Reply, one byte: 06 = done, 15 = bad checksum (nothing sent), 54 ('T') = SPI timeout (SPIF never
+; set within ~256 polls; select released). Uploaded with SBEP 0x17, launched with 0x26. Halts the
+; firmware: power-cycle (psu_reboot.py) to stop.
 
-        .org    $2000
+        .org    $3E40           ; above the firmware's last RAM variables (0x3D66-0x3D7D); 0x3D80-
+;                                 0x3FFF reads zero in every RAM dump and nothing references it.
+;                                 (0x2000 is the firmware's message-buffer pool: a 255-byte upload
+;                                 there crashed the radio mid-upload.)
 
 COPRST  = $103A
-SCSR    = $1074         ; SCI status 1 (RDRF = bit5 = 0x20)
+SCSR    = $1074         ; SCI status 1 (TDRE = bit7, RDRF = bit5)
 SCDR    = $1077         ; SCI data
 SPCR    = $1028
 SPSR    = $1029         ; SPIF = bit7
 SPDR    = $102A
 CSPORT  = $107E         ; control-head selects
-BUF     = $2100         ; the 10 wire bytes (entry 5 sends 5 x 00 + the 5 packed bytes)
-BUFEND  = $210A
+BUF     = $3F80         ; the 10 wire bytes
+BUFEND  = $3F8A
+SUM     = $3F8B         ; running checksum
+LEDB    = $3F8C         ; LED byte
 
 start:  sei
-        lds     #$21FF
+        lds     #$3FFF
 
-loop:   jsr     rxb             ; sync: 0xA5 = digits, 0x5A = LEDs (anything else is skipped)
+loop:   jsr     rxb             ; wait for a sync byte; anything else is skipped
         cmpb    #$5A
         beq     led
         cmpb    #$A5
         bne     loop
+        stab    SUM
         ldx     #BUF
-rd:     jsr     rxb
+rd:     jsr     rxsum
         stab    0,x
         inx
         cpx     #BUFEND
         bne     rd
+        jsr     rxsum           ; checksum byte
+        ldaa    SUM
+        cmpa    #$FF
+        bne     badck
 
         ldaa    SPCR            ; dispatcher prologue: clear CPOL|CPHA
         anda    #$F3
         staa    SPCR
         ldaa    #$52            ; SPI master, mode/rate as entry 5
         staa    SPCR
-        ldaa    CSPORT          ; assert the 7-seg controller select (RMW, keep other lines)
+        ldaa    CSPORT          ; assert the display select (RMW, keep other lines)
         oraa    #$61
         staa    CSPORT
         ldx     #BUF
 send:   ldaa    0,x
-        staa    SPDR
-wait:   ldaa    SPSR
-        bpl     wait            ; SPIF
-        ldaa    SPDR            ; clears SPIF
+        jsr     spix
+        bne     spito
         inx
         cpx     #BUFEND
         bne     send
-        ldaa    CSPORT          ; release
-        anda    #$9E
-        staa    CSPORT
-        ldaa    SPCR            ; dispatcher epilogue: CPOL|CPHA back on
-        oraa    #$0C
-        staa    SPCR
-        bra     loop
+        jsr     unsel
+        ldab    #$06
+        jsr     txb
+        jmp     loop
 
-; LED shift register (front-panel LEDs + LCD backlight bit 7), as firmware entry 10 (0x8F64):
-; SPCR = 0x51, shift one byte out (no select), strobe 0x107E |= 0x21, short delay, clear 0x61.
-led:    jsr     rxb
+led:    stab    SUM
+        jsr     rxsum
+        stab    LEDB
+        jsr     rxsum
+        ldaa    SUM
+        cmpa    #$FF
+        bne     badck
         ldaa    SPCR            ; dispatcher prologue
         anda    #$F3
         staa    SPCR
         ldaa    #$51
         staa    SPCR
-        stab    SPDR
-lwait:  ldaa    SPSR
-        bpl     lwait
-        ldaa    SPDR
+        ldaa    LEDB
+        jsr     spix
+        bne     spito
         ldaa    CSPORT          ; latch strobe
         oraa    #$21
         staa    CSPORT
         ldab    #8              ; stands in for the firmware's fdiv (~41 cycles)
 ldly:   decb
         bne     ldly
-        ldaa    CSPORT
+        jsr     unsel
+        ldab    #$06
+        jsr     txb
+        jmp     loop
+
+badck:  ldab    #$15
+        jsr     txb
+        jmp     loop
+
+spito:  jsr     unsel
+        ldab    #$54
+        jsr     txb
+        jmp     loop
+
+; spix: send A over SPI, wait for SPIF with a limit. Returns Z=1 on success, Z=0 on timeout.
+spix:   staa    SPDR
+        clrb                    ; 256 polls
+spiw:   ldaa    SPSR
+        bmi     spiok
+        decb
+        bne     spiw
+        ldaa    #1              ; Z=0: timeout
+        rts
+spiok:  ldaa    SPDR            ; clears SPIF
+        clra                    ; Z=1: ok
+        rts
+
+unsel:  ldaa    CSPORT          ; release the selects
         anda    #$9E
         staa    CSPORT
-        ldaa    SPCR            ; dispatcher epilogue
+        ldaa    SPCR            ; dispatcher epilogue: CPOL|CPHA back on
         oraa    #$0C
         staa    SPCR
-        jmp     loop
+        rts
+
+rxsum:  jsr     rxb             ; B = next byte; SUM += B
+        ldaa    SUM
+        aba
+        staa    SUM
+        rts
 
 rxb:    jsr     cop
         ldaa    SCSR
         anda    #$20            ; RDRF
         beq     rxb
         ldab    SCDR
+        rts
+
+txb:    ldaa    SCSR            ; wait TDRE, send B
+        bpl     txb
+        stab    SCDR
         rts
 
 cop:    ldaa    #$55
