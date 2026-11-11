@@ -36,6 +36,60 @@ GLYPHS = {
 FONT = {c: sum(SEG[x] for x in segs) for c, segs in GLYPHS.items()}
 
 
+def pack(s):
+    """Port of firmware 0x9018: 5-byte digit struct -> 5-byte controller frame."""
+    s0, s1, s2, s3, s4 = s
+    o = [0] * 5
+    # 9020: ldd 0,x; asld; asld; oraa #80; anda #9E
+    d = ((s0 << 8 | s1) << 2) & 0xFFFF
+    a = ((d >> 8) | 0x80) & 0x9E
+    b = s2 >> 1
+    if s2 & 1: a |= 0x40
+    if s1 & 0x04: a |= 0x01
+    if s2 & 0x20: a |= 0x20
+    o[0] = a
+    # 903E: tba; clrb; lsrd; lsrd; stab 4,y
+    o[4] = ((b << 8) >> 2) & 0xFF
+    # 9045
+    a = s2
+    a = a | 0x20 if s2 & 0x80 else a & 0xDF
+    a = a | 0x80 if s2 & 0x10 else a & 0x7F
+    o[1] = a & 0xE0
+    # 905E
+    o[3] = (s3 << 1) & 0x0E
+    # 9066: ldab 4,x; tba; aslb; aslb; asld; asla x3
+    a, b = s4, (s4 << 2) & 0xFF
+    d = ((a << 8 | b) << 1) & 0xFFFF
+    a = (d >> 8) << 3 & 0xFF
+    # 906F: ldab 3,x; aslb; aslb; asld; oraa 3,y; staa 3,y
+    b = (s3 << 2) & 0xFF
+    d = ((a << 8 | b) << 1) & 0xFFFF
+    a, b = d >> 8, d & 0xFF
+    o[3] |= a
+    # 907A: a=s4; lsra x7 -> C=bit6; rolb; lsra -> C=bit7; rolb
+    def rol(b, c): return ((b << 1) | c) & 0xFF
+    b = rol(b, (s4 >> 6) & 1)
+    b = rol(b, (s4 >> 7) & 1)
+    # 9086: a=s1; lsra rolb (bit0); lsra lsra lsra rolb (bit3); then (lsra rolb) x3 (bits 4..6); aslb
+    b = rol(b, s1 & 1)
+    b = rol(b, (s1 >> 3) & 1)
+    for k in (4, 5, 6):
+        b = rol(b, (s1 >> k) & 1)
+    b = (b << 1) & 0xFF
+    o[2] = b
+    # 9098: a=s3; clrb; lsra x5 -> C=bit4; rolb; aslb; lsra lsra -> C=bit6; rolb; lsra -> bit7; rolb
+    b = 0
+    b = rol(b, (s3 >> 4) & 1)
+    b = (b << 1) & 0xFF
+    b = rol(b, (s3 >> 6) & 1)
+    b = rol(b, (s3 >> 7) & 1)
+    # 90A9: a=s4; asla x4 -> C=bit4; rolb; brclr 1,x #02 -> orab #8; orab 1,y; stab 1,y
+    b = rol(b, (s4 >> 4) & 1)
+    if s1 & 0x02: b |= 0x08
+    o[1] |= b
+    return bytes(o)
+
+
 def text_to_segs(text):
     text = text.ljust(3)[:3]
     try:

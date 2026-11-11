@@ -224,6 +224,29 @@ class LcdTextTest(unittest.TestCase):
         self.assertEqual(lcd_text.text_to_segs("322"), bytes.fromhex("e67676"))
         self.assertEqual(lcd_text.text_to_segs("686"), bytes.fromhex("f3f7f3"))
 
+    def test_pack_matches_firmware_entry5(self):
+        # Run the firmware's own 0x9018 in the emulator on random structs and compare its SPI bytes
+        # (5 zeros + the packed frame) with the Python port.
+        import random
+        import emu6811
+        import lcd_text
+        img = os.environ.get("GM600_FW")
+        if not img:
+            self.skipTest("set GM600_FW=/path/to/motofix.BIN (a flash dump) to run this")
+        m = emu6811.Mem(flash=open(img, "rb").read())
+        c = emu6811.CPU(m)
+        rng = random.Random(3)
+        for _ in range(300):
+            s = bytes(rng.randrange(256) for _ in range(5))
+            m.spi_out = bytearray()
+            for i, v in enumerate(s):
+                m.wb(0x2100 + i, v)
+            c.SP = 0x21FF
+            c.pushw(0x2100); c.pushw(0); c.pushw(0x3000); c.pushw(0x3000)
+            c.PC = 0x9018
+            self.assertEqual(c.run(max_insns=5000, stop_pc=0x3000), "stop")
+            self.assertEqual(bytes(m.spi_out), bytes(5) + lcd_text.pack(s), s.hex())
+
 
 class EmulatorTest(unittest.TestCase):
     """The 68HC11 core must execute correctly (validated on a known program)."""
