@@ -8,6 +8,12 @@ page, then the fixed `8000`-`FFFF`. It does not return - you power-cycle the rad
 
 The stub is `ramdump.S` (readable assembly, register map as a HAL), assembled by `asm6811.py`.
 
+Integrity: the uploaded stub is read back and compared before launch, and the 26 echo + launch-ACK
+are checked, but the 256 KB stream itself has NO per-byte framing or checksum — the stub just writes
+flash bytes to the SCI as fast as TDRE allows. A dropped or doubled byte would shift the image
+silently. For a trustworthy image, dump twice and diff (a clean dump is identical byte-for-byte, as
+verified against the off-board read); a short capture is already flagged.
+
     python3 ramdump.py flash.bin        # upload, launch, capture 256 KB (~4.5 min at 9600)
 
 Prerequisites, as for every BUS+ tool: 9 V on HOOK and the applet's `socket` op on
@@ -76,9 +82,17 @@ def launch_and_capture(radio, org, size, out=None, idle=3.0):
         elif time.monotonic() - last > idle:
             break
     sys.stderr.write("\n")
-    payload = raw[len(frame):]                        # drop the echoed 26 frame
-    if payload[:1] == bytes([sbep.ACK]):              # and the single launch-ACK
-        payload = payload[1:]
+    # The backdoor jump must echo the 26 frame then a single ACK before the raw stream; a wrong
+    # echo means a bus collision and a missing ACK means the jump didn't take, either of which makes
+    # the capture bytes meaningless. Check both instead of silently slicing them off.
+    if raw[:len(frame)] != frame:
+        raise sbep.SBEPError("26 launch: echo mismatch (bus collision?) — sent %s, got %s"
+                             % (frame.hex(), raw[:len(frame)].hex()))
+    payload = raw[len(frame):]
+    if payload[:1] != bytes([sbep.ACK]):
+        raise sbep.SBEPError("26 launch: no ACK after the backdoor jump (got %s)"
+                             % (payload[:1].hex() or "nothing"))
+    payload = payload[1:]
     flash = bytes(payload[:size])
     if out:
         with open(out, "wb") as f:

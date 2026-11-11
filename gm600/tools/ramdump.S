@@ -12,6 +12,11 @@
 ; Assembled by asm6811.py. Verified in-circuit on 807IYA0903: output byte-identical to the
 ; off-board T48 read (motofix.BIN), all 16 pages.
 
+; Why $2000: it sits in the K-series internal RAM, clear of the firmware RAM the dump reads back
+; through the window (the LCD/LED shadows at $34xx/$37xx and the SBEP buffers at $1Axx are all
+; lower). ramdump.py proves it is writable RAM by reading the stub back and comparing before it
+; launches; the stub then runs with interrupts off and never returns, so it only has to not overlap
+; itself — whatever firmware data lived at $2000 is irrelevant once we have jumped in.
         .org    $2000
 
 ; ---- 68HC11 K-series register HAL (pinned from the firmware, see ../FIRMWARE.md) ----
