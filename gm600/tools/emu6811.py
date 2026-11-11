@@ -3,7 +3,9 @@
 Run firmware routines (and eventually boot) to trace the display render, find variables by
 watching memory, and test codeplug writes without the bench. CPU is fairly complete (ALU x all
 addressing modes, 16-bit ops, memory RMW, bit ops, Y/CPD prefixes, branches, stack, calls).
-Peripherals are stubbed: SPI/SCI writes are captured; timer/interrupts come next.
+Peripherals modelled: SPI/SCI capture, timers + output-compare/RTI interrupts (the RTOS ticks),
+the A/D (keypad), and the external AT29C020 flash write path (PA6+pin-12 /OE gate, SDP program,
+product-ID) so the flashtool write sequence can be validated in software.
 
 Memory: 0x0000-0x3FFF RAM; 0x1000-0x107F registers (0x1058=bank, SPI/SCI captured);
 0x0D80-0x0FFF internal EEPROM; 0x4000-0x7FFF banked flash (page=reg0x58>>2); 0x8000-0xFFFF fixed.
@@ -50,6 +52,15 @@ class Mem:
         self.spi_xfers = []                  # list of (cs_value, bytes) grouped by chip-select
         self._cur_xfer = None
         self.force_oc1 = False               # debug: force OC1 interrupt enabled (tick), see docs
+        # External AT29C020 flash write model. In stock operation the flash /OE is held low (read
+        # only): writes are ignored. ~12V on accessory pin-12 releases the gate so /OE follows PA6
+        # (PORTA bit6); with PA6 high a CPU write pulses /WE and reaches the chip. Set pin12_12v to
+        # model the 12V being applied. See docs/FLASH_WRITE.md.
+        self.pin12_12v = False
+        self._fl_seq = []                    # recent (A0..A14 cmd addr, data) writes, for 3-cycle commands
+        self._fl_id = False                  # AT29C020 software product-ID mode
+        self._fl_load = None                 # pending sector program: {byte_offset: value}
+        self._fl_sector = None               # base chip address of the sector being loaded
 
     def tick(self, n=4):
         self.tcnt = (self.tcnt + n) & 0xFFFF
@@ -95,9 +106,7 @@ class Mem:
             return self.reg[o]
         if a < 0x4000:
             return self.ram[a]
-        if a < 0x8000:
-            return self.flash[((self.reg[0x58] >> 2) * 0x4000) + (a - 0x4000)]
-        return self.flash[0x38000 + (a - 0x8000)]
+        return self._flash_read(self._chip_addr(a))
 
     def wb(self, a, v):
         a &= 0xFFFF; v &= 0xFF
@@ -141,6 +150,51 @@ class Mem:
             return
         if a < 0x4000:
             self.ram[a] = v
+            return
+        # 0x4000-0xFFFF: external flash. Writes land only when the /OE write-lock is released
+        # (pin-12 ~12V AND PA6 high); otherwise ignored, exactly as the real board behaves.
+        if self.pin12_12v and (self.reg[0x00] & 0x40):
+            self._flash_write(self._chip_addr(a), v)
+
+    # ---- AT29C020 flash write model (see __init__) ----
+    def _chip_addr(self, a):
+        """CPU address -> 18-bit flash chip address (banked window or fixed region)."""
+        if a < 0x8000:
+            return ((self.reg[0x58] >> 2) * 0x4000) + (a - 0x4000)
+        return 0x38000 + (a - 0x8000)
+
+    def _flash_write(self, chip, v):
+        ca = chip & 0x7FFF                               # AT29C020 commands decode only A0-A14
+        self._fl_seq.append((ca, v)); self._fl_seq = self._fl_seq[-3:]
+        s = self._fl_seq
+        if len(s) == 3 and s[0] == (0x5555, 0xAA) and s[1] == (0x2AAA, 0x55) and s[2][0] == 0x5555:
+            x = s[2][1]
+            if x == 0x90:                                # product-ID entry
+                self._fl_id = True
+            elif x == 0xF0:                              # product-ID exit
+                self._fl_id = False
+            elif x == 0xA0:                              # SDP program prefix -> begin sector load
+                self._fl_load = {}; self._fl_sector = None
+            self._fl_seq = []
+            return
+        if self._fl_load is not None:                    # sector data load
+            if self._fl_sector is None:
+                self._fl_sector = chip & ~0xFF
+            if (chip & ~0xFF) == self._fl_sector:
+                self._fl_load[chip & 0xFF] = v
+
+    def _flash_read(self, chip):
+        if self._fl_load is not None and self._fl_sector is not None:
+            sect = bytearray(b"\xFF" * 0x100)            # sector auto-erases, then loaded bytes program
+            for off, val in self._fl_load.items():
+                sect[off] = val
+            self.flash[self._fl_sector:self._fl_sector + 0x100] = sect
+            self._fl_load = None; self._fl_sector = None
+        if self._fl_id:
+            if chip in (0x0002, 0x3FFF2):
+                return 0xFE                              # boot-block lockout: both unlocked
+            return 0x1F if (chip & 1) == 0 else 0xDA     # manufacturer / device code
+        return self.flash[chip]
 
     def rw(self, a):
         return (self.rb(a) << 8) | self.rb(a + 1)

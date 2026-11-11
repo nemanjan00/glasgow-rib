@@ -34,6 +34,7 @@ CNT16   = $2280         ; loop counter (16-bit, saved across X reuse)
 WINPTR  = $2282         ; working window pointer (hi)
 WINLO   = $2283         ; working window pointer (lo)
 BUFPTR  = $2284         ; working buffer pointer
+PAGE    = $2286         ; target page of a 'W' command (whitelist-checked)
 BUF     = $2300         ; 256-byte sector buffer
 
 ; ------------------------------------------------------------------ command loop
@@ -92,10 +93,11 @@ we_on:  ldaa    PORTA           ; PA6 high -> flash /OE high -> write mode (flas
         rts
 
 ; ------------------------------------------------------------------ AT29C020 product-ID commands
-; Commands must land in the CSPROG region ($8000-$FFFF; PCSZ=0:1=32K) — the bank window $4000-$7FFF
-; is NOT covered by CSPROG, so writes there never select the flash. The AT29C020 command decoder
-; uses only A0-A14, so chip addr 0x5555 == CPU 0xD555 and 0x2AAA == CPU 0xAAAA in the fixed region
-; (A15-A17 don't-care). No banking needed for commands.
+; Commands go through the fixed region $8000-$FFFF. /CE (=CSPROG pin) asserts for both the fixed
+; region and the bank window (ramdump reads every page through the window, and the sector load below
+; writes the window), so either would select the flash; the fixed region is just simpler (no banking)
+; and unambiguously in range. The AT29C020 command decoder uses only A0-A14, so chip 0x5555 == CPU
+; 0xD555 and 0x2AAA == CPU 0xAAAA (A15-A17 don't-care). The write lock was /OE, not chip-select.
 id_cmd: ldaa    #$AA            ; entry: AA->5555, 55->2AAA, 90->5555  (via fixed region)
         staa    $D555
         ldaa    #$55
@@ -157,12 +159,12 @@ rdlp:   stx     CNT16
 ; ------------------------------------------------------------------ 'W' program sector
 do_write:
         jsr     rxb             ; page
-        pshb
+        stab    PAGE
         jsr     rxb             ; window hi
         stab    WINPTR
         jsr     rxb             ; window lo
         stab    WINLO
-        ldx     #BUF            ; receive 256 data bytes into BUF
+        ldx     #BUF            ; receive 256 data bytes into BUF (consume the whole command first)
         stx     BUFPTR
         ldx     #256
 wrxlp:  stx     CNT16
@@ -174,14 +176,24 @@ wrxlp:  stx     CNT16
         ldx     CNT16
         dex
         bne     wrxlp
-        jsr     we_on           ; PA6 high: enable flash writes for the prefix + sector load
+        ldab    PAGE            ; WHITELIST: only program page 0 (patch) or pages 12/13 (erased test)
+        cmpb    #0
+        beq     wpok
+        cmpb    #12
+        beq     wpok
+        cmpb    #13
+        beq     wpok
+        ldab    #$85            ; refuse: program nothing, reply fail status
+        jsr     txb
+        jmp     loop
+wpok:   jsr     we_on           ; PA6 high: enable flash writes for the prefix + sector load
         ldaa    #$AA            ; SDP program prefix via CSPROG region (chip A0-A14, A15-17 n/c)
         staa    $D555
         ldaa    #$55
         staa    $AAAA
         ldaa    #$A0
         staa    $D555
-        pulb                    ; target page
+        ldab    PAGE            ; target page
         stab    BANK
         ldx     #BUF            ; copy BUF -> window (the 256-byte sector load)
         stx     BUFPTR
@@ -200,7 +212,9 @@ wcplp:  stx     CNT16
         dex
         bne     wcplp
         ldaa    #30             ; wait out tWC (>=15 ms), kicking the COP
-wdo:    jsr     cop
+wdo:    psha                    ; cop clobbers A, so preserve the outer counter across the kick
+        jsr     cop
+        pula
         ldx     #2000
 wdi:    dex
         bne     wdi

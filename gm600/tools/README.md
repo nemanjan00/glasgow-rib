@@ -132,12 +132,14 @@ python3 flashtool.py patch flash.bin       # apply the keypad patch (2 sectors, 
 python3 flashtool.py revert flash.bin      # restore the original bytes
 ```
 
-**No flash write has been done on this radio — `probe`/`read` are safe, `patch`/`revert` ERASE AND
-PROGRAM.** `patch`/`revert` refuse unless `probe` reports an AT29C020 with the **lower boot block
-unlocked** (`0xFE`) — `read_adc` and the patch both live in that block, so if Motorola locked it the
-patch can't be flashed (use the hardware keypad-line drive). The stub framework (SCI command loop,
-banking, 256-byte transfer) is validated against the real firmware in the emulator via the read path;
-the AT29C020 program timing is bench-pending. `test_tools.py::FlashToolTest` checks it assembles and
+**In-circuit flash write needs ~12 V on accessory pin-12** (releases the `/OE` write-lock so it
+follows PA6; see [../FLASH_WRITE.md](../FLASH_WRITE.md)). `probe`/`read` are safe; `patch`/`revert`
+ERASE AND PROGRAM, refuse unless `probe` reports an AT29C020 with the boot blocks unlocked, program
+the stub sector before the read_adc jsr sites, and read-back-verify. Confirmed on the radio: probe
+`1F DA FE FE` (writes reach the chip). The full apply is validated end-to-end in the emulator, which
+now models the write path (`test_tools.py::VmFlashWriteModelTest`). Open item: the 256-byte
+host→radio write burst drops the applet link (transport), so a real sector program on the radio is
+pending that fix. `test_tools.py::FlashToolTest` checks it assembles and
 the address mapping; `../datasheets/` holds the AT29C020 and 68HC11K4 datasheets (gitignored).
 
 ## `emu6811.py` and `asm6811.py` — firmware emulator + assembler

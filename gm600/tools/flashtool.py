@@ -127,7 +127,17 @@ def _apply(radio, revert):
         for i in range(len(new)):
             a = off + i
             sectors.setdefault(a & ~0xFF, {})[a & 0xFF] = (orig[i] if revert else new[i])
-    for base, edits in sorted(sectors.items()):
+    # Order so the jsr in read_adc never points at a stub that isn't there yet: apply = stub sector
+    # (STUB_SITE) first, then the read_adc jsr sites; revert = jsr sites first, then clear the stub.
+    stub_sector = STUB_SITE & ~0xFF
+    nonstub = sorted(s for s in sectors if s != stub_sector)
+    order = (nonstub + [stub_sector]) if revert else ([stub_sector] + nonstub)
+    # Safety whitelist: only ever touch the known patch sectors.
+    allowed = {stub_sector} | set(nonstub)
+    for base in order:
+        if base not in allowed:
+            sys.exit(f"refusing to program unexpected sector 0x{base:05X}")
+        edits = sectors[base]
         cur = bytearray(read_sector(radio, base))
         want = bytearray(cur)
         for boff, val in edits.items():

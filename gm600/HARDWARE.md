@@ -32,8 +32,9 @@ Microphone connector (8-pin): 3=Mic Hook, 4=GND, 5=Mic Audio, 6=Mic PTT, 7=**BUS
 ## Implications
 
 - **Programming / codeplug (what we use):** SCI serial on **BUS+ (pin 6)** (single-wire SBEP; also mic
-  pin 7). **HOOK (pin 14)** at ~9 V enables programming mode (our rig). Pin 8 (GP3) is the shared
-  serial data line.
+  pin 7). **HOOK (pin 14)** at ~9 V enables programming mode (our rig). Pin 8 (GP3) is **not fitted on
+  the GM600** (dead; see above). **Pin 12** (GPI/O) at ~12 V releases the flash write-lock for
+  in-circuit firmware programming (see the flash-write note above and FLASH_WRITE.md).
 - **Flat audio for repeater/data (the user's goal) — available in HARDWARE, no codeplug flag needed:**
   **Pin 5 = Flat TX Audio** (unfiltered TX inject, bypasses pre-emphasis/processing) and
   **Pin 11 = RX discriminator** (continuous, de-emphasis-free RX). A repeater/data setup can use these

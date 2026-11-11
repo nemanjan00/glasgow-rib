@@ -423,5 +423,61 @@ class FlashToolTest(unittest.TestCase):
         self.assertEqual(flashtool._win(0x3FFF2), (15, 0x7F, 0xF2)) # upper lockout byte
 
 
+class VmFlashWriteModelTest(unittest.TestCase):
+    """emu6811's AT29C020 write model: gated by 12V+PA6, product-ID, sector program."""
+
+    @staticmethod
+    def _mem():
+        import emu6811
+        flash = bytes((i * 7 + 3) & 0xFF for i in range(0x40000))
+        m = emu6811.Mem(flash, b"\xff" * 0x280)
+        m.reg[0x58] = 0                                  # bank window = page 0
+        return m, flash
+
+    def _id_entry(self, m):
+        m.wb(0xD555, 0xAA); m.wb(0xAAAA, 0x55); m.wb(0xD555, 0x90)   # AA/55/90 via CSPROG region
+
+    def test_commands_ignored_without_12v(self):
+        m, flash = self._mem()
+        m.pin12_12v = False; m.reg[0] = 0x40            # PA6 high but no 12V on pin-12
+        self._id_entry(m)
+        self.assertEqual(m.rb(0x8000), flash[0x38000])  # plain array — ID never engaged
+        self.assertNotEqual(m.rb(0x8000), 0x1F)
+
+    def test_commands_ignored_without_pa6(self):
+        m, flash = self._mem()
+        m.pin12_12v = True; m.reg[0] = 0x00             # 12V but PA6 low (/OE low = read mode)
+        self._id_entry(m)
+        self.assertEqual(m.rb(0x8000), flash[0x38000])
+
+    def test_product_id_when_unlocked(self):
+        m, _ = self._mem()
+        m.pin12_12v = True; m.reg[0] = 0x40
+        self._id_entry(m)
+        self.assertEqual(m.rb(0x8000), 0x1F)            # manufacturer
+        self.assertEqual(m.rb(0x8001), 0xDA)            # device
+        self.assertEqual(m.rb(0x4002), 0xFE)            # lower boot-block lockout (window chip 0x0002)
+        m.wb(0xD555, 0xAA); m.wb(0xAAAA, 0x55); m.wb(0xD555, 0xF0)   # exit
+        self.assertNotEqual(m.rb(0x8000), 0x1F)
+
+    def test_sector_program_when_unlocked(self):
+        m, _ = self._mem()
+        m.pin12_12v = True; m.reg[0] = 0x40
+        m.wb(0xD555, 0xAA); m.wb(0xAAAA, 0x55); m.wb(0xD555, 0xA0)   # SDP program prefix
+        pat = bytes((i ^ 0x3C) & 0xFF for i in range(256))
+        for i in range(256):
+            m.wb(0x5000 + i, pat[i])                    # load sector 0x1000 via the window
+        self.assertEqual(m.rb(0x5000), pat[0])          # first read commits the program
+        self.assertEqual(bytes(m.flash[0x1000:0x1100]), pat)
+
+    def test_program_ignored_without_12v(self):
+        m, flash = self._mem()
+        m.pin12_12v = False; m.reg[0] = 0x40
+        m.wb(0xD555, 0xAA); m.wb(0xAAAA, 0x55); m.wb(0xD555, 0xA0)
+        for i in range(256):
+            m.wb(0x5000 + i, 0xAA)
+        self.assertEqual(bytes(m.flash[0x1000:0x1100]), flash[0x1000:0x1100])
+
+
 if __name__ == "__main__":
     unittest.main()

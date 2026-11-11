@@ -50,8 +50,9 @@ in this folder; it indexes the docs and has the current status.
 
 ## Next steps
 
-1. Pin the personality checksum range: a contrast write to a byte just inside and just outside
-   `0x0FDF`. Then locate the network block's checksum byte.
+1. Finish the in-circuit flash write: the mechanism is solved and VM-validated (12 V on pin-12 +
+   PA6 release the /OE write-lock; probe returns `1F DA FE FE`); the open item is the 256-byte
+   host→radio write burst dropping the applet link. See FLASH_WRITE.md.
 2. Time the reset after `10`; capture what `20`/`22` do from DPS (don't guess).
 3. Optional: bind the MPT1327 network block (`0x0E13`–`0x0F07`).
 

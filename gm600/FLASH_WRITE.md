@@ -110,9 +110,15 @@ keypad patch = probe → for each of the 2 patch sectors: read it, splice in the
 (`gm600_keypad_patch.patch_diff()`), program, read-back verify. Reverting = program the original
 bytes back.
 
-**Status: UNTESTED — bench bring-up required.** No flash write has been done on this radio. Validate
-in order: (1) probe returns `1F DA` and a lockout byte, confirming the command path works; (2) read a
-sector and compare to the known dump; (3) program one sector and read it back; only then the patch.
-A botched page-0 write is recoverable (boot/SBEP live in the fixed region `0x8000+` and page 1, so
-the radio still answers and can be re-flashed) — but a locked boot block or a wrong command sequence
-could brick it, so do this deliberately.
+**Status.** The write *path* is confirmed on the real radio — with 12 V on pin-12 the probe returns
+`1F DA FE FE` (AT29C020, writes reach the chip, both boot blocks unlocked) — and the **full keypad
+patch apply is validated end-to-end in the emulator** (`emu6811` now models the PA6+12 V `/OE` gate,
+the AT29C020 command/program state machine, and the boot-block bits; see
+`test_tools.py::VmFlashWriteModelTest`). The emulator run reproduces the exact patched image, and it
+caught a real stub bug (the tWC delay clobbering its counter via the COP kick). The stub refuses any
+page outside 0/12/13, and `flashtool.py` programs the stub sector first then the read_adc jsr sites
+(so read_adc never points at a stub that isn't there yet). The one open item is the **256-byte
+host→radio write burst dropping the applet link** — a transport issue, not the flash; a real
+in-circuit sector program on the radio waits on that. A botched page-0 write is recoverable (boot/SBEP
+live in the fixed region `0x8000+` and page 1, re-flashable), so proceed deliberately once the burst
+transfer is fixed.
