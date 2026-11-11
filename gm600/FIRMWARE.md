@@ -457,3 +457,39 @@ above; the stubs are for showing anything else.
   look right regardless, and an early "888" was actually the boot self-test caught mid-animation. The
   race never gave *clean* control of a chosen value — a sparse buffer blended with the firmware's
   concurrent `322` render, and RAM `0x17` writes don't even ACK. Treat the race as unproven.
+
+## Keypad, key events and the receive flags (2026-11-12)
+
+**Keypad decode.** Three analog ladders on A/D channels AN0–AN2, read by the keypad task (TCB
+`0x11D0`) through `read_adc` (`0x50DF`, a fresh conversion each call). Decoders (page 0) `0x4FBB` /
+`0x4F79` / `0x4FFD` turn a reading into a key code by window (≤`0x29`, `0x39`–`0x48`, `0x79`–`0x88`,
+`0xB9`–`0xC8`); a code must read the same twice in a row (last codes at `0x33FC`–`0x33FE`).
+
+**Key events — `0x4D8B(event, state)`** (page 0; `D` = event, 16-bit stack arg = state). The keypad
+task calls it for every key of every line on every scan. It keeps the state in an **input-state array at
+`0x3460 + event`**, and on a change posts the key message to the UI task. Events: 16–19 = vol down / vol
+up / clear / base call, **20–23 = A / B / C / D**, 6–8 = scroll down / scroll up / on-off; the other
+entries are fed by other inputs.
+
+**Receive flags in the same array** (found by RAM-diffing a conventional-channel radio with no signal,
+a carrier, and a carrier + the channel's PL from a HackRF; then confirmed live, repeatably):
+
+| RAM | meaning | no signal | carrier, no/wrong PL | carrier + correct PL |
+|--|--|--|--|--|
+| **`0x347F`** (event 31) | carrier detected | 0 | 1 | 1 |
+| **`0x347E`** (event 30) | **PL decoded = RX active / squelch open** | 0 | 0 | 1 |
+
+Hardware side: PORTH (`0x107C`) bit 3 goes high on a carrier without our PL, and the red LED (`0x34AE`
+bit 1) flashes "channel busy". `0x347E` sets within ~0.1 s of a matching PL.
+
+**Pausing a task.** Setting bit `0x10` (or `0x20`/`0x04`/`0x01`) in a TCB's flag byte (TCB+8) makes the
+scheduler skip it until cleared; `0x88`/`0xC0` are cleared back. Keypad task: `0x11D8`.
+
+**Remote key presses without a flash patch — `tools/keyhold.py` + `tools/keyevt.S`.** Pause the
+keypad task (so no real scan reports the key released), then post the event with a *non-halting* RAM
+stub launched through the firmware's own `0x26` handler: it switches to page 0, calls `0x4D8B`,
+restores the bank, re-enables interrupts and exits through the handler's epilogue (`0x4CE6`:
+`pulx; rts`), so the radio keeps running. Release + resume afterwards. Validated in the emulator
+(`KeyHoldTest`) and on the radio: a remote long-hold of A put the bench radio into conventional
+channel `1`. **The conventional latch is RAM state** — no EEPROM write happens (the EEPROM-write
+routine `0x5259`–`0x5293` never runs), which is why a power-cycle returns to trunked.

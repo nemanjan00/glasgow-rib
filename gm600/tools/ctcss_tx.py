@@ -4,8 +4,9 @@
 For opening a GM600 conventional channel's tone squelch on the bench: channel 001 on the reference
 radio is 446.06875 MHz (PMR446 channel 6) with RxPL 3Z = 123.0 Hz. The HackRF is tuned 250 kHz
 below the channel and the signal is shifted up digitally, so the HackRF's own LO leakage lands
-outside the channel. Defaults are minimum power (amp off, TX VGA 0 dB) — plenty for a radio on
-the same bench.
+outside the channel. Defaults: amp off, TX VGA 30 dB — a few cm-to-metre bench link (VGA 0 was too
+weak for the bench radio to see a carrier; 35 decodes PL reliably), plus a +2.5 kHz frequency
+correction measured for the bench HackRF (``--cal-hz``). Still far below PMR446's 500 mW.
 
   ctcss_tx.py                       # 446.06875 MHz, 123.0 Hz PL + 1 kHz audio, until Ctrl-C
   ctcss_tx.py --no-tone             # same carrier and audio, no PL (squelch must stay closed)
@@ -17,11 +18,13 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 import numpy as np
 
 FS = 2_000_000          # 1 s of IQ at this rate loops seamlessly (integer cycles of every tone)
 OFFSET = 250_000        # HackRF LO sits this far below the channel
+CAL_HZ = 2500           # bench HackRF's correction: the radio decodes PL reliably at +2.5 kHz, not at 0
 
 
 def make_iq(tone=123.0, audio=1000.0, tone_dev=500.0, audio_dev=2500.0):
@@ -50,11 +53,20 @@ def demod_check(iq):
     return lambda f0: float(spec[max(0, np.argmin(abs(fr - f0)) - 3):np.argmin(abs(fr - f0)) + 4].max())
 
 
-def transmit(path, freq_hz, seconds=None, vga=0, amp=False):
+def transmit(path, freq_hz, seconds=None, vga=35, amp=False):
     """Loop ``path`` with hackrf_transfer. Returns the Popen (seconds=None) or waits ``seconds``."""
     cmd = ["hackrf_transfer", "-t", path, "-f", str(int(freq_hz - OFFSET)), "-s", str(FS),
            "-x", str(vga), "-a", "1" if amp else "0", "-R"]
-    p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # The HackRF stays busy for a moment after the previous hackrf_transfer exits; a new one started
+    # too soon quits at once and nothing is transmitted. Check it's still running, retry if not.
+    for attempt in range(5):
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.8)
+        if p.poll() is None:
+            break
+        time.sleep(1.0)
+    else:
+        raise RuntimeError("hackrf_transfer would not start (HackRF busy or missing?)")
     if seconds is None:
         return p
     try:
@@ -72,7 +84,9 @@ def main():
     ap.add_argument("--no-tone", action="store_true")
     ap.add_argument("--audio", type=float, default=1000.0, help="audio test tone, Hz (0 = none)")
     ap.add_argument("--seconds", type=float, default=None, help="stop after N s (default: Ctrl-C)")
-    ap.add_argument("--vga", type=int, default=0, help="HackRF TX VGA gain, dB (0-47)")
+    ap.add_argument("--vga", type=int, default=35, help="HackRF TX VGA gain, dB (0-47)")
+    ap.add_argument("--cal-hz", type=float, default=CAL_HZ,
+                    help="frequency correction added to --freq (default: the bench HackRF's)")
     ap.add_argument("--amp", action="store_true", help="enable the HackRF RF amp (+14 dB)")
     ap.add_argument("--write-only", metavar="OUT.iq")
     args = ap.parse_args()
@@ -88,7 +102,7 @@ def main():
     os.close(fd)
     iq.tofile(path)
     try:
-        p = transmit(path, args.freq * 1e6, args.seconds, args.vga, args.amp)
+        p = transmit(path, args.freq * 1e6 + args.cal_hz, args.seconds, args.vga, args.amp)
         if p is not None:
             print("transmitting - Ctrl-C to stop")
             try:

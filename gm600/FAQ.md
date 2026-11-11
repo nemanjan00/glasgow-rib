@@ -23,6 +23,9 @@ on the long-hold.
   rejection, it's just that a brief press doesn't latch.
 - The **~7 s long-hold** toggles conventional on (and off again). A power-cycle also returns it to
   trunked.
+- **Remotely, over SBEP:** `tools/keyhold.py` (default: long-hold A for 9 s). It pauses the keypad
+  task and posts the key event through the firmware's own routine — no flash patch, nothing written to
+  the codeplug; the radio keeps running. Verified on the bench radio (`322` → `---` → `  1`).
 
 ## Once in conventional, how do I pick the channel?
 
@@ -47,7 +50,7 @@ conventional channel stops the hunt.
 
 ## Does the long-hold write anything to the codeplug?
 
-Not in the emulator, which now boots like the real radio. Holding A latches conventional channel
+No. The latch is RAM state. In the emulator, which now boots like the real radio: Holding A latches conventional channel
 `  1` with **no EEPROM write**: the firmware's EEPROM-write routine (page 0 `0x5259`–`0x5293`) never
 runs, during the hold or for 5 M instructions after it. Booting with every value of the
 Conventional Mode field (`0x0E45` bits 6:5 — Inhibit/Dealer/All/RegioNet43, checksums fixed) still
@@ -56,13 +59,29 @@ the power-cycle reverting it. [RECOVERY.md](RECOVERY.md) attributes a 3-byte EEP
 mode switch, but its addresses were never recorded; to settle it on hardware, dump the codeplug
 (`dump_codeplug.py`) in trunked mode, long-hold A, dump again, and diff.
 
+## How do I tell, over SBEP, that the radio is receiving?
+
+Read RAM `0x347E`–`0x347F` (a 2-byte `0x11` read; works while the radio runs normally):
+`0x347F` = 1 on a carrier, `0x347E` = 1 when the channel's PL is decoded, i.e. **RX active, squelch
+open**. A carrier with no or the wrong PL gives `0x347F`=1, `0x347E`=0 and the red LED flashes "busy".
+See [FIRMWARE.md](FIRMWARE.md) "Keypad, key events and the receive flags".
+
 ## Squelch won't open on a conventional channel.
 
 The channel's **RxPL** must match the PL (CTCSS) on the incoming signal, or squelch stays closed.
 With a HackRF: `tools/ctcss_tx.py` transmits narrowband FM on 446.06875 MHz with 123.0 Hz PL and
-1 kHz audio at minimum power (`--no-tone` for the same signal without PL), and
-`tools/squelch_test.py` runs no-signal / no-PL / PL / off phases while logging the LEDs and display
-over SBEP and photographing them.
+1 kHz audio (`--no-tone` for the same signal without PL), and `tools/squelch_test.py` runs no-signal /
+no-PL / PL / off phases while logging the receive flags, LEDs and display over SBEP. On the bench
+(antennas close): TX VGA 0 was too weak; VGA 35 with a +2.5 kHz frequency correction (`--cal-hz`, the
+bench HackRF's offset) decodes the PL. The link is still marginal — about 1 tone phase in 3 saw no
+carrier at all (HackRF start-up) — so repeat a phase rather than trusting a single miss. Measured:
+
+| signal | `0x347F` carrier | `0x347E` RX/PL | red LED |
+|--|--|--|--|
+| none | 0 | 0 | off |
+| carrier, no PL | 1 | 0 | flashing (busy) |
+| carrier + 88.5 Hz (wrong) | 1 | 0 | flashing (busy) |
+| carrier + 123.0 Hz | 1 | **1** | (flashes in some runs) |
 `001` on the reference radio expects **123.0 Hz (3Z)**. Feed a carrier on the channel frequency
 with 123.0 Hz PL and squelch opens. (The recovered sub-audible PL tone is present in the receive
 audio path whenever that carrier is received, independent of the squelch decision — handy for

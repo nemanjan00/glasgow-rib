@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Tone-squelch test on a GM600 conventional channel: HackRF signal phases vs LEDs + display.
 
-The radio must already be on the conventional channel (long-hold Button A ~7 s, then select 001;
-see ../FAQ.md) — this can't be done over SBEP. Phases (each ``--seconds``):
+The radio must already be on the conventional channel: `keyhold.py` long-holds Button A remotely
+(or hold it ~7 s by hand), then 001 is selected. Phases (each ``--seconds``):
   baseline  no signal
   notone    carrier + 1 kHz audio, no PL   -> a PL-coded channel should stay squelched
   tone      carrier + 1 kHz audio + PL     -> squelch should open
   off       no signal again
-Logs the LED shadow (0x34AE: bit0 amber, 1 red, 2 green, 7 backlight) and the display text
-(0x34BD) over SBEP four times a second, and saves a webcam crop of LEDs + LCD per phase.
+Logs over SBEP, four times a second: the firmware's receive flags in its input-state array
+(0x347F = carrier detected, 0x347E = PL decoded = RX active / squelch open), the LED shadow (0x34AE:
+bit0 amber, 1 red = "channel busy" flashes on a carrier without our PL, 2 green, 7 backlight) and
+the display (0x34BD); saves a webcam crop of LEDs + LCD per phase.
 
   squelch_test.py [--freq 446.06875] [--tone 123.0] [--seconds 8] [--out DIR] [--video /dev/video2]
 """
@@ -34,7 +36,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--freq", type=float, default=446.06875)
     ap.add_argument("--tone", type=float, default=123.0)
-    ap.add_argument("--seconds", type=float, default=8.0)
+    ap.add_argument("--seconds", type=float, default=6.0)
+    ap.add_argument("--vga", type=int, default=35, help="HackRF TX VGA gain, dB")
+    ap.add_argument("--cal-hz", type=float, default=ctcss_tx.CAL_HZ, help="HackRF frequency correction")
     ap.add_argument("--out", default="/tmp/squelch_test")
     ap.add_argument("--video", default="/dev/video2")
     args = ap.parse_args()
@@ -55,21 +59,23 @@ def main():
             for phase in ("baseline", "notone", "tone", "off"):
                 tx = None
                 if phase in files:
-                    tx = ctcss_tx.transmit(files[phase], args.freq * 1e6)
-                    time.sleep(1.5)                      # let the HackRF start and the radio settle
-                seen, t0 = [], time.time()
+                    tx = ctcss_tx.transmit(files[phase], args.freq * 1e6 + args.cal_hz, vga=args.vga)
+                    time.sleep(2.0)                      # let the HackRF start and the radio settle
+                seen, rx, t0 = [], [], time.time()
                 while time.time() - t0 < args.seconds:
                     seen.append(r.read_block(0x34AE, 1)[0])
+                    rx.append(r.read_block(0x347E, 2))
                     time.sleep(0.25)
                 disp = r.read_block(0x34BD, 3)
                 shot(args.video, os.path.join(args.out, phase + ".jpg"))
                 if tx:
                     tx.terminate()
                     tx.wait()
+                    time.sleep(1.0)                      # let the HackRF free up
                 bits = sorted({b for b in seen})
-                print(f"{phase:8} display {disp!r} LED bytes seen {' '.join('%02x' % b for b in bits)}"
-                      f"  (amber {any(b & 1 for b in seen)}, red {any(b & 2 for b in seen)}, "
-                      f"green {any(b & 4 for b in seen)})", flush=True)
+                print(f"{phase:8} carrier {int(any(x[1] for x in rx))}  RX/PL {int(any(x[0] for x in rx))}"
+                      f"  display {disp!r}  LED bytes {' '.join('%02x' % b for b in bits)}"
+                      f" (red/busy {int(any(b & 2 for b in seen))})", flush=True)
     finally:
         for path in files.values():
             os.unlink(path)

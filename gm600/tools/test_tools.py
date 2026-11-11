@@ -451,6 +451,42 @@ class CtcssTxTest(unittest.TestCase):
         self.assertEqual(len(ctcss_tx.make_iq()), 2 * ctcss_tx.FS)
 
 
+class KeyHoldTest(unittest.TestCase):
+    """keyevt.S + keypad-task pause = a remote key hold; in the VM a long-hold A latches conventional."""
+
+    def test_long_hold_a_latches_conventional_in_vm(self):
+        import asm6811
+        import emu6811
+        import sbep
+        fw, cp = os.environ.get("GM600_FW"), os.environ.get("GM600_CP")
+        if not fw or not cp:
+            self.skipTest("set GM600_FW=motofix.BIN and GM600_CP=<640-byte codeplug> to run this")
+        with open(fw, "rb") as f:
+            flash = f.read()
+        with open(cp, "rb") as f:
+            m = emu6811.Mem(flash, f.read())
+        c = emu6811.CPU(m)
+        c.reset()
+        c.run(max_insns=3_000_000, cop_timeout=150000)
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")
+        a = asm6811.assemble_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "keyevt.S"))
+        m.ram[a.org:a.org + len(a.code)] = a.code
+        m.ram[0x11D8] |= 0x10                                   # pause the keypad task
+
+        def post(state):                                        # through the firmware's own 0x26
+            m.ram[0x3F00], m.ram[0x3F01] = 20, state
+            m.feed_rx(sbep.encode(0x26, a.org.to_bytes(2, "big")))
+            c.run(max_insns=300_000, cop_timeout=150000)
+
+        post(1)
+        c.run(max_insns=2_000_000, cop_timeout=150000)
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"  1")   # conventional channel 1
+        post(0)
+        m.ram[0x11D8] &= ~0x10 & 0xFF                           # resume the keypad task
+        c.run(max_insns=1_000_000, cop_timeout=150000)
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"  1")   # stays latched after release
+
+
 class EmulatorTest(unittest.TestCase):
     """The 68HC11 core must execute correctly (validated on a known program)."""
 

@@ -30,12 +30,12 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 - **Recover a hung stub with `tools/psu_reboot.py` (PSU), not 0x10.** On the lab host set
   `PYMP305_PATH=~/pymp305/python` if running the script from outside that directory.
 
-- **Tone-squelch test ready, radio not yet conventional (2026-11-12).** `tools/ctcss_tx.py` +
-  `tools/squelch_test.py` (HackRF on the lab PC, 446.06875 MHz / 123.0 Hz, IQ self-verified,
-  dry-run OK). Conventional can't be entered remotely: VM shows the long-hold A latch is RAM-only (no
-  EEPROM write), no Conventional Mode value boots conventional, and pin-12 12 V (keypad patch) is a
-  manual supply. **Next at the bench:** long-hold A ~7 s → `001`, then `python3 squelch_test.py`.
-  Also: dump codeplug before/after the long-hold to settle the RECOVERY.md "3-byte" note.
+- **DONE (2026-11-12): remote conventional + tone squelch + RX flags.** `tools/keyhold.py` long-holds A
+  over SBEP (keypad task paused via `0x11D8`, event posted through `0x4D8B` by the non-halting
+  `keyevt.S`) → bench radio on conventional `1`. HackRF (`ctcss_tx.py`, VGA 35, +2.5 kHz cal) opens the
+  123.0 Hz tone squelch. **RX flags: `0x347F` = carrier, `0x347E` = PL decoded / RX active** (RAM-diff +
+  live polls). Conventional latch is RAM-only (no EEPROM write). Link is marginal (~1 in 3 tone phases
+  missed: HackRF start-up). Radio powered DOWN at the end of the session (PSU output off).
 
 ## Invariants (never violate)
 - **12 V on pin 12 only AFTER boot; off before any power-cycle.** 12 V at reset = CPU bootstrap mode.

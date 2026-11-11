@@ -286,9 +286,21 @@ python3 squelch_test.py --out /tmp/sqt      # baseline / no PL / PL / off, logs 
 ```
 
 Narrowband FM (2.5 kHz audio deviation, 500 Hz PL), HackRF tuned 250 kHz below the channel so its LO
-leak is out of band, amp off and TX VGA 0 by default. The generator self-checks its IQ by
-FM-demodulating it (`CtcssTxTest`). The radio must be put on the conventional channel by hand first
-(long-hold A ~7 s, then 001) — there is no SBEP or codeplug way to do it (see ../FAQ.md).
+leak is out of band, amp off. The generator self-checks its IQ by
+FM-demodulating it (`CtcssTxTest`). Put the radio on the conventional channel first with
+`keyhold.py` (or a ~7 s hand-hold of A). Defaults: TX VGA 35, `--cal-hz 2500` (bench HackRF).
+
+## `keyhold.py` / `keyevt.S` — press and hold a key remotely (no flash patch)
+
+```
+python3 keyhold.py                         # long-hold A 9 s -> conventional mode (322 -> ---  ->   1)
+python3 keyhold.py --event 23 --hold 0.5   # tap D (events: 16-19 vol-/vol+/clear/call, 20-23 A-D, 6-8 scroll-/scroll+/on-off)
+```
+
+Pauses the keypad task (bit `0x10` in TCB flags `0x11D8`), posts the key event with the non-halting
+`keyevt.S` stub (launched via `0x26`, calls the firmware's `0x4D8B`, returns into the firmware), then
+releases and resumes. RAM only; the radio keeps running. Receive flags to watch afterwards:
+`0x347F` carrier, `0x347E` PL decoded / RX active.
 
 ## `gm600_keypad_patch.py` — press real keys via a firmware patch
 
