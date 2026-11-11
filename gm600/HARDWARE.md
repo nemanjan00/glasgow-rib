@@ -46,10 +46,16 @@ Microphone connector (8-pin): 3=Mic Hook, 4=GND, 5=Mic Audio, 6=Mic PTT, 7=**BUS
     - `/OE` = `AND(PA6, Q0103 collector)` via U0106 (74AC08). Q0103 sits on the **accessory pin-12**
       net and normally holds `/OE` low (read-only). **~12 V on pin-12** (current-limited: 4.7 kΩ
       pull-up, firmware pull-down Q0432, ~14 V clamp) turns Q0103 off, so `/OE` follows **PA6** —
-      PA6 high = write-enable. **Stock firmware keeps running normally with 12 V present** (MODA is
-      only sampled at reset; this is NOT bootstrap, and 5 V is not cut). In-circuit flash
-      programming is done this way — see [FLASH_WRITE.md](FLASH_WRITE.md). (Motorola reused the old
-      28F020 VPP-detect net as this write-enable; VPP does nothing on the AT29C020.)
+      PA6 high = write-enable. **Stock firmware keeps running normally when 12 V is applied *after* boot**
+      (the mode pins are sampled only at reset, so hot-plugging 12 V doesn't change mode). In-circuit
+      flash programming is done this way — see [FLASH_WRITE.md](FLASH_WRITE.md). (Motorola reused the
+      old 28F020 VPP-detect net as this write-enable; VPP does nothing on the AT29C020.)
+    - **But 12 V present *at reset* = HC11 bootstrap mode.** The same pin-12 net also pulls **MODA
+      (pin 77) and MODB (pin 76) both low** through D0101/Q0102 (they share the diode node), i.e.
+      `MODB:MODA = 0:0`. So powering on with 12 V present boots the CPU's internal bootstrap loader,
+      *and* releases `/OE` — this is Motorola's factory-programming door. The CPU is **unsecured**
+      (`CONFIG = 0xD9` → `NOSEC=1`). Earlier notes calling this "single-chip / not bootstrap" were
+      wrong. See [RECOVERY.md](RECOVERY.md).
 
 ## Repeater / squelch signals (from the CNTL GM600 schematic, sheet 8402626Y08)
 

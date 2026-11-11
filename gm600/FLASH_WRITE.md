@@ -24,8 +24,11 @@ Y08 schematic, confirmed on the radio):
 **Release = ~12 V on accessory pin-12** (current-limited — the net has a 4.7 kΩ pull-up, a
 firmware-switchable pull-down Q0432, and a ~14 V clamp; 12 V through ~1 kΩ is right). Above ~10 V the
 zener/Q0102/Q0103 network turns Q0103 off, so `/OE` then **follows PA6**: PA6 low = read, PA6 high =
-write-enable. **Stock firmware keeps running normally with 12 V present** (no reset, no boot-mode
-change — MODA is only sampled at reset; this is NOT bootstrap). So the write path is:
+write-enable. **Stock firmware keeps running normally when 12 V is applied *after* boot** (no reset,
+no boot-mode change — the mode pins are sampled only at reset). ⚠️ **12 V present *at reset* is a
+different story: it selects HC11 bootstrap mode** (the pin-12 net pulls MODA *and* MODB low via
+D0101/Q0102). For this in-circuit write path, 12 V must go on *after* the radio has booted. So the
+write path is:
 
 > boot normally → **apply 12 V to pin-12 and leave it on** → launch the RAM stub (`flashtool`), which
 > frees PA6 from OC2 (TCTL1), makes it an output, holds it low for reads and raises it only around the
