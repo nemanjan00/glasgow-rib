@@ -276,3 +276,39 @@ settling or lifting it needs the full flash, not a codeplug edit.
 
 For the analog/board side (ASFIC `SQDET`/`PLLIM`/`CHACT`, audio PA enable, flat-audio & repeater
 taps), see [HARDWARE.md](HARDWARE.md).
+
+## Remote keypress — a firmware patch over the keypad A/D
+
+The front panel is a 6-key analog resistor ladder read through the A/D; there is **no clean software
+way to synthesise a key event**. The firmware re-samples the pin every poll (`read_adc` at CPU
+`0x50DF` writes ADCTL to force a *fresh* conversion each call) and dispatches keys as RTOS messages
+through a mode-dependent state machine: key code lands in `byte_3255`, the keypad task switches on an
+event type at `0x4720` into a jump table at `0x4740` (entry `0x473E` = key), the "give" at `0x8255`
+is only a lock, and the chain wakes the display task (TCB `0x1141`). Injecting at any one stage
+desyncs from that state machine (verified: give alone, `byte_3255` write, and calling the dispatch
+all fail to reproduce a press).
+
+So override the **source** instead. `read_adc` reads the keypad channel at CPU `0x50FE`
+(`ldab ADR1` = `F6 10 31`, flash page 0 = file `0x10DF`/`0x10FE`). Replace those 3 bytes with
+`jsr 0x5E25` and put a 13-byte stub in free flash at CPU `0x5E25` (file `0x1E25`, an 8.6 KB `0xFF`
+run in page 0; a direct jsr reaches it because `read_adc` runs in page 0):
+
+```
+0x5E25  ldab 0x028B (FORCE_EN)   ; F6 02 8B
+        beq  real                ; 27 04
+        ldab 0x028C (FORCE_VAL)  ; F6 02 8C   armed: use our value, ignore the real button
+        rts                      ; 39
+real:   ldab ADR1                ; F6 10 31   disarmed: real keypad, patch is transparent
+        rts                      ; 39
+```
+
+`FORCE_EN`/`FORCE_VAL` are two RAM bytes the firmware never touches (`0x028B`/`0x028C`). With the
+patch in place the **whole real keypad path** runs for a host-supplied A/D level, so a press is
+identical to a finger — **validated in the emulator byte-for-byte against a physical press on the
+patched firmware**. While armed the stub ignores the real line (a real finger and the remote can't
+fight); press/release are RAM writes (SBEP `0x17`); reverting the flash bytes restores the buttons.
+
+The host tool is [`tools/gm600_keypad_patch.py`](tools/gm600_keypad_patch.py) (`patch_image`,
+`patch_diff`, and `arm`/`press`/`release`). Applying and reverting the patch on a real radio is an
+AT29C020 in-system **sector** write (256-byte sectors at `0x1000` and `0x1E00`) — the one remaining
+hardware step; the module emits the exact byte diff for a flash writer.

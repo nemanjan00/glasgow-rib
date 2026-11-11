@@ -183,6 +183,27 @@ poke is overwritten before the round-trip lands, and GM600 firmware exposes no k
 — real injection needs the keypad line driven in hardware or a RAM-stub takeover. The `--emu`
 backend presses for real by setting the A/D levels.
 
+## `gm600_keypad_patch.py` — press real keys via a firmware patch
+
+Reading the screen is easy; *pressing* a key is not — the keypad is an analog A/D ladder the
+firmware re-samples every poll, so there's no RAM variable to poke (see
+[../FIRMWARE.md](../FIRMWARE.md), "Remote keypress"). This patches the **source**: the one `read_adc`
+instruction that reads the keypad channel becomes a `jsr` to a 13-byte stub that returns a
+host-controlled RAM value when armed, else the real A/D. The whole real keypad path then runs for a
+host-supplied level, so a press is identical to a finger — validated in the emulator byte-for-byte
+against a physical press.
+
+```
+python3 gm600_keypad_patch.py --patch flash.bin out.bin   # produce a patched flash image + byte diff
+# then, against a running patched radio (import the module):
+#   from sbep import Radio; import gm600_keypad_patch as kp
+#   with Radio() as r: kp.arm(r); kp.press(r, LEVEL); ...; kp.release(r)
+```
+
+`press`/`release` are SBEP `0x17` writes to two RAM control bytes (`0x028B`/`0x028C`); `LEVEL` is the
+A/D value that key's ladder produces (characterise per radio). Applying/reverting the patch on a real
+radio is an AT29C020 in-system sector write — `patch_diff()` gives the exact bytes.
+
 ## `mock_radio.py` and `test_tools.py` — no hardware needed
 
 `mock_radio.py` is a fake GM600 behind a fake applet socket: it echoes, ACKs, and answers `23`

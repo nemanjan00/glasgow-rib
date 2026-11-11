@@ -367,5 +367,41 @@ class SplitFramesTest(unittest.TestCase):
         self.assertEqual(sbep_write.split_frames(bytes.fromhex("F5")), [])
 
 
+class KeypadPatchTest(unittest.TestCase):
+    """The read_adc override patch: image edits are correct and reversible."""
+
+    @staticmethod
+    def _image():
+        import gm600_keypad_patch as kp
+        f = bytearray(0x40000)
+        f[kp.PATCH_SITE:kp.PATCH_SITE + 3] = kp.PATCH_ORIG     # ldab ADR1 at the site
+        f[kp.STUB_SITE:kp.STUB_SITE + len(kp.STUB)] = b"\xFF" * len(kp.STUB)
+        return bytes(f)
+
+    def test_patch_applies_both_sites(self):
+        import gm600_keypad_patch as kp
+        out = kp.patch_image(self._image())
+        self.assertEqual(out[kp.PATCH_SITE:kp.PATCH_SITE + 3], kp.PATCH_NEW)
+        self.assertEqual(out[kp.STUB_SITE:kp.STUB_SITE + len(kp.STUB)], kp.STUB)
+
+    def test_patch_rejects_wrong_image(self):
+        import gm600_keypad_patch as kp
+        bad = bytearray(self._image())
+        bad[kp.PATCH_SITE] ^= 0xFF                              # not `ldab ADR1` anymore
+        with self.assertRaises(ValueError):
+            kp.patch_image(bytes(bad))
+
+    def test_patch_diff_round_trips(self):
+        import gm600_keypad_patch as kp
+        img = self._image()
+        patched = kp.patch_image(img)
+        # reverting (swap original/patched in each diff tuple) restores the original image
+        rev = bytearray(patched)
+        for off, orig, new in kp.patch_diff():
+            self.assertEqual(bytes(rev[off:off + len(new)]), new)
+            rev[off:off + len(new)] = orig
+        self.assertEqual(bytes(rev), img)
+
+
 if __name__ == "__main__":
     unittest.main()
