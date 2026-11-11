@@ -207,8 +207,10 @@ this when you want real-firmware behaviour (frame validation, firmware-computed 
 
 ## `gm600_remote.py` — read the radio's screen (and press keys)
 
-Remote-control the control head over the wire. The firmware renders the LCD into a 21-byte shadow
-buffer in RAM at `0x37AC` (three 7-segment digits + status icons) with an LED shadow at `0x34AE`,
+Remote-control the control head over the wire. The firmware renders the icons into a 21-byte shadow
+buffer in RAM at `0x37AC` and caches the three 7-seg digit bytes at `0x3497` (see `lcd_text.py`; the
+digits are NOT in `0x37AC` — the old byte split below came from the emulator and is wrong for the
+digits), with an LED shadow at `0x34AE`,
 and SBEP `0x11` reads any address on a running radio — so `read_screen()` mirrors the live display
 without prog mode or hardware mods. The digit/icon byte split was reversed in the emulator (see
 `gm600_remote.py` header). Two backends, same decode:
@@ -223,6 +225,18 @@ re-samples every cycle, so there is **no clean serial keypress** on the real rad
 poke is overwritten before the round-trip lands, and GM600 firmware exposes no keypad-inject opcode)
 — real injection needs the keypad line driven in hardware or a RAM-stub takeover. The `--emu`
 backend presses for real by setting the A/D levels.
+
+## `lcd_text.py` / `lcd_text.S` — write arbitrary text on the 3-digit display
+
+RAM stub (upload `0x17`, launch `0x26`) that calls SPI-dispatcher entry 5, the 7-seg digit controller,
+with host-supplied segment bytes. Cam-proven on the radio. Halts the firmware: recover with
+`psu_reboot.py`.
+
+```
+python3 lcd_text.py HI                      # upload + launch, show "HI"
+python3 lcd_text.py --no-launch --scroll HELLO 322   # stub already running: scroll text
+python3 lcd_text.py --no-launch --raw e67676         # raw segment bytes (here "322")
+```
 
 ## `gm600_keypad_patch.py` — press real keys via a firmware patch
 

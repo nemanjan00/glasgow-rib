@@ -49,10 +49,10 @@ the git-ignored **`CLAUDE.local.md`** — read that first). The repo there is gi
 - **Displayed idle number = MPT1327 Own Unit No. = codeplug 0x0F0B–0x0F0C, big-endian 16-bit**
   (322=0x0142), block checksum at **0x0FF4** = `(Σ(0x0F08..0x0FF3) − 0x55) & 0xFF`. Change it via
   `setunit.py` (direct SBEP + reset) or DPS. Cam-verified 322/456/712.
-- **LCD push protocol** (traced, for a `.S` that drives the glass directly): command phase
-  SPCR(0x1028)=0x57, CS(0x107E)=0x41, send bytes `02 50 3F` via firmware SPI primitive **0x9102**
-  (X=buf, B=count), CS=0x00; data phase SPCR=0x50, CS=0x01, send the 21-B 0x37AC buffer via 0x9102,
-  CS=0x00. (A stub using this still needs validation — see FIRMWARE.md.)
+- **Arbitrary text on the 3 digits = `tools/lcd_text.S` / `lcd_text.py`** (cam-proven). The digits
+  are on their own 7-seg controller via SPI-dispatcher **entry 5 (`0x9018`)**, struct `[00 40 d0 d1 d2]`,
+  cached at `0x3495`; font bit0 f, 1 a, 2 b, 4 e, 5 g, 6 d, 7 c. **`0x37AC` (entry 8) is icons only** —
+  pushing it never changes the number. Find display buffers by RAM-diffing two known states.
 
 ## Hardware facts (from the schematic; confirmed on a radio unless noted)
 

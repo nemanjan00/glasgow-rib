@@ -203,6 +203,28 @@ class RamdumpAssemblerTest(unittest.TestCase):
             asm6811.assemble("        .org 0\n        bra $200\n")
 
 
+class LcdTextTest(unittest.TestCase):
+    """lcd_text.S/.py: the hardware-verified 7-seg stub and its font."""
+
+    # Verified on the radio: pushed 322 over a 686 codeplug, then HI/HEL/LO/AbC/PSU/147/-9-.
+    PROVEN = bytes.fromhex(
+        "0f8e21ffbd2037c1a526f9bd2037f72100bd2037f72101bd2037f72102bd2037f72103bd2037"
+        "f72104ce21003c3cc605bd8f1f383820cdbd2045b61074842027f6f61077398655b7103a86aa"
+        "b7103a39")
+
+    def test_stub_assembles_to_verified_bytes(self):
+        import asm6811
+        a = asm6811.assemble_file(os.path.join(os.path.dirname(__file__), "lcd_text.S"))
+        self.assertEqual(a.org, 0x2000)
+        self.assertEqual(a.code, self.PROVEN)
+
+    def test_font_matches_firmware_digit_cache(self):
+        # 0x3497 on the radio: "322" = e6 76 76, "686" = f3 f7 f3.
+        import lcd_text
+        self.assertEqual(lcd_text.text_to_segs("322"), bytes.fromhex("e67676"))
+        self.assertEqual(lcd_text.text_to_segs("686"), bytes.fromhex("f3f7f3"))
+
+
 class EmulatorTest(unittest.TestCase):
     """The 68HC11 core must execute correctly (validated on a known program)."""
 

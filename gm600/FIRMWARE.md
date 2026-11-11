@@ -269,10 +269,9 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
     state, repeats entry 8 (the controller auto-wraps after 21 bytes).
   - **Driving the LCD — see the consolidated "## LCD" section below for the settled facts.** Short
     version: change the displayed idle number via the **Own Unit No.** codeplug field (`tools/setunit.py`
-    / DPS, cam-verified); direct stub driving of arbitrary `0x37AC` content is **not working yet** and
-    the SBEP-`0x17` "race" on `0x37AC` is **unreliable** (RAM writes don't ACK). The 21-byte `0x37AC`
-    buffer is read *passively* by `tools/gm600_remote.py` (channel "1" = `0530 00c1 008f d085 e5af ea00
-    a661 0000 6008 020010`; "322" = `8530 18c1 008f d080 e5af fe00 a261 8000 6018 020010`).
+    / DPS, cam-verified); show **arbitrary text** on the 3 digits with the `tools/lcd_text.S` RAM stub
+    (entry 5, the separate 7-seg controller — cam-proven). `0x37AC` holds icons/framing only, not the
+    digits; the SBEP-`0x17` "race" on it is **unreliable** (RAM writes don't ACK).
 - **In-circuit patching over BUS+, self-healing.** The OC3/4/5 timer ISRs (`0x92A1`/`0x92AA`/
   `0x9298`) clear their flag and `jmp` through **RAM pointers `$A4`/`$A6`/`$A2`**. Write a stub's
   address into one with a `0x17` RAM write → periodic execution with no flash change (reset re-inits
@@ -350,8 +349,11 @@ hardware step; the module emits the exact byte diff for a flash writer.
 
 ## LCD — settled facts
 
-The control head is a multiplexed segment LCD on the CPU's SPI bus (not BUS+). The firmware keeps a
-21-byte shadow at **`0x37AC`** and pushes it to the controller each refresh. Everything below is
+The control head is a segment LCD on the CPU's SPI bus (not BUS+), driven by **two controllers**:
+the **three main 7-seg digits** go through SPI-dispatcher **entry 5** (see "7-seg digits" below), and the
+icons/annunciators/framing come from a 21-byte shadow at **`0x37AC`** (entry 8). `0x37AC` does **not**
+contain the digits — a RAM diff of the running radio at Own Unit No. 322 vs 686 changes only
+`0x3497–0x3499` (+ ASCII at `0x34BD`), never `0x37AC` or `0x01F1`. Everything below is
 verified; the chronological dead-ends are in **Lessons** at the end.
 
 ### SPI push protocol (what a refresh actually sends)
@@ -391,22 +393,37 @@ Change it two ways, both cam-verified (322→456→712→322):
   `0x10` reset. (A DPS 322→456 write diffs to exactly these two bytes, which is what cracked it.)
 - **Vendor DPS:** File→Read Radio, Edit→Trunking→MPT Personality Data→"Own Unit No.", File→Write
   Radio; driven headless with `tools/mouse_ctl.py` + `tools/typestr.py`.
-The main digits (buffer idx `[0,1,2,4,6,8,14]`) are drawn procedurally by a bset/bclr renderer at
-`0x61B1/0x61B7/0x617B` — there is no font table and no single RAM "number" byte, so the clean way to
-change the number is this codeplug field, not a RAM poke.
+### 7-seg digits — entry 5, and a working RAM stub (cam-proven)
+SPI-dispatcher **entry 5 = `0x9018`**: takes a pointer (stack arg, read at `$C,y`) to a 5-byte struct
+`[b0 b1 d0 d1 d2]`, bit-packs it into a 5-byte frame, sets SPCR=`0x52`, `BSET 0x107E #0x61`, sends 5
+zero bytes (from `0x90F0`) then the frame via `0x9102`, `BCLR 0x107E #0x61`, and copies the struct
+to **`0x3495`**. So `0x3497–0x3499` is the firmware's cache of the three digit bytes (idle `b0 b1` =
+`00 40`). Firmware callers (page 1, `0x56A7`): `ldd #$0245; jsr $9FFB` (RTOS device lock — a pure
+semaphore, bit 7 of `0x0245`), push struct ptr (`word_34A5+8`), push a word, `ldd #5; jsr $8F1F`, pull
+both, `ldd #$0245; jsr $A01A` (unlock).
 
-### Direct stub driving of arbitrary `0x37AC` content — NOT working yet
-A RAM stub (`tools/lab/lcd_arb.S`, upload `0x17` + launch `0x26`) that replicates SPCR/CS/`0x9102` runs
-(SBEP goes dead = stub active) but the glass stays frozen at the firmware's last render. Leading
-suspects: the stub's CS writes must be **BSET/BCLR** on `0x107E` (not full-byte `staa`), and/or the
-acquire/device-select step is required. The SBEP-`0x17` "race" on `0x37AC` is **unreliable** (RAM
-writes don't return a `0x84` ACK, unlike EEPROM-range writes). **Recovery from a hung `sei` stub =
-PSU power-cycle (`tools/psu_reboot.py`), not `0x10`.** Next: decompile `0x8F1F` + the display paint
-in IDA and either fix CS to BSET/BCLR + exact SPCR, or call the firmware's own refresh with `0x37AC`
-pre-filled. (`0x37AC` is read passively by `tools/gm600_remote.py`; "322" = `8530 18c1 008f d080 e5af
-fe00 a261 8000 6018 020010`.)
+**Font** (one byte per digit; swept bit by bit on the radio, [images/lcd_7seg_bitmap.png](images/lcd_7seg_bitmap.png)):
+
+| bit | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|--|--|--|--|--|--|--|--|--|
+| segment | f (top-left) | a (top) | b (top-right) | — | e (bottom-left) | g (middle) | d (bottom) | c (bottom-right) |
+
+e.g. `2`=`76`, `3`=`E6`, `6`=`F3`, `8`=`F7` (matches `0x3497` on the radio).
+
+**`tools/lcd_text.S` + `lcd_text.py`** — RAM stub (upload `0x17`, launch `0x26`): `sei`, then loop:
+wait for sync `A5`, read 5 bytes from the SCI, call entry 5 with them (no lock). Proven on the radio:
+"322" pushed over a 686 codeplug while the firmware was halted, then HI / HEL / LO / AbC / PSU / 147 /
+-9- ([images/lcd_text_stub.png](images/lcd_text_stub.png)). `lcd_text.py HEL LO`, `--scroll`, `--raw
+e67676`, `--no-launch`. The firmware is halted while it runs: recover with `psu_reboot.py`.
+
+The clean way to change the number the *firmware* shows is still the Own Unit No. codeplug field
+above; the stub is for showing anything else.
 
 ### Lessons (why earlier conclusions were wrong)
+- **The `0x37AC` stub pushes "never worked" because the digits aren't there.** Every attempt to put a
+  number on the glass by pushing `0x37AC` (entry 8) was aimed at the icon controller; the "888" seen
+  was the boot self-test after a crash. The digits are a separate controller (entry 5). A RAM diff
+  between two displayed numbers found it in one step — do that before decoding a buffer by hand.
 - **Emulator gap:** `emu6811.py` reads `0x0F0B`/`0x0F0C` at boot (pc `9D91`, `9E7D`) but renders the
   SAME `322` for any Own Unit No. (a real 456 codeplug renders identically in the VM). It does not
   model the trunking-idle "show own ident" display state (RF/synth/ASFIC not modelled → different

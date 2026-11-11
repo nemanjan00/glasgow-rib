@@ -11,7 +11,10 @@ They run on import, shell out, and write to /tmp — treat as throwaway, not an 
   (the race is unreliable — RAM writes don't ACK).
 - `led_sweep.S`, `led_demo.py`, `led_run.py` — LED-bit-map sweeps (result is the table in FIRMWARE.md).
 
-## .S LCD-push experiments (2026-11-11)
+## .S LCD-push experiments (2026-11-11) — SUPERSEDED by `../lcd_text.S`
+These all pushed `0x37AC` (entry 8, the icon controller); the digits are on a separate controller
+(entry 5). `lcd_text.S` drives that and works. Kept for history only.
+
 The `.S` push to the control-head LCD controller WORKS but is timing-marginal:
 - `lcd_disp2.S` — sei-stub, fill 0x37AC=FF, push → lit all segments ("888") with SBEP verified dead
   (firmware halted ⇒ a real push, not the boot self-test). The key that made pushes land: the
