@@ -74,10 +74,18 @@ def _expect(radio, n, timeout):
     return bytes(buf)
 
 
+CHUNK = 32          # send in small bursts: the single-wire echoes every TX byte, so a 256-byte blast
+#                     fills the applet RX FIFO faster than we drain it and the link drops. Interleaving
+#                     send + echo-read in small chunks keeps the FIFO drained.
+
+
 def _cmd(radio, out, nresp, timeout=3.0):
-    """Send raw command bytes, swallow their single-wire echo, return nresp response bytes."""
-    radio.sock.sendall(out)
-    _expect(radio, len(out), timeout)               # our own echo, discarded
+    """Send raw command bytes in small chunks, swallow each chunk's single-wire echo, return nresp
+    response bytes. Chunking avoids the applet link drop on a large (e.g. 256-byte) host->radio burst."""
+    for i in range(0, len(out), CHUNK):
+        part = out[i:i + CHUNK]
+        radio.sock.sendall(part)
+        _expect(radio, len(part), timeout)          # drain this chunk's echo before sending more
     return _expect(radio, nresp, timeout) if nresp else b""
 
 

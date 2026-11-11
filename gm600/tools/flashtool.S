@@ -139,6 +139,8 @@ idwt:   jsr     cop
 
 ; ------------------------------------------------------------------ 'R' read sector -> host
 do_read: jsr    rxb             ; page
+        aslb                    ; MM1CR bank value = page << 2 (see ramdump.S); NOT the raw page
+        aslb
         stab    BANK
         jsr     rxb             ; window hi
         stab    WINPTR
@@ -176,8 +178,10 @@ wrxlp:  stx     CNT16
         ldx     CNT16
         dex
         bne     wrxlp
-        ldab    PAGE            ; WHITELIST page: only 0 (patch) or 12/13 (erased test pages)
-        cmpb    #0
+        ldab    PAGE            ; WHITELIST page: 0 (patch), 3 (recover mis-banked 0xC000 write),
+        cmpb    #0              ; or 12/13 (erased test pages). Page checked BEFORE the <<2 encode.
+        beq     wpg
+        cmpb    #3
         beq     wpg
         cmpb    #12
         beq     wpg
@@ -202,6 +206,8 @@ wpok:   jsr     we_on           ; PA6 high: enable flash writes for the prefix +
         ldaa    #$A0
         staa    $D555
         ldab    PAGE            ; target page
+        aslb                    ; MM1CR bank value = page << 2 (see ramdump.S); NOT the raw page
+        aslb
         stab    BANK
         ldx     #BUF            ; copy BUF -> window (the 256-byte sector load)
         stx     BUFPTR

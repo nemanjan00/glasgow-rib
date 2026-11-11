@@ -485,9 +485,9 @@ class FlashStubIntegrationTest(unittest.TestCase):
     def setUp(self):
         import emu6811, asm6811
         import os
-        fw = "/home/nemanjan00/storage/motorola/motofix.BIN"
-        if not os.path.exists(fw):
-            self.skipTest("motofix.BIN not present")
+        fw = os.environ.get("GM600_FW")
+        if not fw or not os.path.exists(fw):
+            self.skipTest("set GM600_FW=/path/to/motofix.BIN (a flash dump) to run this")
         self.flash = open(fw, "rb").read()
         self.stub = asm6811.assemble_file(os.path.join(HERE, "flashtool.S")).code
         self.m, self.c = self._boot(emu6811)
@@ -506,6 +506,25 @@ class FlashStubIntegrationTest(unittest.TestCase):
         self.m.sci_out.clear(); self.m.feed_rx(bytes(payload))
         self.c.run(max_insns=budget, cop_timeout=0)
         return bytes(self.m.sci_out[:n])
+
+    def test_nonzero_page_bank_encoding(self):
+        # Regression for the mis-banked write that corrupted the real radio: the stub must encode
+        # BANK = page<<2 (MM1CR), not the raw page. With the raw-page bug, "page 13" set BANK=0x0D ->
+        # page 3 -> device 0xC000 (live firmware). Page 0 (all the keypad-patch sectors) is immune
+        # because 0<<2 == 0, which is why the old test never caught it. Exercise a non-zero page.
+        c000_before = bytes(self.m.flash[0xC000:0xC100])
+        pat = bytes((i ^ 0x5A) & 0xFF for i in range(256))
+        p, wh, wl = 13, 0x40, 0x00                                   # device 0x34000 (erased in golden)
+        self.assertEqual(self._cmd([ord("W"), p, wh, wl] + list(pat), 1), b"\x84")
+        self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), pat)
+        self.assertEqual(bytes(self.m.flash[0x34000:0x34100]), pat)          # landed at the RIGHT bank
+        self.assertEqual(bytes(self.m.flash[0xC000:0xC100]), c000_before)    # page 3 NOT touched
+        # recovery path: page 3 (0xC000) is writable and also lands at its correct device address
+        rec = bytes((i ^ 0x3C) & 0xFF for i in range(256))
+        p, wh, wl = 3, 0x40, 0x00                                    # device 0xC000
+        self.assertEqual(self._cmd([ord("W"), p, wh, wl] + list(rec), 1), b"\x84")
+        self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), rec)
+        self.assertEqual(bytes(self.m.flash[0xC000:0xC100]), rec)
 
     def test_probe_and_apply_and_whitelist(self):
         import gm600_keypad_patch as kp
