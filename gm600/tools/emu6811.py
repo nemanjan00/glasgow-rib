@@ -61,6 +61,18 @@ class Mem:
         self._fl_id = False                  # AT29C020 software product-ID mode
         self._fl_load = None                 # pending sector program: {byte_offset: value}
         self._fl_sector = None               # base chip address of the sector being loaded
+        # Snapshot the power-on register file so an MCU reset can restore I/O defaults (below).
+        self._reg_poweron = bytes(self.reg)
+
+    def reset_io(self):
+        """Restore I/O registers to their power-on defaults on an MCU/COP reset. This clears the
+        bank register (0x1058), PORTA/DDRA (incl. PA6), the chip-select / memory-window block and
+        the SCI/timer/COP mask state — exactly what real-hardware reset does. RAM, flash, EEPROM
+        (CONFIG) and external pins (pin12_12v) persist across reset, as on real hardware."""
+        self.reg[:] = self._reg_poweron      # includes CONFIG (0x3F) restored to its saved value
+        self.tcnt = self.tcnt_prev = 0       # free-running timer restarts from 0
+        self.cop_arm = False
+        self._fl_seq = []; self._fl_id = False   # a reset aborts any in-progress flash command seq
 
     def tick(self, n=4):
         self.tcnt = (self.tcnt + n) & 0xFFFF
@@ -262,10 +274,11 @@ class CPU:
         r &= 0xFF; self.nz8(r); return r
 
     def reset(self):
-        """Hardware/COP reset: re-vector, set S/X/I, clear bank; RAM is battery-backed (preserved)."""
+        """Hardware/COP reset: restore I/O register defaults, re-vector, set S/X/I. RAM, flash and
+        CONFIG are non-volatile and preserved, exactly as on real hardware."""
+        self.m.reset_io()
         self.PC = self.m.rw(0xFFFE)
         self.CC = S | X_ | I
-        self.m.reg[0x58] = 0
 
     def irq(self, vector):
         """Take an interrupt: stack PC,Y,X,A,B,CC and vector."""
@@ -684,7 +697,7 @@ def _rti(c):
     c.CC = c.pull(); c.B = c.pull(); c.A = c.pull()
     c.X = c.pullw(); c.Y = c.pullw(); c.PC = c.pullw()
 @op(0x3F)
-def _swi(c): raise NotImplementedError("SWI @0x%04X" % c.PC)
+def _swi(c): c.irq(0xFFF6)   # SWI: stack regs, set I, vector through 0xFFF6 (real HW doesn't trap-to-host)
 @op(0x3E)
 def _wai(c):
     # WAI stacks the registers once, then halts until an unmasked interrupt vectors in.

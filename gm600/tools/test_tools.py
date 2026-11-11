@@ -550,5 +550,40 @@ class FlashStubIntegrationTest(unittest.TestCase):
         self.assertEqual(bytes(self.m.flash), kp.patch_image(self.flash))
 
 
+class BootFaultInjectionTest(unittest.TestCase):
+    """Reproduce the real-radio brick in the VM: corrupting page 3 (device 0xC000 — boot-path code)
+    makes the firmware execute garbage, hit an SWI, vector to the 0x8EE4 'BRA *' fault spin, and
+    (on hardware) COP-reset-loop. Restoring 0xC000 from the golden dump boots clean again. This is
+    the exact failure caused by the bank-encoding bug (a "page 13" write landing at page 3)."""
+
+    FAULT_SPIN = 0x8EE4          # SWI/default-interrupt handler = BRA * (verified: bytes 20 FE)
+
+    def setUp(self):
+        import os
+        fw = os.environ.get("GM600_FW")
+        if not fw or not os.path.exists(fw):
+            self.skipTest("set GM600_FW=/path/to/motofix.BIN (golden flash dump) to run this")
+        self.gold = open(fw, "rb").read()
+
+    def _reaches_fault(self, flash):
+        import emu6811
+        m = emu6811.Mem(flash, b"\xff" * 0x280)
+        c = emu6811.CPU(m); c.reset()
+        r = c.run(max_insns=6_000_000, cop_timeout=150000, stop_pc=self.FAULT_SPIN)
+        return r == "stop"
+
+    def test_page3_corruption_bricks_and_restore_recovers(self):
+        gold = self.gold
+        self.assertEqual(gold[0xC000:0xC008].hex(), "34c60130e700f634",
+                         "golden page-3 reference bytes changed — update this test")
+        broken = bytearray(gold)
+        broken[0xC000:0xC100] = bytes((i ^ 0x3C) & 0xFF for i in range(256))   # what the bug wrote
+        recovered = bytearray(broken)
+        recovered[0xC000:0xC100] = gold[0xC000:0xC100]                          # the reflash fix
+        self.assertFalse(self._reaches_fault(gold),       "golden must not hit the fault spin")
+        self.assertTrue(self._reaches_fault(bytes(broken)), "corrupt page 3 must reach the fault spin")
+        self.assertFalse(self._reaches_fault(bytes(recovered)), "restoring 0xC000 must boot clean")
+
+
 if __name__ == "__main__":
     unittest.main()
