@@ -259,11 +259,23 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
     device-manager `0x9FFB`/`0xA01A` with `D = 0x0245` (the control-head SPI device struct) — and in
     between does `LDAB #8; JSR 0x8F1F` (entry 8) to stream the 21-byte `0x37AC` buffer. Boot inits the
     controller with entries **5,4,3** once; steady state alternates **8/10** with periodic **5**.
-  - ***Active* LCD segment driving is still OPEN.** A takeover stub reproducing acquire→entry 8→release
-    (with or without re-running the 5/4/3 init) does **not** change the segments: the controller holds
-    its last state statically and ignores the stub's `0x37AC` data (init entries *do* reach it — they
-    blank it). The missing piece is the controller's own data/command protocol (likely a register-select
-    / command-vs-data line) not yet reversed. Tools: `tools/lcd_cmd.S` (stub), `tools/lcd_sweep.py`.
+  - **Command vs data on the control head** (from SPI capture + the entry routines): the LCD segment
+    driver shares the SPI bus, selected on **port `0x107E`**. A write asserts a CS/mode nibble with
+    `BSET $107E`, streams bytes via `0x9102`, then `BCLR $107E #$61`. Observed selects: `0x01` = LCD
+    **data** (entry 8, 21 bytes from `0x37AC`); `0x41` = LCD **command** (entry 3, 3 bytes from
+    `0x01EE`, **bit6 = command**); `0x21`/`0x20`/`0x60`/`0x61` = LED / other-device / mixed selects.
+    The firmware's first real display push is preceded by the command **`00 00 3f`** at `CS=0x41`
+    (sets the controller's address pointer); then it streams 21 data bytes at `CS=0x01` and, in steady
+    state, repeats entry 8 (the controller auto-wraps after 21 bytes).
+  - ***Active* LCD segment driving is still OPEN.** A takeover stub reproducing the apparent sequence —
+    the `00 00 3f` address command (entry 3) then entry-8 data, with/without acquire/release and the
+    5/4/3 init — does **not** change the segments: the controller keeps its last state and ignores the
+    stub's `0x37AC` data, while *init* entries do reach it (they blank it). A remaining protocol/timing
+    nuance is unresolved, and the emulator's SPI capture is **not cycle-accurate on the CS port** (it
+    logged the entry-10 backlight byte at `CS=0x00` though entry 10 asserts `0x21`), so the exact wire
+    can't be trusted from emulation. **Resolving this needs a logic analyzer on the control-head SPI**
+    (SCK/MOSI + the `0x107E` CS lines) to compare the firmware's real wire against the stub's. Tools:
+    `tools/lcd_cmd.S` (stub with the entry-3 address command), `tools/lcd_sweep.py`.
   - **The LCD is read *passively* instead** — `0x37AC` (21 bytes) is a live mirror decoded by
     `tools/gm600_remote.py` (channel "1" = `0530 00c1 008f d085 e5af ea00 a661 0000 6008 020010`,
     "322" = `8530 18c1 008f d080 e5af fe00 a261 8000 6018 020010`). Segment decoding is best done this
