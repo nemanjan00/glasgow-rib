@@ -59,11 +59,12 @@ doesn't contain every address in the chosen `PROBE_SET`.
 current image + the pending writes) and verifies all five block checksums (`gm600_codeplug.py`). A
 write that would leave any block wrong is **refused with nothing sent** — DPS would otherwise reject
 the radio on its next read. `--fix` corrects them instead (it appends `0x17` writes for the affected
-checksum bytes); `--force` sends anyway. The probe sets here keep each block's sum unchanged (a
-changed byte balanced by an equal, opposite change elsewhere in the same block), so they pass the
-guard untouched; the guard is what makes an arbitrary, net-nonzero edit safe to write. Off-step
-frequencies or an Inhibit-with-PL combo are still rejected by DPS as invalid *values*, independent
-of the checksum.
+checksum bytes); `--force` sends anyway. Some probe sets (`balanced`, `bits012f`, `bits012p`) are
+block-neutral — a changed byte balanced by an opposite change *in the same block* — and pass the
+guard untouched; the rest are raw bit-isolation probes that leave a checksum wrong (and some tweak
+`0x0F06`, which is in the Network block, not Personality), so they need `--fix`. The guard is what
+makes an arbitrary, net-nonzero edit safe to write. Off-step frequencies or an Inhibit-with-PL combo
+are still rejected by DPS as invalid *values*, independent of the checksum.
 
 The patch addresses in `sbep_write.py` are specific to this radio's layout and its captured
 `sniff-write.log`; adapt both for another radio/codeplug.

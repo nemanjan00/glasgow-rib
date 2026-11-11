@@ -38,29 +38,37 @@ from gm600_codeplug import verify_checksums, fix_checksums, RADIO_BASE
 LOG = "sniff-write.log"
 EEPROM_LO, EEPROM_HI = 0x0D80, 0x1000       # the 640-byte codeplug, [lo, hi)
 
-# channel +6 byte radio addresses and the probe bit to OR in (default byte = 0x08)
-# PROBE table selectable via env PROBE_SET; default = checksum-neutral test
+# Channel +6 byte radio addresses and the probe bit to OR in (default byte = 0x08).
+# PROBE table selectable via env PROBE_SET; default = checksum-neutral test.
+#
+# Checksum note: the +6 option bytes and the per-channel Rx/Tx bytes (0x0F68.. / 0x0F80) are all in
+# the PERSONALITY block (checksum 0x0FF4), but 0x0F06 is in the NETWORK block (checksum 0x0F07).
+# Only the sets whose changes net to zero WITHIN each block are checksum-neutral on their own:
+#   balanced, bits012f, bits012p  -> neutral (compensated inside the personality block).
+# The rest (bits, bits_comp, bits012, b4, b567) are NOT self-neutral: `bits` doesn't compensate at
+# all, and the `0x0F06` "compensation" lands in the Network block, so it leaves BOTH the personality
+# and network checksums wrong. They exist as raw bit-isolation probes; `--write` recomputes/refuses
+# via the checksum guard (`--fix`/`--force`), so they are only usable with `--fix`.
 _SETS = {
-    # net byte-sum delta == 0 : tests the "block total sum" checksum model
+    # neutral: +1/-1 within the personality block
     "balanced": {0x0F6D: 0x09,   # ch1 +1 (set bit0)
                  0x0F74: 0x07},  # ch2 -1 (clear bit3)
-    # original 4-bit probe (needs valid checksum)
+    # NOT neutral: raw 4-bit probe, no compensation (needs --fix)
     "bits":     {0x0F6D: 0x09, 0x0F74: 0x0A, 0x0F7B: 0x0C, 0x0F82: 0x18},
-    # 4-bit probe + padding-byte compensation (delta +0x17 -> set 0x0F06=0xE9)
+    # NOT neutral: the 0x0F06 tweak is in the NETWORK block, so both blocks' sums move (needs --fix)
     "bits_comp": {0x0F6D: 0x09, 0x0F74: 0x0A, 0x0F7B: 0x0C, 0x0F82: 0x18, 0x0F06: 0xE9},
-    # bits 0,1,2 on ch1/2/3 (ch4 untouched); delta +7 -> 0x0F06=0xF9
+    # NOT neutral: 0x0F06 is Network block, not Personality (needs --fix)
     "bits012":  {0x0F6D: 0x09, 0x0F74: 0x0A, 0x0F7B: 0x0C, 0x0F06: 0xF9},
-    # single bit per channel for isolation; override via env PROBE_SET
-    "b4":   {0x0F6D: 0x18, 0x0F06: 0xF0},   # ch1 bit4, delta +0x10
+    # NOT neutral: 0x0F06 is Network block (needs --fix)
+    "b4":   {0x0F6D: 0x18, 0x0F06: 0xF0},   # ch1 bit4
     "b567": {0x0F6D: 0x28, 0x0F74: 0x48, 0x0F7B: 0x88, 0x0F06: (0x100-(0x20+0x40+0x80))&0xFF},
-    # bits 0,1,2 on ch1/2/3, each compensated by that channel's Rx-low byte
-    # (option +k, Rx-low -k) -> personality block sum unchanged, all in-block, no network touch
+    # neutral: each option bit compensated by that channel's Rx-low byte, all in the personality block
     "bits012f": {0x0F6D: 0x09, 0x0F68: 0x6b-1,     # ch1 bit0, Rx 0x6b->0x6a
                  0x0F74: 0x0A, 0x0F6F: 0x75-2,     # ch2 bit1, Rx 0x75->0x73
                  0x0F7B: 0x0C, 0x0F76: 0x6f-4},    # ch3 bit2, Rx 0x6f->0x6b
-    # single bit4 on ch1 compensated by ch1 Rx-low (avoids ch4/TxPL inhibit conflict)
+    # NOT neutral on its own (single bit4 + one Rx byte, net +0x08 in personality) (needs --fix)
     "b4f":  {0x0F6D: 0x18, 0x0F68: 0x6b-0x10},     # ch1 bit4, Rx 0x6b->0x5b
-    # bits 0,1,2 on ch1/2/3, compensated by lowering ch4 Tx PL tone index (0x13->0x0C, valid tone)
+    # neutral: option bits compensated by lowering ch4 Tx PL tone index (0x13->0x0C, valid tone)
     "bits012p": {0x0F6D: 0x09, 0x0F74: 0x0A, 0x0F7B: 0x0C, 0x0F80: 0x13-7},
 }
 PROBE_SET = os.environ.get("PROBE_SET", "balanced")
@@ -84,6 +92,8 @@ def split_frames(sent):
     while i < len(sent):
         if (sent[i] & 0xF0) == 0xF0:
             total = frame_length(sent[i:])
+            if total is None or i + total > len(sent):
+                break                       # capture ends mid-frame: drop the partial tail
             frames.append(sent[i:i+total]); i += total
         else:
             i += 1

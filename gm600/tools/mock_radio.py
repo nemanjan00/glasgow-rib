@@ -60,7 +60,12 @@ class MockRadio:
             if addr == self.fail_write_at:
                 return bytes([ACK]) + encode(0x85, data[:3])
             off = addr - self.base
-            self.eeprom[off:off + len(data) - 3] = data[3:]
+            payload = data[3:]
+            # Range-check like the real radio/bridge: a slice-assign past the end would grow the
+            # image and a negative offset would write from the end, both silently corrupting it.
+            if off < 0 or off + len(payload) > len(self.eeprom):
+                return bytes([ACK]) + encode(0x85, data[:3])
+            self.eeprom[off:off + len(payload)] = payload
             return bytes([ACK]) + encode(0x84, data[:3])
         return bytes([0x60])
 

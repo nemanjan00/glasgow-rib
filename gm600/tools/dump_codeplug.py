@@ -5,7 +5,7 @@ Each 0x11 read is checked end to end: our echo, the ACK, the reply frame's check
 address the radio echoes back. Any mismatch aborts the dump, so a corrupted byte can't land in the
 file silently.
 
-usage: dump_codeplug.py [OUT.bin]      (SBEP_ADDR=host:port, default 127.0.0.1:2324)
+usage: dump_codeplug.py OUT.bin      (SBEP_ADDR=host:port, default 127.0.0.1:2324)
 """
 import sys
 import time
@@ -31,4 +31,6 @@ def main(outpath):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "/tmp/cp_dump.bin")
+    if len(sys.argv) < 2:
+        sys.exit("usage: dump_codeplug.py OUT.bin   (keep your first dump; don't overwrite it)")
+    main(sys.argv[1])

@@ -330,5 +330,42 @@ class VmBridgeWriteRangeTest(unittest.TestCase):
         self.assertEqual(decode(reply[1:])[0], 0x85)
 
 
+class MockRadioWriteRangeTest(unittest.TestCase):
+    """mock_radio's 0x17 must reject out-of-range writes like the real radio/bridge."""
+
+    def setUp(self):
+        self.radio = MockRadio(bytes(640))
+
+    def tearDown(self):
+        self.radio.close()
+
+    def test_write_above_eeprom_fails_without_growing(self):
+        with Radio(f"127.0.0.1:{self.radio.port}") as r:
+            st, op, _ = r.transact(encode(0x17, (0x2000).to_bytes(3, "big") + b"\x01"))
+        self.assertEqual(op, 0x85)                 # write-fail result
+        self.assertEqual(len(self.radio.eeprom), 640)
+
+    def test_write_below_base_fails_without_wrapping(self):
+        with Radio(f"127.0.0.1:{self.radio.port}") as r:
+            st, op, _ = r.transact(encode(0x17, (0x0000).to_bytes(3, "big") + b"\x01"))
+        self.assertEqual(op, 0x85)
+        self.assertNotEqual(self.radio.eeprom[-1], 0x01)
+
+
+class SplitFramesTest(unittest.TestCase):
+    """sbep_write.split_frames must not crash on a capture that ends mid-frame."""
+
+    def test_partial_trailing_header_is_dropped(self):
+        import sbep_write
+        # a complete 0x10 frame, then a truncated long-frame header (0xFF 0x17 with no length)
+        frames = sbep_write.split_frames(bytes.fromhex("F110FEFF17"))
+        self.assertEqual(frames, [bytes.fromhex("F110FE")])
+
+    def test_partial_short_frame_is_dropped(self):
+        import sbep_write
+        # long read reply header claiming 4 data bytes but only 1 present
+        self.assertEqual(sbep_write.split_frames(bytes.fromhex("F5")), [])
+
+
 if __name__ == "__main__":
     unittest.main()
