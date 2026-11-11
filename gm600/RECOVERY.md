@@ -37,39 +37,52 @@ golden boots to the main loop (`PC=0xCE98`) and never reaches `0x8EE4`; the reco
 image reaches the `0x8EE4` spin; **restoring `0xC000` from the golden dump boots identically to
 golden.** The recovery content is therefore known and verified: `motofix.BIN[0xC000:0xC100]`.
 
-## Recovery routes, in order (cheapest first)
+## Outcome
 
-### 1. Factory-loader check — BUS+ sniff with 12 V on (free, do first)
-The 12 V-on beep means internal code runs. **Listen before guessing:** power up with 12 V and capture
-raw BUS+ for a few seconds. Anything it emits at power-up — even one byte — is informative. Then try
-decoding at **9600** and **7812.5** baud. (A prior SBEP `0x23` ID at 9600 got no reply, which only
-rules out *that* query at *that* speed, not a loader with its own prompt/protocol.) If a loader
-exists and can program flash, the rest is unnecessary.
+**Recovered by T48** (route 3, below). In-circuit bootstrap (route 2) was attempted and came up
+silent; chasing it further needed a clock measurement the bench couldn't spare, so we fell back to
+the guaranteed off-board reflash.
 
-### 2. MODB meter check (for route 3)
-`MODB` = **pin 76 (`MODB_VSTBY`)**. After reset this pin supplies RAM standby power, so **only pull
-it low during reset, through ~1 kΩ, never a hard short.** With the radio off, measure resistance
-pin 76 → +5 V and → GND: ~0 Ω to +5 V means tied directly (needs a cut); a few kΩ means an
-overridable pull-up. With the radio on, measure the pin-76 voltage.
+## Recovery routes
 
-### 3. HC11 bootstrap mode (no desolder)
-Force `MODB:MODA = 0:0` at reset → the MCU's internal bootstrap ROM loads a program over the SCI into
-internal RAM and runs it, bypassing the broken flash. **MODA is already pulled low by 12 V on pin 12**
-(which we also need to release the flash `/OE` for writing), so we only add MODB low. The RAM loader
-must then reach the flash and reflash `0xC000` from golden. Writer requirements:
+### 1. In-circuit SBEP — NOT possible in this state
+The firmware crashes in the corrupted page-3 code *before* it reaches the SBEP-servicing main loop
+(SCI is polled, `SCCR2` RIE=0), so the radio never answers SBEP while bricked. The flashtool stub
+upload (`0x17`+`0x26`) needs a live firmware, which we don't have. Confirmed in the VM.
 
-- Set **`HPRIO.MDA`** to switch from the special mode onto the **expanded bus**, then **clear
-  `RBOOT`** so the boot ROM stops overlaying the top of the map (vectors + flash underneath).
-- **Replay the firmware's reset register table** (below) to map the flash and bank window.
-- **Never write `CONFIG`** (writable in special modes; a bad write there is a worse brick).
-- Watchdog is blocked by `DISR` in special modes, but **keep the COP kicks** so the same code also
-  works in normal mode.
-- Internal RAM is small — once expanded, put the **256-byte sector buffer in external SRAM (CSGP2)**.
-- The bootstrap loader **echoes every received byte**; on the single-wire BUS+ that collides with the
-  next byte, so **send one byte at a time and wait for each echo**.
+### 2. HC11 bootstrap mode (no desolder) — ATTEMPTED, inconclusive
+**12 V on accessory pin 12 already selects bootstrap mode**: pin 12 drives *both* MODA (pin 77) and
+MODB (pin 76, `MODB_VSTBY`) low through D0101/Q0102 — they share the diode node, so >~11 V pulls both
+low = `MODB:MODA = 0:0` = bootstrap, while Q0103 turns off and releases the flash `/OE`. **No
+soldering needed** — the earlier "single-chip" reading was wrong (MODB was never high). This is
+Motorola's own factory-programming mechanism: one 12 V signal boots the internal loader *and* unlocks
+flash writes. Security does **not** block it: `CONFIG = 0xD9` → **`NOSEC=1` (unsecured)**.
 
-### 4. T48 off-board — guaranteed fallback
-Desolder/clip the AT29C020, reflash page 3 (`0xC000`) from `motofix.BIN`, resolder.
+The boot ROM loads into `$0080–$037F` and jumps to `$0080` after a 4-char idle or the 768th byte
+(K4 datasheet §2.3, and AN1060). Baud = `EXTAL ÷ (32 × BR)`; **but the CPU clock comes from the
+ASFIC's UPCLK** (EXTAL ← R0147 ← TP0100 ← ASFIC via R0146), which the firmware raises to 14.7456 MHz
+over SPI during boot (derived from the firmware's `SCBDL = 0x30` → BR=48 → 9600). In bootstrap no
+firmware runs, so the ASFIC sits at an **unknown power-on default clock**, and the bootstrap baud is
+whatever that gives.
+
+What was tried: a baud sweep (115200, 57600, 38400, 28800, 19200, 14400, 9600, 7200, 4800, 2400,
+1200), power-cycling into bootstrap at each and sending one `$FF`. The applet's receiver decodes the
+**physical** BUS+ wire (open-drain wired-AND; no software echo), so a live boot ROM re-transmitting
+its byte would show as a **second** byte. **Every baud returned exactly one byte (our own echo) — no
+boot ROM response on BUS+.** Unresolved possibilities: the ASFIC default clock gives a baud outside
+the swept set; the 448-byte K4 boot ROM may not echo at all; or the SCI TxD→BUS+ path needs setup the
+boot ROM doesn't do. **Decisive next test if revisited: scope/counter on TP0100 with 12 V on** to get
+the real bootstrap clock, then target that baud and confirm with a downloaded signature program
+(don't rely on echo). A RAM loader would then: set `HPRIO.MDA` (expanded) + clear `RBOOT`, replay the
+reset register table (below), drive PA6, program `0x0C000` from golden, kicking the COP; buffer in
+external SRAM (CSGP2); one byte at a time, waiting for each echo.
+
+### 3. T48 off-board — USED (guaranteed)
+Desolder the AT29C020, **erase + program the full golden `motofix.BIN`** (SHA-256
+`db74c7c88911e9df1f7328e09975ae3a2db5d212be3df74bdeee0dd00aa530b9`, 262144 B), resolder. The live
+flash differs from golden only in the one corrupted sector, so a full reflash restores it exactly.
+**The codeplug is in the CPU's internal EEPROM (`0x0D80–0x0FFF`), not this chip — T48 doesn't touch
+it.** After `0xC000` the sector should read `34 c6 01 30 e7 00 f6 34 7a c4 01 27 06 bd b8 ba`.
 
 ## Firmware reset register-setup table (authoritative, K4 names)
 

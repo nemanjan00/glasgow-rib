@@ -107,9 +107,30 @@ def read_sector(radio, dev_addr):
     return _cmd(radio, bytes([ord("R"), page, wh, wl]), SECTOR, timeout=4.0)
 
 
-def write_sector(radio, dev_addr, data):
+BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash_backups")
+
+
+def _backup_live(base, data):
+    """Save a live sector's before-image to disk so any write is recoverable. The lack of this is
+    exactly why the mis-banked 0xC000 write could not be undone in-circuit (see ../RECOVERY.md)."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    fn = os.path.join(BACKUP_DIR, f"sector_{base:05X}_{time.strftime('%Y%m%d_%H%M%S')}.bin")
+    with open(fn, "wb") as f:
+        f.write(data)
+    print(f"  backed up live sector 0x{base:05X} -> {fn}")
+
+
+def write_sector(radio, dev_addr, data, *, require_erased=False):
     assert len(data) == SECTOR
-    page, wh, wl = _win(dev_addr & ~0xFF)
+    base = dev_addr & ~0xFF
+    live = read_sector(radio, base)          # ALWAYS read + back up the before-image first
+    _backup_live(base, live)
+    if require_erased and live != b"\xff" * SECTOR:
+        raise sbep.SBEPError(
+            f"refusing test write @0x{base:05X}: the LIVE sector is NOT erased "
+            f"(starts {live[:8].hex()}); back-up saved. Never trust a file's idea of 'erased' — "
+            "this is the mistake that bricked the radio. Use patch/revert for live firmware data.")
+    page, wh, wl = _win(base)
     r = _cmd(radio, bytes([ord("W"), page, wh, wl]) + data, 1, timeout=4.0)
     if r != b"\x84":
         raise sbep.SBEPError(f"program @0x{dev_addr:05X}: status {r.hex()}")

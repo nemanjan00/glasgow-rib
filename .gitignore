@@ -5,3 +5,4 @@ build/
 .venv/
 *.vcd
 gm600/datasheets/
+gm600/tools/flash_backups/
