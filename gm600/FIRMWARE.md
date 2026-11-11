@@ -416,8 +416,23 @@ wait for sync `A5`, read 5 bytes from the SCI, call entry 5 with them (no lock).
 -9- ([images/lcd_text_stub.png](images/lcd_text_stub.png)). `lcd_text.py HEL LO`, `--scroll`, `--raw
 e67676`, `--no-launch`. The firmware is halted while it runs: recover with `psu_reboot.py`.
 
+**`tools/lcd_raw.S` — the same, with NO firmware code.** Our own SPI driver: `SPCR &= 0xF3; SPCR =
+0x52`, `0x107E |= 0x61`, the 10 wire bytes out through SPDR polling SPIF, `0x107E &= 0x9E`, `SPCR |=
+0x0C`. The host sends all 10 wire bytes (normally 5 × `00` + `lcd_text.pack(struct)`, a Python port of
+`0x9018` cross-checked against the firmware in `emu6811`). The SPCR/select/SPDR write sequence is
+identical to the firmware path in the emulator (test `LcdTextTest`), and it ran on the radio: HI / OUr /
+SPI / COd / 586 ([images/lcd_raw_stub.png](images/lcd_raw_stub.png)). It also drives the LED shift
+register as entry 10 does (`SPCR = 0x51`, shift 1 byte, strobe `0x107E |= 0x21`, clear `0x61`), so
+`--backlight` turns the backlight on. `lcd_text.py --standalone [--backlight] TEXT`.
+
+**The glass is one controller: 3 digits + 10 icons.** `b0`/`b1` in the struct are the icons (`b1` bit 6
+is the upper-right icon the idle screen shows). All 80 wire bits were swept one at a time with the
+backlight on: every segment answers to one bit in wire bytes 0–4 **and** one in 5–9; the firmware only
+fills 5–9. Per-segment photos, both maps and the glyph shots:
+[images/lcd_segments/](images/lcd_segments/README.md).
+
 The clean way to change the number the *firmware* shows is still the Own Unit No. codeplug field
-above; the stub is for showing anything else.
+above; the stubs are for showing anything else.
 
 ### Lessons (why earlier conclusions were wrong)
 - **The `0x37AC` stub pushes "never worked" because the digits aren't there.** Every attempt to put a

@@ -236,7 +236,13 @@ with host-supplied segment bytes. Cam-proven on the radio. Halts the firmware: r
 python3 lcd_text.py HI                      # upload + launch, show "HI"
 python3 lcd_text.py --no-launch --scroll HELLO 322   # stub already running: scroll text
 python3 lcd_text.py --no-launch --raw e67676         # raw segment bytes (here "322")
+python3 lcd_text.py --standalone --backlight 53X     # lcd_raw.S: own SPI driver, no firmware code
+python3 lcd_photos.py /tmp/out [--only wire|struct|glyphs]  # photograph every segment (webcam)
 ```
+
+`lcd_raw.S` drives the display controller and the LED/backlight shift register itself; the host sends
+the 10 wire bytes (`lcd_text.pack` ports the firmware's packing). Maps and photos:
+`../images/lcd_segments/`.
 
 ## `gm600_keypad_patch.py` — press real keys via a firmware patch
 

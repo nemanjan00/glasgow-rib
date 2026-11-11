@@ -16,6 +16,11 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
   b0/b1 = `00 40`, d = one 7-seg byte per digit) and caches the struct at **`0x3495`** (so
   `0x3497-99` = the digits). Firmware call: lock `ldd #$245; jsr $9FFB`, push struct ptr, push word,
   `ldd #5; jsr $8F1F`, pull, unlock `$A01A`. The stub skips the lock (pure RTOS semaphore).
+- **DONE: standalone driver, no firmware code** — `tools/lcd_raw.S` (own SPI + select + LED latch; host
+  packs with `lcd_text.pack`, a verified port of `0x9018`). Cam-proven (HI/OUr/SPI/COd/586), backlight
+  on via `--backlight`. Every segment + glyph photographed: `images/lcd_segments/` (README has the
+  struct-bit and wire-bit maps). Open: wire byte 5 bit 7 (always set by the firmware) — clearing it
+  showed `d0.f`; why each segment has a bit in both wire halves (likely the controller's 2 backplanes).
 - **7-seg font (cam-swept):** bit0 f, bit1 a, bit2 b, bit3 unused, bit4 e, bit5 g, bit6 d, bit7 c.
   Font table in `lcd_text.py`.
 - **Next (optional):** a co-resident (non-halting) variant via the free OC pseudo-vectors, so the

@@ -247,6 +247,41 @@ class LcdTextTest(unittest.TestCase):
             self.assertEqual(c.run(max_insns=5000, stop_pc=0x3000), "stop")
             self.assertEqual(bytes(m.spi_out), bytes(5) + lcd_text.pack(s), s.hex())
 
+    def test_standalone_stub_matches_firmware_on_the_wire(self):
+        # lcd_raw.S (own SPI, no firmware calls) must produce the same SPCR / select / SPDR write
+        # sequence as lcd_text.S (which calls firmware entry 5), and the same LED sequence as entry 10.
+        import asm6811
+        import emu6811
+        import lcd_text
+        img = os.environ.get("GM600_FW")
+        if not img:
+            self.skipTest("set GM600_FW=/path/to/motofix.BIN (a flash dump) to run this")
+        flash = open(img, "rb").read()
+        here = os.path.dirname(os.path.abspath(__file__))
+
+        def trace(stub, payload):
+            m = emu6811.Mem(flash=flash)
+            c = emu6811.CPU(m)
+            a = asm6811.assemble_file(os.path.join(here, stub))
+            m.ram[a.org:a.org + len(a.code)] = a.code
+            m.reg[0x28] = 0x5C
+            log = []
+            m.watch = lambda ad, v: log.append((ad, v)) if ad in (0x1028, 0x107E, 0x102A) else None
+            c.SP, c.PC = 0x21FF, a.org
+            m.feed_rx(payload)
+            c.run(max_insns=200000)
+            return log
+
+        for text in ("322", "HI", "-9-"):
+            st = bytes([0x00, 0x40]) + lcd_text.text_to_segs(text)
+            fw = trace("lcd_text.S", bytes([0xA5]) + st)
+            raw = trace("lcd_raw.S", bytes([0xA5]) + bytes(5) + lcd_text.pack(st))
+            self.assertTrue(fw)
+            self.assertEqual(raw, fw, text)
+        self.assertEqual(trace("lcd_raw.S", bytes([0x5A, 0xC0])),
+                         [(0x1028, 0x50), (0x1028, 0x51), (0x102A, 0xC0), (0x107E, 0x21),
+                          (0x107E, 0x00), (0x1028, 0x5D)])
+
 
 class EmulatorTest(unittest.TestCase):
     """The 68HC11 core must execute correctly (validated on a known program)."""

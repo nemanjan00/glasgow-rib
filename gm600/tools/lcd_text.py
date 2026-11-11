@@ -8,6 +8,7 @@ e6 76 76) or text (see FONT). The radio stays halted on the stub: recover with p
   lcd_text.py --raw e67676          push raw segment bytes
   lcd_text.py HEL LO                push text, one 3-char screen per argument (--delay between)
   lcd_text.py --no-launch e67676    stub already running: just send
+  lcd_text.py --standalone HI       use lcd_raw.S (own SPI, no firmware code) instead
 """
 import argparse
 import os
@@ -31,7 +32,7 @@ GLYPHS = {
     "A": "abcefg", "B": "cdefg", "C": "adef", "D": "bcdeg", "E": "adefg", "F": "aefg",
     "G": "acdef", "H": "bcefg", "I": "ef", "J": "bcde", "L": "def", "N": "ceg", "O": "abcdef",
     "P": "abefg", "Q": "abcfg", "R": "eg", "S": "acdfg", "T": "defg", "U": "bcdef", "Y": "bcdfg",
-    "Z": "abdeg", "-": "g", "_": "d", " ": "",
+    "X": "bcefg", "Z": "abdeg", "-": "g", "_": "d", " ": "",  # X: conventional stand-in (= H)
 }
 FONT = {c: sum(SEG[x] for x in segs) for c, segs in GLYPHS.items()}
 
@@ -98,8 +99,8 @@ def text_to_segs(text):
         raise SystemExit(f"no glyph for {e}")
 
 
-def launch(r):
-    a = asm6811.assemble_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lcd_text.S"))
+def launch(r, stub="lcd_text.S"):
+    a = asm6811.assemble_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), stub))
     org, code = a.org, a.code
     for off in range(0, len(code), 32):
         addr = org + off
@@ -113,8 +114,24 @@ def launch(r):
     r.drain()
 
 
-def push(r, segs, b0=B0, b1=B1):
-    r.sock.sendall(bytes([SYNC, b0, b1]) + bytes(segs))
+def push(r, segs, b0=B0, b1=B1, standalone=False):
+    struct = bytes([b0, b1]) + bytes(segs)
+    r.sock.sendall(bytes([SYNC]) + (bytes(5) + pack(struct) if standalone else struct))
+    time.sleep(0.05)
+    r.drain()
+
+
+def push_wire(r, wire):
+    """lcd_raw.S only: send 10 raw wire bytes to the display controller."""
+    assert len(wire) == 10
+    r.sock.sendall(bytes([SYNC]) + bytes(wire))
+    time.sleep(0.05)
+    r.drain()
+
+
+def led(r, value):
+    """Set the LED shift register (lcd_raw.S only): bit 7 = backlight, bits 0-2 = status LEDs."""
+    r.sock.sendall(bytes([0x5A, value]))
     time.sleep(0.05)
     r.drain()
 
@@ -124,12 +141,19 @@ def main():
     ap.add_argument("screens", nargs="+")
     ap.add_argument("--raw", action="store_true", help="arguments are hex: d0d1d2 or b0b1d0d1d2")
     ap.add_argument("--no-launch", action="store_true")
+    ap.add_argument("--standalone", action="store_true",
+                    help="use lcd_raw.S: drive the controller with no firmware calls (host packs)")
     ap.add_argument("--delay", type=float, default=1.0)
+    ap.add_argument("--backlight", action="store_true", help="turn the backlight on (--standalone)")
     ap.add_argument("--scroll", action="store_true", help="scroll the joined text through 3 digits")
     args = ap.parse_args()
     with sbep.Radio() as r:
         if not args.no_launch:
-            launch(r)
+            launch(r, "lcd_raw.S" if args.standalone else "lcd_text.S")
+        if args.backlight:
+            if not args.standalone:
+                raise SystemExit("--backlight needs --standalone")
+            led(r, 0xC0)
         screens = args.screens
         if args.scroll:
             t = "   " + " ".join(screens) + "   "
@@ -139,9 +163,9 @@ def main():
                 time.sleep(args.delay)
             if args.raw:
                 b = bytes.fromhex(s)
-                push(r, b[-3:], *(b[:2] if len(b) == 5 else (B0, B1)))
+                push(r, b[-3:], *(b[:2] if len(b) == 5 else (B0, B1)), standalone=args.standalone)
             else:
-                push(r, text_to_segs(s))
+                push(r, text_to_segs(s), standalone=args.standalone)
             print("pushed", s)
 
 
