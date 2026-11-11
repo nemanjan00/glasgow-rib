@@ -442,3 +442,26 @@ digits are buffer idx **[0,1,2,4,6,8,14]**.)
    changed identity"; needs GUI interaction (VNC).
 3. **Band-plan/entry-checksum RE**: find the exact checksum for the freq-plan entry so a valid
    alternate control-channel frequency renders a different channel number instead of the fallback.
+
+### RESOLVED — the main number IS data-drivable: Own Unit No. @ 0x0F0B–0x0F0C (VERIFIED on cam)
+The "322" idle display is the **MPT1327 Own Unit No.** (DPS → Edit → Trunking → MPT Personality
+Data → "Own Unit No."), stored in the codeplug as a **big-endian 16-bit** value at **0x0F0B–0x0F0C**
+(322=0x0142, 456=0x01C8, 712=0x02C8), protected by the block checksum at **0x0FF4**
+(`(Σ(0x0F08..0x0FF3) − 0x55) & 0xFF`). This is the documented MPT1327_OWN_IDENT location — the docs
+were right all along.
+
+Two methods proven on the real radio (cam-verified 322 → 456 → 712 → 322):
+1. **Vendor DPS** (`C:\MRSS\MPT\DPSWDP\WDPS_DP.EXE`, R00.05.04, English menus, in the Win3.1 QEMU VM,
+   serial bridged to the applet): File→Read Radio, Edit→Trunking→MPT Personality Data, set Own Unit
+   No., OK, File→Write Radio. Driven headless via `tools/mouse_ctl.py` (closed-loop mouse) +
+   `/tmp/typestr.py` (QWERTZ typing); menu nav via `sendkey`.
+2. **Direct SBEP data write** (no DPS): `0x17` write 0x0F0B/0x0F0C (BE16) + recompute checksum 0x0FF4
+   + `0x10` reset. Tool: `~/captures/setunit.py <n>`. Diff of a DPS 322→456 write is exactly two
+   bytes (0x0F0C and the 0x0FF4 checksum), which is what cracked it.
+
+**Why the earlier hunt failed — emulator gap:** `emu6811.py` does NOT model the Own-Unit-No.→display
+path. Changing 0x0F0B/0x0F0C in the emulator (checksum-fixed, fresh boot) produced **no** buffer
+change, which wrongly led to "the number is firmware-determined / not a clean codeplug field." On
+**real hardware** 0x0F0B–0x0F0C is the displayed number. Lesson: the emulator is unreliable for the
+trunking-idle identity render; verify display-source claims on hardware. (The procedural bset/bclr
+renderer and the icon-field/backlight findings above remain correct.)
