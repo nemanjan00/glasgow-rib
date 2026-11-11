@@ -8,7 +8,38 @@ This documents the AT29C020 programming interface and how it maps through the GM
 Datasheet: Atmel `0291N–FLASH–07/02` (saved under `datasheets/AT29C020.pdf`, gitignored;
 e.g. <https://www.farnell.com/datasheets/94379.pdf>). Mfr code `1F`, device code `DA`.
 
-## ⚠️ Check the boot-block lockout FIRST
+## The write lock — and how to release it (hardware-confirmed)
+
+In stock operation the flash is **read-only**: every write command is ignored and a probe reads back
+ordinary array data (`0F CE …`). The lock is the flash **`/OE`** line. Board control (traced on the
+Y08 schematic, confirmed on the radio):
+
+- `/WE` = CPU `PG7_R_W` (U0101 pin 33) — a write strobe on every CPU write; shared with the SRAM.
+- `/CE` = `PH7_CSPROG` (U0101 pin 29), point-to-point to U0102 pin 30.
+- `/OE` = `AND(PA6, Q0103 collector)` via U0106 (74AC08). **PA6** is a CPU port pin (U0101 pin 5);
+  Q0103 is on the accessory **pin-12** net. Normally Q0103 holds the AND low → `/OE` stuck low →
+  flash always in read mode → writes ignored (reads work regardless). Motorola reused the old
+  28F020 VPP-detect net as this write-enable; VPP itself does nothing on the AT29C020.
+
+**Release = ~12 V on accessory pin-12** (current-limited — the net has a 4.7 kΩ pull-up, a
+firmware-switchable pull-down Q0432, and a ~14 V clamp; 12 V through ~1 kΩ is right). Above ~10 V the
+zener/Q0102/Q0103 network turns Q0103 off, so `/OE` then **follows PA6**: PA6 low = read, PA6 high =
+write-enable. **Stock firmware keeps running normally with 12 V present** (no reset, no boot-mode
+change — MODA is only sampled at reset; this is NOT bootstrap). So the write path is:
+
+> boot normally → **apply 12 V to pin-12 and leave it on** → launch the RAM stub (`flashtool`), which
+> frees PA6 from OC2 (TCTL1), makes it an output, holds it low for reads and raises it only around the
+> `AA/55/A0` command + sector-load writes → program → read-back verify → remove 12 V.
+
+Order matters: hot-plugging 12 V can glitch a *running* stub, so apply 12 V **first**, then launch.
+
+**Confirmed probe (12 V live, PA6-gated):** `mfr 1F, device DA` — the AT29C020 answered its own
+command interface, i.e. **writes reach the chip** — with **lower-lockout `FE` and upper-lockout `FE`:
+both boot blocks UNLOCKED**, so the patch sectors are programmable. (Commands go through the CSPROG
+`$8000–$FFFF` region, where `/CE` is guaranteed; the AT29C020 decodes only A0–A14, so chip `0x5555`
+== CPU `0xD555`, `0x2AAA` == CPU `0xAAAA`.)
+
+## ⚠️ Boot-block lockout (measured: both UNLOCKED)
 
 The AT29C020 has a **boot-block programming lockout**: the first 8 KB (`0x00000–0x01FFF`) and the
 last 8 KB can each be permanently* locked against erase/program. **Everything we need to patch is in

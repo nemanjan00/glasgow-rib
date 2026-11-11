@@ -21,9 +21,9 @@ plus RAM, registers and the internal EEPROM.
 
 ## CPU and memory
 
-The controller CPU is a **Motorola 68HC11 K-series** part. The two sources in the manual disagree
-on the exact variant: the parts list text calls U0101 a masked **68HC11K4** (`5195136A01`, "S/W
-MSKD 68HC11K4"), while the schematic symbol is labelled **68HC11K1_QFP**. Either way it has the
+The controller CPU is a **Motorola 68HC11 K-series** part. On this board revision (**PCB
+8402626Y08**) the parts list gives U0101 = `5195136A02` ("MICROPROCESSOR"), schematic-labelled
+"PROC350 PLAT S/W R010000 A3"; the `5195136A01` "S/W MSKD 68HC11K4" is the earlier Y07 list. Either way it has the
 K-series memory-management unit (bank register at `0x1058`, MMU control registers around offset
 `0x55`–`0x5F`) and 640 bytes of internal EEPROM. The 64 KB logical map seen through `11`:
 
@@ -40,7 +40,7 @@ K-series memory-management unit (bank register at `0x1058`, MMU control register
 | `0000`–`02FF` | Internal RAM (768 bytes) |
 | `0D80`–`0FFF` | **Internal EEPROM, 640 bytes** — the whole codeplug: alignment, network and personality blocks ([CODEPLUG.md](CODEPLUG.md)) |
 | `1000`–`107F` | **I/O register block** — bank select `0x1058`, SCI data `0x1077`, free-running timer `0x100E`. Values here change between reads because they are live registers, not RAM. |
-| `1080`–`3FFF` | RAM / working data structures (external SRAM U0103, inferred) |
+| `1080`–`3FFF` | RAM / working data structures (external SRAM U0103 = **MB84256A**, 32K×8, confirmed) |
 | `4000`–`7FFF` | **Banked flash window** (see below) |
 | `8000`–`DAFF` | Fixed firmware bank (dispatcher, SCI driver, trampoline, vectors) |
 | `DB00`–`FFBF` | `FF` (unmapped in this bank) |

@@ -24,11 +24,14 @@ press on the patched firmware). While armed the stub ignores the real line, so a
 remote can't fight. Press / release are just RAM writes (SBEP 0x17); reverting the flash bytes gives
 the buttons back.
 
-  * FORCE_EN  = 0x028B   0 = off (real buttons), non-zero = armed (use FORCE_VAL)
+  * FORCE_EN  = 0x028B   armed only when == 0xA5 (magic 1); anything else = real buttons
+  * FORCE_M2  = 0x028D   armed only when == 0x5A (magic 2)
   * FORCE_VAL = 0x028C   the A/D level for the key to inject (same value the key's ladder gives)
 
-Both control bytes are in RAM the firmware never touches. The host must set FORCE_EN = 0 right after
-connecting (battery-backed RAM powers up undefined), then press/release at will.
+The override engages only when BOTH magic bytes match, so power-up garbage RAM arms it ~1-in-65536
+instead of a coin flip (a patched radio with no host attached boots and keys work normally). The
+host calls arm() after connecting to clear the control bytes, then press()/release(). The bytes sit
+in RAM the firmware never touches, well clear of the stack (SP never below ~0x00F5).
 
 Applying the patch to a real radio needs an AT29C020 in-system sector write (apply + revert); this
 module produces the patched image and the exact byte diff for a flash writer. The press/release
@@ -40,9 +43,17 @@ PATCH_SITE = 0x10FE                       # flash file offset of `ldab ADR1` in 
 PATCH_ORIG = bytes.fromhex("F61031")      # ldab ADR1
 PATCH_NEW = bytes.fromhex("BD5E25")       # jsr  0x5E25
 STUB_SITE = 0x1E25                        # flash file offset for the stub (CPU 0x5E25, page 0)
-STUB = bytes.fromhex("F6028B" "2704" "F6028C" "39" "F61031" "39")
+# Magic-gated override (asm6811 of kstub.S): return FORCE_VAL only when BOTH magic bytes match,
+# else the real ADR1. The two magics make power-up garbage RAM arm the patch ~1-in-65536 instead of
+# a coin flip, so a patched radio with no host attached boots and keys work normally.
+#   ldaa FORCE_EN; cmpa #$A5; bne real; ldaa FORCE_M2; cmpa #$5A; bne real; ldab FORCE_VAL; rts
+#   real: ldab ADR1; rts
+STUB = bytes.fromhex("b6028b81a5260bb6028d815a2604f6028c39f6103139")
 
-FORCE_EN, FORCE_VAL = 0x028B, 0x028C      # RAM control bytes
+# RAM control bytes, in a region the firmware never touches and well clear of the stack (reset sets
+# SP=0x0114 and it never goes below ~0x00F5, verified in the emulator; FORCE sits at 0x028B+).
+FORCE_EN, FORCE_VAL, FORCE_M2 = 0x028B, 0x028C, 0x028D
+MAGIC1, MAGIC2 = 0xA5, 0x5A
 RELEASED = 0xFF                           # idle A/D level (no key)
 
 
@@ -76,15 +87,19 @@ def _w(radio, addr, value):
 
 
 def arm(radio):
-    """Put the patched radio in a known released state (call once after connecting)."""
-    _w(radio, FORCE_VAL, RELEASED)
+    """Put the patched radio in a known released state (call once after connecting, to clear any
+    garbage the control bytes powered up with)."""
     _w(radio, FORCE_EN, 0)
+    _w(radio, FORCE_M2, 0)
+    _w(radio, FORCE_VAL, RELEASED)
 
 
 def press(radio, level):
-    """Hold a key: `level` is the A/D value that key's ladder produces (characterise per radio)."""
+    """Hold a key: `level` is the A/D value that key's ladder produces (characterise per radio).
+    Both magic bytes must be set for the override to engage; write FORCE_EN last so it's atomic."""
     _w(radio, FORCE_VAL, level)
-    _w(radio, FORCE_EN, 1)
+    _w(radio, FORCE_M2, MAGIC2)
+    _w(radio, FORCE_EN, MAGIC1)
 
 
 def release(radio):

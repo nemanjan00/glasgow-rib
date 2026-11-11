@@ -25,6 +25,10 @@ SCSR    = $1074         ; SCI status 1 (RDRF = bit5 0x20, TDRE = bit7 0x80)
 SCDR    = $1077         ; SCI data
 BANK    = $1058         ; bank register = page << 2
 COPRST  = $103A         ; COP kick = write 0x55 then 0xAA
+PORTA   = $1000         ; PA6 (bit6) gates flash /OE (via U0106 AND gate) once pin-12 > ~10V
+DDRA    = $1001         ; DDA6 = PA6 direction
+TCTL1   = $1020         ; OM2:OL2 (bits 7:6) = OC2 action on PA6; clear to use PA6 as a plain output
+WEMASK  = $40           ; PA6 bit
 
 CNT16   = $2280         ; loop counter (16-bit, saved across X reuse)
 WINPTR  = $2282         ; working window pointer (hi)
@@ -34,6 +38,7 @@ BUF     = $2300         ; 256-byte sector buffer
 
 ; ------------------------------------------------------------------ command loop
 start:  sei
+        jsr     we_setup        ; free PA6 from OC2, make it an output, start in read mode (/OE low)
 loop:   jsr     cop
         jsr     rxb             ; B = command byte
         cmpb    #$49            ; 'I'
@@ -70,50 +75,64 @@ txe:    ldaa    SCSR
         ldaa    SCDR            ; discard it
         rts
 
-; ------------------------------------------------------------------ AT29C020 product-ID commands
-id_cmd: ldab    #4              ; entry: AA->5555 (pg1), 55->2AAA (pg0), 90->5555 (pg1)
-        stab    BANK
-        ldaa    #$AA
-        staa    $5555
-        clrb
-        stab    BANK
-        ldaa    #$55
-        staa    $6AAA
-        ldab    #4
-        stab    BANK
-        ldaa    #$90
-        staa    $5555
+; --- flash write-enable (PA6 -> flash /OE when pin-12 > ~10V). High = write mode, low = read. ---
+we_setup: ldaa  TCTL1           ; detach OC2 from PA6 (OM2:OL2 = 0) so PA6 is a plain output
+        anda    #$3F
+        staa    TCTL1
+        ldaa    DDRA            ; PA6 = output
+        oraa    #WEMASK
+        staa    DDRA
+we_off: ldaa    PORTA           ; PA6 low -> flash /OE low -> read mode (flash drives data)
+        anda    #$BF
+        staa    PORTA
+        rts
+we_on:  ldaa    PORTA           ; PA6 high -> flash /OE high -> write mode (flash off the bus)
+        oraa    #WEMASK
+        staa    PORTA
         rts
 
-id_exit: ldab   #4              ; exit: AA->5555, 55->2AAA, F0->5555
-        stab    BANK
-        ldaa    #$AA
-        staa    $5555
-        clrb
-        stab    BANK
+; ------------------------------------------------------------------ AT29C020 product-ID commands
+; Commands must land in the CSPROG region ($8000-$FFFF; PCSZ=0:1=32K) — the bank window $4000-$7FFF
+; is NOT covered by CSPROG, so writes there never select the flash. The AT29C020 command decoder
+; uses only A0-A14, so chip addr 0x5555 == CPU 0xD555 and 0x2AAA == CPU 0xAAAA in the fixed region
+; (A15-A17 don't-care). No banking needed for commands.
+id_cmd: ldaa    #$AA            ; entry: AA->5555, 55->2AAA, 90->5555  (via fixed region)
+        staa    $D555
         ldaa    #$55
-        staa    $6AAA
-        ldab    #4
-        stab    BANK
+        staa    $AAAA
+        ldaa    #$90
+        staa    $D555
+        rts
+
+id_exit: ldaa   #$AA            ; exit: AA->5555, 55->2AAA, F0->5555
+        staa    $D555
+        ldaa    #$55
+        staa    $AAAA
         ldaa    #$F0
-        staa    $5555
+        staa    $D555
         rts
 
 ; ------------------------------------------------------------------ 'I' probe (ID + lockout)
-do_id:  jsr     id_cmd
+do_id:  jsr     we_on           ; PA6 high: enable flash writes for the command sequence
+        jsr     id_cmd
+        jsr     we_off          ; PA6 low: back to read mode to fetch the ID codes
+        ldx     #2000           ; short settle after ID entry before reading
+idwt:   jsr     cop
+        dex
+        bne     idwt
+        ldab    $8000           ; manufacturer: A0=0 in ID mode (fixed region)
+        jsr     txb
+        ldab    $8001           ; device: A0=1
+        jsr     txb
         clrb
-        stab    BANK            ; page 0
-        ldab    $4000           ; manufacturer (device 0x0000)
+        stab    BANK            ; page 0 for the window read of the lower lockout
+        ldab    $4002           ; lower boot-block lockout (chip 0x0002) via window read
         jsr     txb
-        ldab    $4001           ; device (0x0001)
+        ldab    $FFF2           ; upper boot-block lockout (chip 0x3FFF2) via fixed region
         jsr     txb
-        ldab    $4002           ; lower boot-block lockout (0x0002)
-        jsr     txb
-        ldab    #$3C            ; page 15 (<<2) for device 0x3FFF2
-        stab    BANK
-        ldab    $7FF2           ; upper boot-block lockout
-        jsr     txb
+        jsr     we_on
         jsr     id_exit
+        jsr     we_off
         jmp     loop
 
 ; ------------------------------------------------------------------ 'R' read sector -> host
@@ -155,18 +174,13 @@ wrxlp:  stx     CNT16
         ldx     CNT16
         dex
         bne     wrxlp
-        ldab    #4              ; SDP program prefix: AA->5555, 55->2AAA, A0->5555
-        stab    BANK
-        ldaa    #$AA
-        staa    $5555
-        clrb
-        stab    BANK
+        jsr     we_on           ; PA6 high: enable flash writes for the prefix + sector load
+        ldaa    #$AA            ; SDP program prefix via CSPROG region (chip A0-A14, A15-17 n/c)
+        staa    $D555
         ldaa    #$55
-        staa    $6AAA
-        ldab    #4
-        stab    BANK
+        staa    $AAAA
         ldaa    #$A0
-        staa    $5555
+        staa    $D555
         pulb                    ; target page
         stab    BANK
         ldx     #BUF            ; copy BUF -> window (the 256-byte sector load)
@@ -192,6 +206,7 @@ wdi:    dex
         bne     wdi
         deca
         bne     wdo
+        jsr     we_off          ; PA6 low: back to read mode
         ldab    #$84            ; status
         jsr     txb
         jmp     loop

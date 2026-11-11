@@ -38,12 +38,17 @@ Microphone connector (8-pin): 3=Mic Hook, 4=GND, 5=Mic Audio, 6=Mic PTT, 7=**BUS
   **Pin 5 = Flat TX Audio** (unfiltered TX inject, bypasses pre-emphasis/processing) and
   **Pin 11 = RX discriminator** (continuous, de-emphasis-free RX). A repeater/data setup can use these
   directly regardless of the De/Pre-emphasis codeplug bit (which is the *internal* path selector).
-- **Firmware (68HC11) bootstrap:** the accessory connector exposes the SCI programming bus and the
-  HOOK prog-enable, but **no dedicated bootstrap-control pin**. 68HC11 native bootstrap (XMODEM loader
-  for flash) is entered via the CPU MODA/MODB pins at reset, which are **on the PCB, not this
-  connector** — so firmware dump/flash via HC11 bootstrap likely needs opening the radio and strapping
-  MODA/MODB, not just an accessory-connector lead. (Contrast: the 26-pin Waris radios expose a boot
-  pin on their connector.)
+- **Flash write-enable on accessory pin-12 (confirmed on the radio).** The firmware flash (U0102
+  AT29C020) is read-only in stock operation; its control lines (Y08 schematic + bench):
+    - `/WE` = CPU `PG7_R_W` (U0101 pin 33), shared with the SRAM;
+    - `/CE` = `PH7_CSPROG` (U0101 pin 29), point-to-point;
+    - `/OE` = `AND(PA6, Q0103 collector)` via U0106 (74AC08). Q0103 sits on the **accessory pin-12**
+      net and normally holds `/OE` low (read-only). **~12 V on pin-12** (current-limited: 4.7 kΩ
+      pull-up, firmware pull-down Q0432, ~14 V clamp) turns Q0103 off, so `/OE` follows **PA6** —
+      PA6 high = write-enable. **Stock firmware keeps running normally with 12 V present** (MODA is
+      only sampled at reset; this is NOT bootstrap, and 5 V is not cut). In-circuit flash
+      programming is done this way — see [FLASH_WRITE.md](FLASH_WRITE.md). (Motorola reused the old
+      28F020 VPP-detect net as this write-enable; VPP does nothing on the AT29C020.)
 
 ## Repeater / squelch signals (from the CNTL GM600 schematic, sheet 8402626Y08)
 
