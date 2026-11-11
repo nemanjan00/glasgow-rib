@@ -465,3 +465,23 @@ change, which wrongly led to "the number is firmware-determined / not a clean co
 **real hardware** 0x0F0B–0x0F0C is the displayed number. Lesson: the emulator is unreliable for the
 trunking-idle identity render; verify display-source claims on hardware. (The procedural bset/bclr
 renderer and the icon-field/backlight findings above remain correct.)
+
+### LCD push protocol — exact wire sequence (emulator-traced) + .S status
+Goal: a RAM stub (`.S`) that writes arbitrary content to the glass. The firmware refresh of the
+21-byte 0x37AC buffer to the control-head LCD controller (SPI) is:
+- **SPI send primitive 0x9102**(X=buf, B=count): for each byte — wait SPSR(0x1029) SPIF (`tst
+  $1029; bpl`), then `staa $102A` (SPDR); after the last, read SPDR to clear. **No COP kick inside.**
+- **Command phase:** SPCR(0x1028)=0x57, then **BSET 0x107E #0x41** (CS; read-modify-write, NOT a
+  full-byte store), send 3 cmd bytes `02 50 3F` via 0x9102, then **BCLR 0x107E #0x61**.
+- **Data phase:** SPCR=0x50, **BSET 0x107E #0x01**, send 21 bytes of 0x37AC via 0x9102, then clear.
+- The CS lines live in port **0x107E** and are driven with **BSET/BCLR** to preserve the other
+  device-select bits (LED, etc.) — a plain `staa` of 0x41/0x01/0x00 (what `lcd_cmd.S`/`lcd_arb.S`
+  did) is wrong and is the leading suspect for why stub pushes don't land.
+
+**.S status: NOT working yet.** `lcd_arb.S`/`lcd_fftest.S` (upload 0x17 + launch 0x26, replicate
+SPCR/CS/0x9102) run (SBEP goes dead = stub active) but the glass stays frozen at the firmware's last
+render — the raw full-byte CS writes and/or a missing acquire/device-select step. Next: decompile
+0x8F1F dispatcher + the display task's paint routine in **IDA** and either (a) fix CS to BSET/BCLR
+and match SPCR exactly, or (b) have the stub call the firmware's own complete refresh routine with
+0x37AC pre-filled. Recovery from a hung stub = **PSU power-cycle** (`~/captures/psu_reboot.py`), not
+0x10. See the "Lab rig" section in CLAUDE.md.
