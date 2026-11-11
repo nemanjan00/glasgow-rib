@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Serial SBEP bridge backed by the GM600 firmware emulator ("serial dumb emu").
+"""Serial SBEP bridge over the GM600 firmware emulator ("serial dumb emu").
 
-The emulated radio (emu6811 running motofix.BIN) is the radio: it boots the real firmware
-and, for an identity query (0x23), receives + validates the frame and BUILDS the authoritative
-reply in its own RAM. A thin bridge then does the final byte-out that the firmware's RTOS TX
-task would (that task doesn't get dispatched in the emulator — a cooperative-scheduler timing
-race), so real SBEP tools / Motorola DPS / NPS can talk to the emulated radio over a socket.
+Scope, honestly: only the identity query (0x23) actually runs through the firmware — the emulated
+radio (emu6811 running motofix.BIN) boots the real firmware, receives + validates the frame and
+BUILDS the authoritative reply in its own RAM, and a thin bridge does the final byte-out the
+firmware's RTOS TX task would (that task doesn't get dispatched in the emulator — a cooperative-
+scheduler timing race). The other opcodes (0x11/0x17/0x13/0x10) are served by this bridge directly
+over the VM's EEPROM image (mock_radio logic), NOT through the firmware's own read/write handlers.
+That's enough for real SBEP tools / Motorola DPS / NPS to talk to it over a socket and for a
+dump/write round-trip, but it is not a full firmware-in-the-loop radio.
 
 Per SBEP opcode:
   0x23  feed to the VM, run until it builds the 0x8B reply in RAM, read it back out (the VM's
@@ -81,13 +84,21 @@ class VMRadio:
                 if length > 0x40:
                     return bytes([REFUSED])
                 off = addr - self.base
+                # Only the EEPROM codeplug is modelled; a read outside it returns zeros (a real
+                # radio reads RAM/flash here too, but this bridge doesn't serve those).
                 block = (bytes(self.m.eeprom[off:off + length])
-                         if 0 <= off < len(self.m.eeprom) else bytes(length))
+                         if 0 <= off and off + length <= len(self.m.eeprom) else bytes(length))
                 return bytes([ACK]) + encode(0x80, data[1:4] + block)
             if op == 0x17:
                 addr = int.from_bytes(data[:3], "big") & 0xFFFF
                 off = addr - self.base
-                self.m.eeprom[off:off + len(data) - 3] = data[3:]
+                payload = data[3:]
+                # Range-check: Python slice-assign silently grows the bytearray for off >= len and
+                # (via negative off) writes from the end for addr < base. Either corrupts the image,
+                # so refuse anything not wholly inside the 640-byte EEPROM.
+                if off < 0 or off + len(payload) > len(self.m.eeprom):
+                    return bytes([ACK]) + encode(0x85, data[:3])   # write-fail result, like a radio
+                self.m.eeprom[off:off + len(payload)] = payload
                 return bytes([ACK]) + encode(0x84, data[:3])
             return bytes([NAK])
 
@@ -96,7 +107,8 @@ def serve(radio, port):
     srv = socket.create_server(("127.0.0.1", port))
     real = srv.getsockname()[1]
     print(f"GM600 VM bridge listening on 127.0.0.1:{real} "
-          f"(firmware-backed; point a tool's SBEP_ADDR / DPS COM here)", flush=True)
+          f"(0x23 via firmware, reads/writes over the VM EEPROM; "
+          f"point a tool's SBEP_ADDR / DPS COM here)", flush=True)
     while True:
         conn, _ = srv.accept()
         threading.Thread(target=_handle, args=(radio, conn), daemon=True).start()
