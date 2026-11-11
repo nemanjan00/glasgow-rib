@@ -247,6 +247,26 @@ replies `06` ok / `15` bad checksum / `54` SPI timeout (`lcd_text.command` raise
 Loads at `0x3E40` (not `0x2000`, which is live firmware RAM). Maps, photos, and the framing
 experiment (start bit + 33 data bits): `../images/lcd_segments/`.
 
+## `gm600_display.py` and `gm600_vm_bridge.py --ui` — see the emulated control head
+
+![VM UI](../images/vm_ui.png)
+
+`gm600_display.py` models the display controller (start bit + 33 data bits, partial frames carry
+over), taps an `emu6811.Mem`'s SPI/chip-select writes (display frames on select `0x61`, the LED byte
+latched by the `0x21` strobe), and draws the result with the banner's front panel
+(`../../assets/make_banner.py`, `panel_svg()`): digits, 9 icons, the 3 LEDs and the backlight.
+
+```
+python3 gm600_vm_bridge.py motofix.BIN codeplug-640.bin 2399 --ui     # then open http://127.0.0.1:8600/
+python3 gm600_display.py --text 53X --icons 0040 --backlight out.svg  # static preview
+```
+
+`--ui[=PORT]` keeps the firmware running between SBEP queries so its display task refreshes; the
+page polls `/display.svg` and `/state.json`. The codeplug must be the 640-byte EEPROM image
+(`0x0D80`–`0x0FFF`). With the bench radio's codeplug the VM cycles numbers (12, 11, 10, 9, 7, 3, 2 …)
+on the right-hand digits with the green LED blinking ([animation](../images/vm_ui.gif)) — it looks
+like a channel hunt (no RF in the VM), unlike the real radio's steady own-unit number.
+
 ## `gm600_keypad_patch.py` — press real keys via a firmware patch
 
 Reading the screen is easy; *pressing* a key is not — the keypad is an analog A/D ladder the

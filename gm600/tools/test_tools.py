@@ -304,6 +304,67 @@ class LcdTextTest(unittest.TestCase):
         self.assertEqual(cs & 0x61, 0)                                # select released
 
 
+class DisplayModelTest(unittest.TestCase):
+    """gm600_display: the start-bit controller model, the SPI tap, and the SVG panel."""
+
+    def test_controller_decodes_text_frames(self):
+        import gm600_display
+        import lcd_text
+        c = gm600_display.Controller()
+        c.feed(bytes(5) + lcd_text.pack(bytes([0x00, 0x40]) + lcd_text.text_to_segs("322")))
+        want = {"b1.6"} | {f"d0.{s}" for s in "abcdg"} | {f"d{n}.{s}" for n in (1, 2) for s in "abdeg"}
+        self.assertEqual(c.segments, want)
+
+    def test_partial_frame_carries_over(self):
+        # images/lcd_segments/framing run1: after AB80 left a partial frame, pattern A showed "t".
+        import gm600_display
+        c = gm600_display.Controller()
+        c.feed(bytes.fromhex("01800003838001c0f000"))        # AB80
+        self.assertEqual(c.segments, {"d0.a", "d0.b", "d0.f", "d1.g", "d2.a", "d2.b"})
+        c.feed(bytes.fromhex("01800003830001c0f000"))        # AB
+        self.assertEqual(c.segments, {"d0.f", "d0.g", "d0.e", "d0.d", "d2.a", "d2.f", "d2.g"})
+        c.feed(bytes.fromhex("01800003830000000000"))        # A
+        self.assertEqual(c.segments, {"d0.f", "d0.g", "d0.e", "d0.d"})
+
+    def test_tap_decodes_the_standalone_stub(self):
+        # lcd_raw.S only touches registers, so it runs in the emulator without a firmware image.
+        import asm6811
+        import emu6811
+        import gm600_display
+        import lcd_text
+        import sbep
+        m = emu6811.Mem()
+        tap = gm600_display.SpiTap(m)
+        c = emu6811.CPU(m)
+        a = asm6811.assemble_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lcd_raw.S"))
+        m.ram[a.org:a.org + len(a.code)] = a.code
+        c.SP, c.PC = 0x3FFF, a.org
+        cmds = b""
+        text = bytes(5) + lcd_text.pack(b"\x00\x00" + lcd_text.text_to_segs("HI"))
+        for sync, body in ((0x5A, b"\x84"), (0xA5, text)):
+            frame = bytes([sync]) + body
+            cmds += frame + bytes([sbep.checksum(frame)])
+        m.feed_rx(cmds)
+        c.run(max_insns=400000)
+        st = tap.state()
+        self.assertEqual(st["leds"], 0x84)
+        self.assertEqual(set(st["segments"]), gm600_display.segments_for_text("HI"))
+        svg = gm600_display.render_svg(st["segments"], st["leds"])
+        self.assertIn("lcdlit", svg)                      # backlight on
+        self.assertIn("GM600", svg)
+
+
+class BannerTest(unittest.TestCase):
+    def test_banner_generator_reproduces_committed_banner(self):
+        import importlib.util
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets")
+        spec = importlib.util.spec_from_file_location("make_banner", os.path.join(root, "make_banner.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with open(os.path.join(root, "banner.svg")) as f:
+            self.assertEqual(mod.panel_svg(), f.read())
+
+
 class EmulatorTest(unittest.TestCase):
     """The 68HC11 core must execute correctly (validated on a known program)."""
 

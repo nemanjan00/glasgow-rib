@@ -20,7 +20,10 @@ Per SBEP opcode:
 Everything is echoed first (single-wire half-duplex), then ACK (0x50), then the reply frame,
 exactly as a real GM600 answers (byte-for-byte compatible with mock_radio.py / a real capture).
 
-usage: gm600_vm_bridge.py <motofix.BIN> <codeplug.bin> [PORT]   (default port 2399)
+--ui[=PORT] also keeps the firmware running in the background and serves a live view of the
+control head (digits, icons, LEDs, backlight) at http://127.0.0.1:8600/ (gm600_display.py).
+
+usage: gm600_vm_bridge.py <motofix.BIN> <codeplug.bin> [PORT] [--ui[=PORT]]   (default port 2399)
 """
 import socket
 import sys
@@ -39,14 +42,24 @@ REPLY_INSNS = 2_500_000          # budget to let the VM build a 0x23 reply
 class VMRadio:
     """The emulated GM600 as an SBEP endpoint."""
 
-    def __init__(self, flash_path, codeplug_path, base=0x0D80):
+    def __init__(self, flash_path, codeplug_path, base=0x0D80, tap=False):
         flash = open(flash_path, "rb").read()
         self.base = base
         self.m = emu6811.Mem(flash, open(codeplug_path, "rb").read())
         self.c = emu6811.CPU(self.m)
+        self.tap = None
+        if tap:                                    # before boot, so the boot screens are seen too
+            import gm600_display
+            self.tap = gm600_display.SpiTap(self.m)
         self.c.reset()
         self.c.run(max_insns=BOOT_INSNS, cop_timeout=150000)   # boot the firmware
         self.lock = threading.Lock()
+
+    def free_run(self, chunk=20_000):
+        """Keep the firmware running between queries (for the UI: its display task refreshes)."""
+        while True:
+            with self.lock:
+                self.c.run(max_insns=chunk, cop_timeout=150000)
 
     def _vm_query_23(self, frame, index):
         """Feed a 0x23 query and read back the reply the firmware builds in RAM."""
@@ -138,8 +151,16 @@ def _handle(radio, conn):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
+    args = [a for a in sys.argv[1:] if not a.startswith("--ui")]
+    ui = [a for a in sys.argv[1:] if a.startswith("--ui")]
+    if len(args) < 2:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr); sys.exit(2)
-    port = int(sys.argv[3]) if len(sys.argv) > 3 else 2399
-    radio = VMRadio(sys.argv[1], sys.argv[2])
+    port = int(args[2]) if len(args) > 2 else 2399
+    radio = VMRadio(args[0], args[1], tap=bool(ui))
+    if ui:
+        import gm600_display
+        ui_port = int(ui[0].split("=", 1)[1]) if "=" in ui[0] else 8600
+        ui_port = gm600_display.serve_ui(radio.tap.state, ui_port)
+        threading.Thread(target=radio.free_run, daemon=True).start()
+        print(f"GM600 VM display: http://127.0.0.1:{ui_port}/", flush=True)
     serve(radio, port)

@@ -54,7 +54,8 @@ the git-ignored **`CLAUDE.local.md`** — read that first). The repo there is gi
   cached at `0x3495`; font bit0 f, 1 a, 2 b, 4 e, 5 g, 6 d, 7 c. **`0x37AC` (entry 8) is icons only** —
   pushing it never changes the number. Find display buffers by RAM-diffing two known states.
   `tools/lcd_raw.S` does the same with its own SPI code (no firmware calls) + backlight; segment
-  photos and wire-bit map in `images/lcd_segments/`.
+  photos and data-bit map in `images/lcd_segments/`. Live view of the emulated head:
+  `gm600_vm_bridge.py … --ui` (http://127.0.0.1:8600/, `gm600_display.py`).
 
 ## Hardware facts (from the schematic; confirmed on a radio unless noted)
 
