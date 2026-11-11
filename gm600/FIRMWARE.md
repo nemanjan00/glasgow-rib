@@ -380,3 +380,65 @@ The host tool is [`tools/gm600_keypad_patch.py`](tools/gm600_keypad_patch.py) (`
 `patch_diff`, and `arm`/`press`/`release`). Applying and reverting the patch on a real radio is an
 AT29C020 in-system **sector** write (256-byte sectors at `0x1000` and `0x1E00`) — the one remaining
 hardware step; the module emits the exact byte diff for a flash writer.
+
+## LCD content: what is and is NOT data-drivable (bench, 5 V applet + webcam, no logic analyzer)
+
+Full investigation of "can we make the display show a chosen value by writing data?" — using the
+cycle-accurate emulator as an oracle (`tools/emu6811.py`, renders 0x37AC identically to the glass)
+and the real radio + webcam as the numeral ground truth. The radio serves SBEP on the applet socket
+(`127.0.0.1:2324`); `0x17` writes the internal EEPROM codeplug (0x0D80–0x0FFF) **and** the RO
+factory region, and `0x10` resets/reboots the CPU (re-render). RW-block checksum at 0x0E12 =
+`(Σ(0x0D94..0x0E11) − 0x55) & 0xFF` (verified: stored 0xEE == computed).
+
+### DRIVABLE — identity/annunciator field 0x0E07–0x0E0D (VERIFIED on cam)
+Writing this 7-byte field + `0x10` reset changes the LCD annunciator segments and the backlight,
+persistently, rendered by the firmware. Bit-level map (emulator-derived, confirmed on hardware):
+- 0x0E07 → buf idx12, bits 4–7 (idx12 low nibble fixed 0x2)
+- 0x0E0B → buf idx16 = `src & 0x7B`
+- 0x0E0C → buf idx17 = `0x10 | (src & 0x0C)`
+- 0x0E0D → buf idx18 = `0x02 | (src & 0x1C)`
+- 0x0E08 → buf idx13 (lookup-style, not a clean mask)
+- 0x0E09/0x0E0A → no display effect
+all-FF or all-00 here turns the **backlight on** and lights/clears an annunciator icon; the main
+3-digit number is UNAFFECTED. So this field = status icons + backlight, NOT the main number. (Earlier
+`DIGIT_BYTES=(3,5,6,12,13,14,16,17,18,20)` in gm600_remote was an icon-heavy guess; the real main
+digits are buffer idx **[0,1,2,4,6,8,14]**.)
+
+### NOT cleanly drivable — the main 3-digit "322" (trunking idle)
+- **NOT** `0x0F0B` (documented MPT1327_OWN_IDENT = 0x0142 = 322): changing it, checksum-fixed,
+  fresh-boot, changes **zero** of the 21 buffer bytes. The displayed 322 is not this field.
+- Provenance sweep (every codeplug byte flipped, checksum-fixed, fresh-boot, full-buffer diff): the
+  main-digit bytes [0,1,2,4,6,8,14] are moved only by `0x0D92/0x0DDA/0x0DF7/0x0EAF/0x0EB1`
+  (freq-plan) and `0x0DD5/0x0DD6`. All of these drive the display to one of two states, never a clean
+  alternate number: a **fallback** `00 31 04 80 d1 e4 00` (also what a wiped RW region yields) or
+  **blank** `00…00` (0x0DD5/6). Clean small changes to the control-channel frequency bytes leave the
+  display on 322. So 322 is firmware-determined (trunking idle, no live MPT1327 network on the bench)
+  and derived from a valid multi-byte structure, not a single pokeable field.
+- Renderer: `0x61B1/0x61B7/0x617B` (bank 0) draw the main digits **procedurally via bset/bclr**
+  (opcodes 0x1C/0x1D) — there is no digit→segment font table to read, and no single RAM "number"
+  byte (live-patch sweeps of the renderer's scratch struct 0x2FB4–0x2FC4 and input region
+  0x374x–0x377x changed nothing; the struct is a transient comms-decode buffer).
+
+### Injection paths and why they don't give an arbitrary number
+- **RAM-stub LCD takeover** (`lcd_cmd.S`/`lcd_replay.S`, upload via 0x17 + launch via 0x26): the stub
+  runs and pushes 0x37AC via the SPI dispatcher (entry 8, `jsr 0x8F1F`), but its controller
+  addressing differs from the firmware's steady-state refresh, so a pushed buffer does not map to the
+  expected glyph (322-buffer shows as 888; arbitrary buffers stay latched at 322/888). Driving a
+  chosen numeral would need the per-COM multiplex font, which cannot be learned on the bench because
+  the firmware only ever renders one number (322) in trunking and conventional-mode numbers need the
+  keypad.
+- **Race** (tight-loop `0x17` to RAM 0x37AC while firmware refreshes): RAM writes to 0x37AC do **not**
+  return a write-ACK (only EEPROM-range 0x17 writes ACK with 0x84), so the race is unreliable here.
+- **Recovery:** `0x10` reset reliably reboots the radio to normal trunking (322) — including out of a
+  hung 0x26 stub, as long as the SBEP ISR is still alive. The applet `-V 5` is the logic reference,
+  not the radio's main supply, so restarting the applet does not power-cycle the radio.
+
+### Remaining routes to a specific displayed NUMBER (each needs a decision/resources)
+1. **Keypad flash-patch** (`tools/gm600_keypad_patch.py` + fixed `tools/flashtool.py`): override the
+   A/D keypad source in flash → inject Button-A long-hold (→ conventional mode = data-driven channel
+   number) and channel up/down. Risk: AT29C020 boot-block sector write (0x1000/0x1E00) is untested on
+   hardware and the boot block may be program-locked → re-brick risk.
+2. **DPS reprogram** of the identity/network (the vendor tool in the QEMU VM) — the legitimate "write
+   changed identity"; needs GUI interaction (VNC).
+3. **Band-plan/entry-checksum RE**: find the exact checksum for the freq-plan entry so a valid
+   alternate control-channel frequency renders a different channel number instead of the fallback.
