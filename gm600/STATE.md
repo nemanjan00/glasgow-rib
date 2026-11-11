@@ -7,14 +7,22 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 ## Now
 - **Current task:** GOAL = make a RAM stub (`.S`) write ARBITRARY content to the glass (prove with a
   specific number like 686, NOT 888 — all-segments aliases the boot self-test). Radio left at **322**.
-- **PROVEN (2026-11-11):** the `.S` push works. `tools/lab/lcd_disp2.S` (sei-stub, fill 0x37AC=FF,
-  push) lit all segments ("888") with **SBEP confirmed dead = firmware halted**, so it was a real
-  push, not the self-test. `lcd_disp3.S` pushed the "322" buffer → showed 322. **The missing pieces
-  that made the push work: the control-head enable `0x107C` (=0x14 before, 0x10 after) + `0x1024`
-  (=0x00/0x40), plus busy-wait delays replacing the firmware's OC4-timed delays. CS on 0x107E via RMW
-  (oraa/anda).** The full push: enable 0x1024=0/0x107C=0x14 → dly → cmd (SPCR=0x57, CS|=0x41, send
-  `02 50 3F` via 0x9102, CS&=~0x61) → dly → data (SPCR=0x50, CS|=0x01, send 21 bytes, CS&=~0x01) →
-  0x107C=0x10/0x1024=0x40 → dly.
+- **CORRECTION (2026-11-11, definitive): the `.S` RAM-stub LCD push does NOT work.** Every "888" I
+  got — including `lcd_disp2.S` — was the **boot self-test** (all segments + all icons + arrows), not
+  a stub push. Re-testing `lcd_disp2` with fill=FF AND fill=00 both crashed on all 4 attempts →
+  COP-reset → boot → the cam caught the self-test. The "SBEP-dead = stub running" verify was unreliable
+  (the brief boot window also looks dead). **Root cause: the push stubs crash on launch** — likely from
+  calling the firmware SPI/dispatcher routines (0x9102 / 0x8F1F) from a `sei` RAM-stub, and/or the 0x17
+  upload racing live firmware RAM/stack at 0x2000. My own-SPI `mysend` stub crashed/failed too. **The
+  reliable way to change the displayed number is the codeplug (Own Unit No., `tools/setunit.py` / DPS)
+  — THAT is cam-proven (322→456→712).** The push protocol IS decompiled (below) but can't be invoked
+  reliably from a stub yet.
+- **Decompiled push (reference, IDA):** dispatcher entry 8 (CPU 0x8F7F) = clean REPLACE write of the
+  21-byte 0x37AC buffer: `ldab #21; ldx #$37AC; ldy #$1000; SPCR(0x1028)=0x50; BSET 0x107E #1; jsr
+  0x9102; CS cleanup`. Entry 3 (CPU 0x8FDE) = command: `BSET 0x107E #0x41; SPCR=A; jsr 0x9102` sending
+  the command bytes from the device struct. The page-4 caller (bank 0x10, CPU ~0x5384) brackets these
+  with the control-head enable 0x107C(=0x14/0x10)+0x1024 and OC4-interrupt-timed delays. Calling entry
+  8 ALONE (no command) does NOT update the digits (command sets the controller write address).
 - **BLOCKERS to clean arbitrary content (next step):**
   1. The DIGIT segment buffer is **not 0x37AC** on the real radio (0x37AC reads identical for 686 and
      322 — it's icons/fixed; the emulator wrongly models it as the digits). The number source pipeline
