@@ -14,7 +14,7 @@ the recovery reflash).
 ## Symptom → root cause (verified in the emulator)
 
 - **12 V off (normal expanded mode):** all LCD segments on + beep, repeating = **bootloop**.
-- **12 V on (MODA low → single-chip mode):** one beep, then silence.
+- **12 V on (bootstrap mode — see Route 2):** one beep, then silence.
 
 Root-cause chain, reproduced byte-for-byte in `tools/emu6811.py`:
 
@@ -25,12 +25,12 @@ Root-cause chain, reproduced byte-for-byte in `tools/emu6811.py`:
    it's the shared default handler for most vectors).
 4. The spin never kicks the COP → **COP watchdog resets the CPU** → reboot → same crash = the loop.
 
-The 12 V-on single beep is **not** the watchdog being off: COP is governed by `NOCOP` in `CONFIG`,
-not the mode pins, and only the *special* modes (bootstrap/test) set `DISR` to block resets.
-Single-chip is a *normal* mode, so its COP runs normally. Since the 12 V-off loop *is* the COP
-resetting the spin, **COP is enabled (NOCOP=0)** — which means the single-chip "beep then silence"
-must be **CPU-internal code running** (external flash is off-bus, yet a beep needs ASFIC setup over
-SPI). That is a possible **factory loader**, to be confirmed by a BUS+ sniff (see below).
+The 12 V-on state is **bootstrap mode**, not single-chip: 12 V on pin 12 pulls **both MODA and MODB**
+low via D0101/Q0102 (`MODB:MODA = 0:0`), confirmed by schematic trace — see Route 2. The HC11's
+internal bootstrap ROM runs (DISR is set in special modes, so no watchdog loop), sits waiting for an
+SCI download, and the single beep is just the audio side powering up; the external firmware does not
+run. (COP is otherwise enabled — `CONFIG = 0xD9`, `NOCOP=0` — which is why the 12 V-*off* bootloop is
+the COP resetting the crashed spin.)
 
 Emulator proof (`tools/test_tools.py::BootFaultInjectionTest`, needs `GM600_FW=motofix.BIN`):
 golden boots to the main loop (`PC=0xCE98`) and never reaches `0x8EE4`; the reconstructed broken
@@ -57,9 +57,11 @@ the guaranteed off-board reflash.
 ## Recovery routes
 
 ### 1. In-circuit SBEP — NOT possible in this state
-The firmware crashes in the corrupted page-3 code *before* it reaches the SBEP-servicing main loop
-(SCI is polled, `SCCR2` RIE=0), so the radio never answers SBEP while bricked. The flashtool stub
-upload (`0x17`+`0x26`) needs a live firmware, which we don't have. Confirmed in the VM.
+The firmware crashes in the corrupted page-3 code *before* it reaches a running state that services
+SBEP, so the radio never answers SBEP while bricked. (SBEP is handled off the SCI receive interrupt —
+the firmware clocks its transmit from the RX ISR — not by polling; `SCCR2` is `0x1073`, set during
+boot, after the crash point.) The flashtool stub upload (`0x17`+`0x26`) needs live firmware, which we
+don't have. Confirmed in the VM.
 
 ### 2. HC11 bootstrap mode (no desolder) — ATTEMPTED, inconclusive
 **12 V on accessory pin 12 already selects bootstrap mode**: pin 12 drives *both* MODA (pin 77) and
@@ -127,7 +129,7 @@ The reset handler at `0xD45A` copies this table (`LDY #$D437`, write-loop, `0xFF
 | `0x1026` | `0x01` | PACTL | port A control |
 | `0x1056` | `0x42` | **MMSIZ** | memory-window size (with MMWBR defines the bank window) |
 | `0x1057` | `0x06` | **MMWBR** | memory-window base |
-| `0x102D` | `0x1E` | SCCR2 | SCI TE+RE+ILIE, **RIE=0** (SBEP is polled, not RX-interrupt) |
+| `0x102D` | `0x1E` | **PGAR** | Port G assignment (the K4 SCI is at `0x1070–0x1077`, *not* `0x102D`) |
 | `0x105B` | `0x05` | **CSCTL** | configures **CSPROG** — the flash chip-select (the one that matters) |
 | `0x105D` | `0x4A` | GPCS1C | CSGP1 control (not the flash) |
 | `0x105F` | `0x04` | GPCS2C | CSGP2 control (external SRAM chip-select) |
@@ -139,10 +141,17 @@ The reset handler at `0xD45A` copies this table (`LDY #$D437`, write-loop, `0xFF
 | `0x107C` | `0x10` | — | K4 extended reg |
 | `0x107D` | `0x14` | — | K4 extended reg |
 | `0x1028` | `0x50` | SPCR | SPI enable (ASFIC link) |
-| `0x1072` | `0x40` | — | |
+| `0x1072` | `0x40` | **SCCR1** | SCI: `WOMS=1` = wired-OR (open-drain) — matches the single-wire BUS+ |
 | `0x1030` | `0x34` | ADCTL | |
 
 Set *before* the table by the reset code: `OPTION(0x1039)=0xBB`, `0x1035=0x40`, and `INIT=0x01`
 (moves registers to `0x1000`) via the early direct `STAA $3D`. `MM1CR(0x1058)` (the bank) stays 0 and
-is driven dynamically during boot. `HPRIO` is **never** touched by the firmware (it is already
+is driven dynamically during boot. `SCCR2(0x1073)` (SCI interrupt enables, incl. RIE) is **not** in
+this table — it is set later during boot. `HPRIO` is **never** touched by the firmware (it is already
 expanded) — so entering expanded mode from bootstrap is the one step the writer must add.
+
+> Bootstrap over BUS+ was **set aside** (recovery was done on the T48). A likely reason the boot-ROM
+> echo never reached BUS+: the firmware drives the SCI in **wired-OR mode (`SCCR1.WOMS`)** and enables
+> the line via port pins (`DDRD=0x3A`, `PORTD=0x18`) that the bootstrap ROM never configures — so it
+> could receive/load fine while its echo never drives the bus. If ever revisited, confirm with a
+> downloaded signature program that toggles a scopeable pin (not the SCI), and measure TP0100.

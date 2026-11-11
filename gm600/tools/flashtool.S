@@ -178,10 +178,8 @@ wrxlp:  stx     CNT16
         ldx     CNT16
         dex
         bne     wrxlp
-        ldab    PAGE            ; WHITELIST page: 0 (patch), 3 (recover mis-banked 0xC000 write),
-        cmpb    #0              ; or 12/13 (erased test pages). Page checked BEFORE the <<2 encode.
-        beq     wpg
-        cmpb    #3
+        ldab    PAGE            ; WHITELIST page: 0 (patch) or 12/13 (erased test pages). Checked
+        cmpb    #0              ; BEFORE the <<2 encode. Page 3 is LIVE boot code — never writable.
         beq     wpg
         cmpb    #12
         beq     wpg

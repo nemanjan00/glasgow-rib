@@ -519,12 +519,11 @@ class FlashStubIntegrationTest(unittest.TestCase):
         self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), pat)
         self.assertEqual(bytes(self.m.flash[0x34000:0x34100]), pat)          # landed at the RIGHT bank
         self.assertEqual(bytes(self.m.flash[0xC000:0xC100]), c000_before)    # page 3 NOT touched
-        # recovery path: page 3 (0xC000) is writable and also lands at its correct device address
-        rec = bytes((i ^ 0x3C) & 0xFF for i in range(256))
+        # page 3 (0xC000) is LIVE boot code and must be REFUSED (0x85), leaving the flash untouched
+        c000 = bytes(self.m.flash[0xC000:0xC100])
         p, wh, wl = 3, 0x40, 0x00                                    # device 0xC000
-        self.assertEqual(self._cmd([ord("W"), p, wh, wl] + list(rec), 1), b"\x84")
-        self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), rec)
-        self.assertEqual(bytes(self.m.flash[0xC000:0xC100]), rec)
+        self.assertEqual(self._cmd([ord("W"), p, wh, wl] + [0xAA] * 256, 1), b"\x85")
+        self.assertEqual(bytes(self.m.flash[0xC000:0xC100]), c000)
 
     def test_probe_and_apply_and_whitelist(self):
         import gm600_keypad_patch as kp
