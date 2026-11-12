@@ -421,6 +421,30 @@ Change it two ways, both cam-verified (322→456→712→322):
   `0x10` reset. (A DPS 322→456 write diffs to exactly these two bytes, which is what cracked it.)
 - **Vendor DPS:** File→Read Radio, Edit→Trunking→MPT Personality Data→"Own Unit No.", File→Write
   Radio; driven headless with `tools/mouse_ctl.py` + `tools/typestr.py`.
+### SPI devices seen in the emulator (boot + idle, 2026-11-12) [VM]
+
+Every SPDR write during an 8 M-instruction boot of `motofix.BIN` with the bench codeplug goes through
+primitive `0x9102`, with the device chosen by PORTG (`0x107E`) bits 0/5/6 on top of the base `0x98`.
+The dispatcher `0x8F1F` word table at `0x8F44`:
+
+| Entry | Routine | Sends | SPCR | PORTG |
+|--|--|--|--|--|
+| 2 | `0x8FB7` | 13 bytes from **`0x01F1`** | `0x50` | `0xB8` (bit 5) |
+| 3 | `0x8FD6` | 3 bytes from `0x01EE` (LCD command) | `0x57` | `0xD9` (bits 0, 6) |
+| 4 | `0x8FF0` | 1 byte from **`0x01FE`** (2 at boot) | `0x51` | `0xF8` (bits 5, 6) |
+| 5 | `0x9018` | 7-seg digit frame | `0x52` | `0xF9` (bits 0, 5, 6) |
+| 8 | `0x8F7F` | 21 bytes from `0x37AC` (icons) | `0x50` | `0x99` (bit 0) |
+| 10 | `0x8F64` | 1 byte `0x34AE` (LEDs), then strobe | `0x51` | `0x98` (none), strobe `0x21` |
+| 11 | `0x90F6` | entry 8 then entry 2 | | |
+
+- **Entry 2's 13-byte device is most likely the synthesizer.** In the trunked control-channel
+  scan, byte `0x01FB` = `0xAE + 2·channel` for every control channel visited [VM].
+- **No ASFIC transfer appears at all.** All other SPI traffic is display/LED. So the ASFIC is either
+  bit-banged or programmed on a path this boot doesn't reach; the 2-byte entry-4 device
+  (`0x01FE`/`0x01FF`, many read-modify-write sites on page 4) is the open candidate [INF].
+- Mapping PORTG bit patterns to the 74HC138 outputs (HARDWARE.md) is not consistent yet, so the
+  icon controller's select path is unexplained.
+
 ### 7-seg digits — entry 5, and a working RAM stub (cam-proven)
 SPI-dispatcher **entry 5 = `0x9018`**: takes a pointer (stack arg, read at `$C,y`) to a 5-byte struct
 `[b0 b1 d0 d1 d2]`, bit-packs it into a 5-byte frame, sets SPCR=`0x52`, `BSET 0x107E #0x61`, sends 5

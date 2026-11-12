@@ -57,6 +57,40 @@ Microphone connector (8-pin): 3=Mic Hook, 4=GND, 5=Mic Audio, 6=Mic PTT, 7=**BUS
       (`CONFIG = 0xD9` → `NOSEC=1`). Earlier notes calling this "single-chip / not bootstrap" were
       wrong. See [RECOVERY.md](RECOVERY.md).
 
+## Firmware-driven outputs on the accessory connector (2026-11-12)
+
+Both digital outputs come from the **ASFIC's general-control bits**, not from CPU port pins
+(schematic 8402626Y08, I/O sheet 2 of 2):
+
+| Acc. pin | Net | Driver | Source |
+|--|--|--|--|
+| 4 (GP2) | `EXTERNAL_ALARM` | Q0411, open collector, R0412 4.7 kΩ pull-up to `FLT_A+` (B+) | ASFIC **GCB1** |
+| 12 (GP5) | `GPI/O` (also the VPP / bootstrap net) | Q0432 pull-down via R0435 | `GPO1` = ASFIC **GCB3** |
+
+- **Pin 4 idles at 11.98 V** with the radio on (bench PSU 12 V; networked DMM) [HW], so the pull-up
+  is fitted and the output is off at idle.
+- Pin 12 is read back by the CPU through Q0431 (`GPI1`).
+- Driving either pin from our own code means reprogramming the ASFIC. How the firmware does that
+  is not found yet (see FIRMWARE.md, "SPI devices").
+- The goal this is for: pin 4 as a **PL-decoded (tone-squelch-open) output** for a repeater
+  controller, following the RX flag `0x347E`. It's open collector to ground, which suits a COR
+  input; the controller must tolerate the B+ pull-up voltage.
+
+**SPI chip selects** come from a 74HC138 decoder, U0105:
+
+| Output | Goes to |
+|--|--|
+| Y1, Y2 | serial-EEPROM footprints U0104/U0107, not fitted |
+| Y3 | `DAC_CE` |
+| Y4 | `FRACN_CE` (synthesizer) |
+| Y5 | `OPTION_BD_CE` |
+| Y6 | `LED_CE` |
+| Y7 | `LCD_CE` (inverted through Q0141) |
+
+The ASFIC (U0201) is **not** on the decoder: its programming pins are CLK (F1), DATA (E3) and
+active-low PGMENAB (F2), and PGMENAB's source isn't traced yet. PORTG bits 1–4 are flash address
+lines XA14–XA17, so only PG0, PG5 and PG6 are free for selects.
+
 ## Repeater / squelch signals (from the CNTL GM600 schematic, sheet 8402626Y08)
 
 Controller board = **MCU U0101** (a 68HC11 K-series part) + **ASFIC U0201**. The GM600 manual lists
