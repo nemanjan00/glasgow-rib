@@ -81,6 +81,7 @@ if __name__ == "__main__":
 
 CHANNELS, CHANNEL_LEN, N_CHANNELS = 0x0F67, 7, 4      # conventional channel table (CODEPLUG.md)
 OWN_UNIT = 0x0F0B                                     # MPT1327 Own Unit No. (BE16) = idle display
+BLOCK_NAMES = ["Header A", "Header B", "Radio", "Network", "Personality"]
 
 
 def freq_mhz(word):
@@ -117,7 +118,23 @@ def summary(cp, base=RADIO_BASE):
                       "tx_pl": tones.get(r[4], f"#{r[4]}"), "rx_pl": tones.get(r[5], f"#{r[5]}"),
                       "options": f"0x{r[6]:02X}"})
     bad = verify_checksums(bytes(cp), base)
+    blks = []
+    for (ds, de, ca), name in zip(blocks(base), BLOCK_NAMES):
+        computed, stored = block_checksum(cp, ds, de, base), cp[at(ca)]
+        blks.append({"name": name, "start": ds, "end": de, "checksum_addr": ca,
+                     "stored": stored, "computed": computed, "ok": stored == computed})
+    regions = [{"name": b["name"], "start": b["start"], "end": b["end"], "kind": f"blk{i}"}
+               for i, b in enumerate(blks)]
+    regions += [{"name": f"{b['name']} checksum", "start": b["checksum_addr"],
+                 "end": b["checksum_addr"] + 1, "kind": "cks"} for b in blks]
+    regions += [{"name": "Own Unit No. (shown on the display)", "start": OWN_UNIT, "end": OWN_UNIT + 2,
+                 "kind": "unit"},
+                {"name": "Conventional channel table (4 x 7 bytes)", "start": CHANNELS,
+                 "end": CHANNELS + N_CHANNELS * CHANNEL_LEN, "kind": "chan"},
+                {"name": "Factory field (in no checksum block)", "start": CHECKSUM_ADDRS[-1] + 1,
+                 "end": base + len(cp), "kind": "factory"}]
     return {"own_unit": int.from_bytes(cp[at(OWN_UNIT):at(OWN_UNIT) + 2], "big"),
             "channels": chans,
             "checksums": "all valid" if not bad else f"BAD: {bad}",
+            "blocks": blks, "regions": regions, "base": base, "bytes": list(cp),
             "size": len(cp)}

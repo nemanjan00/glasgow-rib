@@ -301,7 +301,9 @@ python3 gm600_live.py --host 0.0.0.0       # or listen on the LAN
 ```
 
 Same page as `gm600_vm_bridge.py --ui` (plus **Download / Preview codeplug** and **Mode:
-trunked / conventional** buttons), but the radio: display (icons + digits) from the struct the
+trunked / conventional** buttons), but the radio. The preview ([screenshot](../images/codeplug_preview.png),
+or open `/#codeplug` directly) shows the Own Unit No., the conventional channels, the five checksum
+blocks (stored vs computed) and a colour-coded hex dump with per-byte tooltips: display (icons + digits) from the struct the
 firmware caches at `0x3495`, LEDs/backlight from `0x34AE`, RX state (`0x347E`/`0x347F`) on the status
 line, ~3 reads/s. Click = tap, mouse-hold = hold (a 7 s hold of A switches trunked ↔ conventional; the
 radio re-runs its self-test, which the server rides out). Single SBEP client: stop it before running
