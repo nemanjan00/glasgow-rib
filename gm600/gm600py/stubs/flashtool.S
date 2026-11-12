@@ -16,7 +16,7 @@
 ;                      Whitelist: pages 0, 12, 13 (window 0x40-0x7F), and exactly two fixed-region
 ;                      sectors for pl_patch: page 14 window 0x4F00 (dev 0x38F00) and page 15 window
 ;                      0x5E00 (dev 0x3DE00). Anything else -> 0x85, nothing programmed.
-;   After a 'W' or 'E' command byte every further byte must arrive within ~1 s, else the command is
+;   After a 'W' or 'E' command byte every further byte must arrive within ~0.7 s, else the command is
 ;   dropped (nothing programmed) and the stub returns to its loop — so a host that reconnects to a
 ;   still-running stub (flashtool.py --attach) can't have its bytes taken as the tail of a cut-off W.
 ;   'E' (0x45) ECHO  : host sends 256 bytes; the stub stores them in BUF exactly as 'W' does and sends
@@ -103,7 +103,10 @@ rxb:    jsr     cop             ; wait for a received byte -> B (host->radio, no
         ldab    SCDR
         rts
 
-rxt:    ldx     #0              ; like rxb, but give up after ~65536 polls (~1 s): C=1 on timeout.
+rxt:    ldx     #0              ; like rxb, but give up after 65536 polls: C=1 on timeout. ~38 E-cycles per
+;                                 poll -> ~2.5 M cycles = ~0.7 s at E = 3.6864 MHz (NOT 1 s: keep host gaps
+;                                 between chunks well under that; a dropped W just shows up as a failed
+;                                 read-back and gets retried).
 rxtl:   jsr     cop             ; Used for everything after a 'W'/'E' command byte, so a command
         ldaa    SCSR            ; cut off by a dropped link can't later swallow a reconnecting host's
         anda    #$20            ; bytes as sector data (and program garbage). Clobbers X.

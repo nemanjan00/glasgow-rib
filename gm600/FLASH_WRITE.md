@@ -174,7 +174,8 @@ Write:
    halted, so a plain re-run can't upload anything). Continue with
    `flashtool.py --attach patch pl …` (re-run) or `flashtool.py --attach revert pl …` (undo). `--attach`
    skips the upload and starts with a no-flash echo; the stub drops any command cut off mid-transfer
-   after ~1 s, so a reconnect can't be taken as sector data. If the link is gone for good: T48.
+   after ~0.7 s (65536 polls × ~38 E-cycles at 3.6864 MHz), so a reconnect can't be taken as sector data.
+   A host pause longer than that between chunks just drops the W → read-back fails → retry. If the link is gone for good: T48.
 
 After the reboot, in this order:
 6. **Look at the display first**: the normal idle number, **not `- 1`**. If it shows `- 1`: stop, don't

@@ -196,7 +196,7 @@ def _apply_pl(radio, revert, golden):
             except sbep.SBEPError as e:
                 back = None
                 print(f"  link error: {e}")
-                time.sleep(1.5)                       # > the stub's ~1 s receive timeout: it drops
+                time.sleep(1.5)                       # > the stub's ~0.7 s receive timeout: it drops
                 radio.drain()                         # a cut-off command and is back in its loop
             if back == want:
                 break
@@ -276,7 +276,7 @@ def main(argv):
                 cpu = 0x8000 + (base - 0x38000)
                 fixed[base] = b"".join(radio.read_block(cpu + o, 64) for o in range(0, SECTOR, 64))
         if attach:
-            time.sleep(1.5)                           # let a cut-off command time out in the stub
+            time.sleep(1.5)                           # let a cut-off command time out in the stub (~0.7 s)
             radio.drain()
             sent, got = echo_test(radio)              # liveness, no flash access
             if got != sent:
