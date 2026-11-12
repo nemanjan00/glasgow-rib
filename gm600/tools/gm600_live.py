@@ -36,7 +36,7 @@ EVT, STATE = 0x3F00, 0x3F01
 
 
 class LiveRadio:
-    def __init__(self, addr=None, poll=0.3):
+    def __init__(self, addr=None, poll=0.15):
         self.r = sbep.Radio(addr)
         self.lock = threading.Lock()
         self.poll = poll
@@ -56,20 +56,27 @@ class LiveRadio:
         if st != sbep.ACK:
             raise sbep.SBEPError(f"write @0x{addr:04X}: status {st:02X}")
 
-    def _post(self, event, pressed):
+    def _post(self, event, pressed, verify=True):
         self._write(EVT, [event, 1 if pressed else 0])
-        try:
-            sbep.launch_stub(self.r, self.org, self.code)   # re-verifies the stub, then 0x26
-        except sbep.SBEPError as e:
-            if "changed before launch" not in str(e):
-                raise
-            # the radio reset (power cycle, or a trunked/conventional mode change) and its boot RAM
-            # test wiped the stub: put it back and try once more
-            self._upload()
-            self._write(EVT, [event, 1 if pressed else 0])
-            sbep.launch_stub(self.r, self.org, self.code)
-        time.sleep(0.25)                                # stub returns into the firmware
+        if verify:
+            try:
+                frame = sbep.launch_stub(self.r, self.org, self.code)   # re-verify, then 0x26
+            except sbep.SBEPError as e:
+                if "changed before launch" not in str(e):
+                    raise
+                # the radio reset (power cycle, or a trunked/conventional mode change) and its boot
+                # RAM test wiped the stub: put it back and try once more
+                self._upload()
+                self._write(EVT, [event, 1 if pressed else 0])
+                frame = sbep.launch_stub(self.r, self.org, self.code)
+        else:                                           # stub verified moments ago (same tap)
+            frame = sbep.encode(0x26, self.org.to_bytes(2, "big"))
+            self.r.drain()
+            self.r.sock.sendall(frame)
+        # the radio echoes the frame and ACKs, then runs the stub and returns to the firmware
+        self.r._need(len(frame) + 1, time.monotonic() + 0.5)
         self.r.drain()
+        time.sleep(0.03)
 
     def _keypad(self, paused):
         flags = self.r.read_block(KEYPAD_TCB_FLAGS, 1)[0]
@@ -94,7 +101,7 @@ class LiveRadio:
                 # press + explicit release in one request (~0.5 s apart). Leaving the release to the
                 # keypad task's next scan stepped scroll keys the wrong way at random.
                 self._post(code, True)
-                self._post(code, False)
+                self._post(code, False, verify=False)
             elif action == "down":
                 if self.held is not None:
                     self._post(self.held, False)
@@ -140,7 +147,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--port", type=int, default=8600)
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--poll", type=float, default=0.3, help="seconds between screen reads")
+    ap.add_argument("--poll", type=float, default=0.15, help="seconds between screen reads")
     args = ap.parse_args()
     radio = LiveRadio(poll=args.poll)
     threading.Thread(target=radio.poll_forever, daemon=True).start()
