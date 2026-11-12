@@ -139,7 +139,8 @@ writes [VM], so keep the stub session open until the final state verifies.
 - **Transport:** the host already sends in 32-byte chunks and drains each echo. `flashtool.py echo`
   (stub command `E`) sends 256 bytes into the stub's sector buffer and gets them back, with no flash
   access and no 12 V. It's the hardware proof of the transfer before any write; afterwards the radio
-  needs a PSU power cycle (halting stub).
+  needs a PSU power cycle (halting stub). **Done on the radio 2026-11-12: 256/256 bytes intact [HW]**;
+  the radio rebooted clean afterwards.
 - `flashtool.py patch pl motofix.BIN` (golden image required, SHA-256 checked) writes the cave first,
   then the hook (`revert pl`: reverse). Before each write the live sector must equal the golden
   original or the already-patched version, otherwise it aborts.
