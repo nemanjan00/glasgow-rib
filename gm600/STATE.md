@@ -37,6 +37,9 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
   - a channel once stepped by itself during real PMR traffic [HW observation; RF into the keypad ladders
     is a hypothesis, INF — test by logging AN0–AN2 while keying a transmitter nearby];
   - coax + attenuators for the RF link.
+  - **PL-decoded output on accessory pin 4** (repeater COR): pin 4 = ASFIC GCB1 via Q0411, idles 11.98 V
+    [HW, Rigol DM858 on pin 4/7]. Blocked on finding how the firmware programs the ASFIC (no ASFIC SPI
+    transfer seen in the VM; PGMENAB source untraced) — HARDWARE.md / FIRMWARE.md "SPI devices".
 
 ## Invariants (never violate)
 - **Irreversible steps have a hard gate** (flash write, EEPROM write outside `codeplug.apply`, hot air,
