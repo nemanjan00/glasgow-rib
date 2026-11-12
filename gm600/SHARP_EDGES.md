@@ -88,7 +88,7 @@ TX enable). Then read the symptom:
   children with Ctrl+F4 and start from a screenshot.
 - Typed paths in file dialogs lose characters — navigate the tree; DPS saves as `RADIO` (no extension).
 - Menu accelerators collide (Alt-F opened the frequency plan); some fields only exist under
-  View → Network → Radio Flags ("view only" in DP).
+  View → Network → Radio Flags ("view only" in DP). Full menu inventory: [DPS_GUI_MAP.md](DPS_GUI_MAP.md).
 
 ## Shell, lab host, harness
 
