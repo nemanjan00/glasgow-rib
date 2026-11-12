@@ -8,7 +8,7 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
 unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
 
-- **Radio: ON, conventional, channel `  4`** (last read 2026-11-12 19:50) [HW], live panel running on the
+- **Radio: ON, conventional, channel `  4`** (last read 2026-11-12 19:50) [HW], live panel running (without `--pl-out`) on the
   lab PC as the systemd user unit `gm600live` (`python3 -m gm600py.ui.live` from `~/glasgow-rib/gm600`,
   `http://127.0.0.1:8600/` there; logs `journalctl --user -u gm600live`). It holds the single SBEP
   slot — `systemctl --user stop gm600live` before other SBEP tools. Long-running lab processes must be
@@ -37,10 +37,10 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
   - a channel once stepped by itself during real PMR traffic [HW observation; RF into the keypad ladders
     is a hypothesis, INF — test by logging AN0–AN2 while keying a transmitter nearby];
   - coax + attenuators for the RF link.
-  - **PL-decoded output on accessory pin 4** (repeater COR): pin 4 = ASFIC GCB1 = **byte 8 bit 1 of the
-    `0x37AC` image** — set + `asfic_push.S` pulls pin 4 to 0.61 V [HW]. Byte 8 bit 0 = GCB0 = amp mute (clears
-    when PL squelch opens [HW]). Next: make pin 4 follow `0x347E` (host-polling prototype first, then a
-    firmware-side hook). Image bits 1:2 and 4:1 reset the radio — FIRMWARE.md "SPI devices".
+  - **PL-decoded output on accessory pin 4 — host-polled prototype WORKS [HW]:** `python3 -m gm600py.radio.pl_out`
+    or live panel `--pl-out`; pin 4 0.615 V while PL decoded, 11.99 V otherwise, carrier-without-PL ignored.
+    Pin 4 = ASFIC GCB1 = byte 8 bit 1 of the `0x37AC` image. Next: standalone (firmware-side hook, copy NOT
+    GCB0 → GCB1) — needs a RAM hook point or a flash patch (hard gate). Image bits 1:2 and 4:1 reset the radio.
 
 ## Invariants (never violate)
 - **Irreversible steps have a hard gate** (flash write, EEPROM write outside `codeplug.apply`, hot air,

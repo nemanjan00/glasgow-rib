@@ -466,6 +466,23 @@ Why `0x37AC` is the ASFIC image:
   | 2 | GCB2 | `B+_CONTROL`, the power latch | **never touch** (set at idle; polarity unconfirmed) |
   | 3 | GCB3 | accessory pin 12 `GPO1` | inferred; never set while 12 V is on pin 12 |
 
+- **Pin 4 as a PL-decoded output — working prototype [HW, 2026-11-12].** `gm600py.radio.pl_out` (or the live
+  panel with `--pl-out`) polls the RX flag `0x347E` and, on a mismatch, launches `asfic_push.S` with
+  `GCB1REQ` (`0x3F02`) = wanted state. The stub flips GCB1 in byte 8 with interrupts off and pushes.
+  HackRF on ch 004 with a Rigol DM858 logging pin 4 every 0.3 s:
+
+  | Phase | Pin 4 |
+  |--|--|
+  | idle | 11.99 V |
+  | carrier + 123.0 Hz PL | 0.615 V |
+  | after TX stops | 11.99 V again, 1.27 s later (mostly the radio's own PL-loss time) |
+  | carrier without PL | no change |
+
+  - When the firmware re-mutes on squelch close it updates only its own bit (`0xE4` → `0xE7` with
+    our GCB1 still set), so the host acts only on changes.
+  - Limits: it needs the host connected (SBEP), and latency is one poll plus a push (~0.1–0.3 s on top
+    of the radio's squelch timing).
+  - A standalone version needs a firmware-side hook (copy NOT GCB0 → GCB1 where byte 8 is built).
 - **The image also holds bits that upset the radio [HW].** These were found with `asfic_probe`
   (set + push + restore, one bit at a time):
   - after the byte 1 bit 2 trial, and again after the byte 4 bit 1 trial, the radio reset itself and
