@@ -5,37 +5,27 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 `CLAUDE.local.md`.
 
 ## Now
-- **DONE (2026-11-11): a `.S` RAM stub writes arbitrary text to the glass** — `tools/lcd_text.S` +
-  `tools/lcd_text.py`, cam-proven: pushed "322" over a 686 codeplug with the firmware halted (SBEP
-  dead), then HI / HEL / LO / AbC / PSU / 147 / -9- ([images/lcd_text_stub.png](images/lcd_text_stub.png)).
-  Radio left at **322** (power-cycled, Own Unit No. restored).
-- **Why every earlier attempt failed:** the 3 main digits are **not** in the 21-byte `0x37AC` LCD
-  shadow (that's icons/framing, unchanged between 322 and 686 — RAM-diffed). They live on a
-  **separate 7-seg controller**: SPI-dispatcher **entry 5 (`0x9018`)**, SPCR `0x52`, CS `0x61` on
-  `0x107E`, sends 5 zero bytes + 5 bytes packed from a 5-byte struct `[b0 b1 d0 d1 d2]` (idle
-  b0/b1 = `00 40`, d = one 7-seg byte per digit) and caches the struct at **`0x3495`** (so
-  `0x3497-99` = the digits). Firmware call: lock `ldd #$245; jsr $9FFB`, push struct ptr, push word,
-  `ldd #5; jsr $8F1F`, pull, unlock `$A01A`. The stub skips the lock (pure RTOS semaphore).
-- **DONE: standalone driver, no firmware code** — `tools/lcd_raw.S` (own SPI + select + LED latch; host
-  packs with `lcd_text.pack`, a verified port of `0x9018`). Cam-proven (HI/OUr/SPI/COd/586), backlight
-  on via `--backlight`. Every segment + glyph photographed: `images/lcd_segments/` (README has the
-  struct-bit and data-bit maps). **Controller = start bit + 33 data bits** (partial frames survive
-  chip-select; the 5 leading zero bytes flush them) — settled by the A/B framing test. `lcd_raw.S` now
-  has a checksum, a status reply (06/15/54) and SPI timeouts, and loads at `0x3E40` (0x2000 is the
-  firmware's live buffer pool — a big upload there crashed the radio).
-- **7-seg font (cam-swept):** bit0 f, bit1 a, bit2 b, bit3 unused, bit4 e, bit5 g, bit6 d, bit7 c.
-  Font table in `lcd_text.py`.
-- **Next (optional):** a co-resident (non-halting) variant via the free OC pseudo-vectors, so the
-  radio keeps running while showing text; drive the `0x37AC` icons with the same stub style.
-- **Recover a hung stub with `tools/psu_reboot.py` (PSU), not 0x10.** On the lab host set
-  `PYMP305_PATH=~/pymp305/python` if running the script from outside that directory.
-
-- **DONE (2026-11-12): remote conventional + tone squelch + RX flags.** `tools/keyhold.py` long-holds A
-  over SBEP (keypad task paused via `0x11D8`, event posted through `0x4D8B` by the non-halting
-  `keyevt.S`) → bench radio on conventional `1`. HackRF (`ctcss_tx.py`, VGA 35, +2.5 kHz cal) opens the
-  123.0 Hz tone squelch. **RX flags: `0x347F` = carrier, `0x347E` = PL decoded / RX active** (RAM-diff +
-  live polls). Conventional latch is RAM-only (no EEPROM write). Link is marginal (~1 in 3 tone phases
-  missed: HackRF start-up). Radio powered DOWN at the end of the session (PSU output off).
+- **Radio: POWERED OFF** (MP305 output off, 2026-11-12). Power on with `tools/psu_reboot.py` (or
+  `output_on()`); it boots trunked showing `322`.
+- **Latest (2026-11-12): remote conventional + tone squelch + RX flags — DONE, pushed (`953e4cc`).**
+  - `tools/keyhold.py` = remote key hold over SBEP: pause keypad task (`0x11D8 |= 0x10`), post the
+    event through firmware `0x4D8B` with the non-halting stub `keyevt.S` (launched by `0x26`, returns
+    via `0x4CE6`). Default: long-hold A → conventional channel `1`. RAM only; conventional latch is RAM
+    state (no EEPROM write), so a power-cycle returns to trunked.
+  - **RX flags (RAM, input-state array `0x3460+event`): `0x347F` = carrier, `0x347E` = PL decoded /
+    RX active.** Carrier without/with wrong PL: PORTH `0x107C` bit 3 high + red "busy" LED.
+  - HackRF on the lab PC: `tools/ctcss_tx.py` (446.06875 MHz, PL 123.0, VGA 35, `--cal-hz 2500`) and
+    `tools/squelch_test.py` (logs RX flags/LEDs/display). Link is marginal (~1 in 3 tone phases missed).
+  - To repeat: power on → `keyhold.py` → `squelch_test.py`.
+- **Also this session (2026-11-11/12):** arbitrary text on the glass (`lcd_text.S` via firmware,
+  `lcd_raw.S` standalone; controller = start bit + 33 data bits; segment atlas in
+  `images/lcd_segments/`); emulator boots to the real idle screen (port pins + A/D modelled) with a live
+  web UI (`gm600_vm_bridge.py --ui`, clickable keys/LEDs); keypad decoded (3 A/D ladders, 11 keys).
+- **Next (optional):** confirm the VM-derived key names on the bench (hold each button, read
+  `0x33FC`–`0x33FE`); dump the codeplug before/after a hand long-hold of A to close the RECOVERY.md
+  "3-byte" note; a stronger/cleaner RF link (amp, attenuator, cable) for the squelch test.
+- **Lab host checkout `~/glasgow-rib` is 15 commits behind** (`git pull --ff-only` aborts on untracked
+  `tools/lab/` files the new commits add). This session ran tools from copies in `/tmp/gt`.
 
 ## Invariants (never violate)
 - **12 V on pin 12 only AFTER boot; off before any power-cycle.** 12 V at reset = CPU bootstrap mode.
@@ -47,8 +37,10 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
   live sector first.
 - **Golden flash = `motofix.BIN`**, SHA-256 `db74c7c88911e9df1f7328e09975ae3a2db5d212be3df74bdeee0dd00aa530b9`
   — verify before use.
-- **Display/behaviour claims: verify on HARDWARE.** The emulator has known gaps (does not render the
-  Own Unit No. → sees the same 322 for any value).
+- **Display/behaviour claims: verify on HARDWARE.** The emulator now boots like the radio (port pins +
+  A/D modelled, `VmBootTest`), but RF/synth/ASFIC are still not modelled.
+- **RAM stubs load at `0x3D80`** (`lcd_raw.S` `0x3E40`, `keyevt.S` `0x3D80`), never `0x2000` (live
+  firmware buffer pool); halting stubs self-check (`.cksum16`); launch via `sbep.launch_stub`.
 - Applet `socket` on 127.0.0.1:2324 is **single-client**; kill the socat bridge before direct SBEP.
 - Never send SBEP `17/19/20/22/26` to the radio without a reason and a backup (`20/22` touch tuning;
   `26` jumps to a request-supplied address).
