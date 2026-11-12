@@ -13,6 +13,10 @@ bit0 amber, 1 red = "channel busy" flashes on a carrier without our PL, 2 green,
 the display (0x34BD); saves a webcam crop of LEDs + LCD per phase.
 
   squelch_test.py [--freq 446.06875] [--tone 123.0] [--seconds 8] [--out DIR] [--video /dev/video2]
+                  [--watch 0x37AC:21 ...]
+
+``--watch ADDR:LEN`` (repeatable) also logs every distinct value of that RAM range per phase, e.g. to
+find which buffer bits follow the squelch.
 """
 import argparse
 import os
@@ -40,7 +44,10 @@ def main():
     ap.add_argument("--cal-hz", type=float, default=ctcss_tx.CAL_HZ, help="HackRF frequency correction")
     ap.add_argument("--out", default="/tmp/squelch_test")
     ap.add_argument("--video", default="/dev/video2")
+    ap.add_argument("--watch", action="append", default=[], metavar="ADDR:LEN",
+                    help="also log distinct values of this RAM range per phase (repeatable)")
     args = ap.parse_args()
+    watches = [(int(a, 0), int(n, 0)) for a, n in (w.split(":") for w in args.watch)]
     os.makedirs(args.out, exist_ok=True)
     files = {}
     for name, tone in (("notone", None), ("tone", args.tone)):
@@ -61,9 +68,14 @@ def main():
                     tx = ctcss_tx.transmit(files[phase], args.freq * 1e6 + args.cal_hz, vga=args.vga)
                     time.sleep(2.0)                      # let the HackRF start and the radio settle
                 seen, rx, t0 = [], [], time.time()
+                watched = {w: [] for w in watches}
                 while time.time() - t0 < args.seconds:
                     seen.append(r.read_block(0x34AE, 1)[0])
                     rx.append(r.read_block(0x347E, 2))
+                    for addr, n in watches:
+                        v = bytes(r.read_block(addr, n))
+                        if v not in watched[(addr, n)]:
+                            watched[(addr, n)].append(v)
                     time.sleep(0.25)
                 disp = r.read_block(0x34BD, 3)
                 shot(args.video, os.path.join(args.out, phase + ".jpg"))
@@ -75,6 +87,9 @@ def main():
                 print(f"{phase:8} carrier {int(any(x[1] for x in rx))}  RX/PL {int(any(x[0] for x in rx))}"
                       f"  display {disp!r}  LED bytes {' '.join('%02x' % b for b in bits)}"
                       f" (red/busy {int(any(b & 2 for b in seen))})", flush=True)
+                for (addr, n), vals in watched.items():
+                    for v in vals:
+                        print(f"           0x{addr:04X}: {v.hex(' ')}", flush=True)
     finally:
         for path in files.values():
             os.unlink(path)
