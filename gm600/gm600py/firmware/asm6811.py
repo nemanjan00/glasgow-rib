@@ -20,6 +20,7 @@ from collections import namedtuple
 #   REL   8-bit relative branch
 INSTR = {
     "sei": {"INH": 0x0F}, "cli": {"INH": 0x0E}, "nop": {"INH": 0x01},
+    "tpa": {"INH": 0x07}, "tap": {"INH": 0x06},
     "inx": {"INH": 0x08}, "dex": {"INH": 0x09},
     "clra": {"INH": 0x4F}, "clrb": {"INH": 0x5F}, "inca": {"INH": 0x4C}, "incb": {"INH": 0x5C},
     "deca": {"INH": 0x4A}, "decb": {"INH": 0x5A}, "tsta": {"INH": 0x4D}, "tstb": {"INH": 0x5D},
@@ -35,6 +36,7 @@ INSTR = {
     "oraa": {"IMM8": 0x8A, "EXT": 0xBA}, "orab": {"IMM8": 0xCA, "EXT": 0xFA},
     "adda": {"IMM8": 0x8B, "IDX": 0xAB, "EXT": 0xBB}, "addb": {"IMM8": 0xCB},
     "cmpa": {"IMM8": 0x81}, "cmpb": {"IMM8": 0xC1},
+    "bita": {"IMM8": 0x85}, "bitb": {"IMM8": 0xC5},
     "ldx": {"IMM16": 0xCE, "EXT": 0xFE}, "stx": {"EXT": 0xFF}, "cpx": {"IMM16": 0x8C},
     "lds": {"IMM16": 0x8E, "EXT": 0xBE},
     "jmp": {"EXT": 0x7E, "IDX": 0x6E}, "jsr": {"EXT": 0xBD, "IDX": 0xAD}, "rts": {"INH": 0x39},

@@ -39,8 +39,8 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
   - coax + attenuators for the RF link.
   - **PL-decoded output on accessory pin 4 — host-polled prototype WORKS [HW]:** `python3 -m gm600py.radio.pl_out`
     or live panel `--pl-out`; pin 4 0.615 V while PL decoded, 11.99 V otherwise, carrier-without-PL ignored.
-    Pin 4 = ASFIC GCB1 = byte 8 bit 1 of the `0x37AC` image. Next: standalone (firmware-side hook, copy NOT
-    GCB0 → GCB1) — needs a RAM hook point or a flash patch (hard gate). Image bits 1:2 and 4:1 reset the radio.
+    Pin 4 = ASFIC GCB1 = byte 8 bit 1 of the `0x37AC` image. Standalone: flash patch `pl_patch` (hook entry 8,
+    GCB1 = NOT GCB0) designed + VM-verified, NOT flashed — needs flashtool whitelist + the 256-byte burst fix + the hard gate. Image bits 1:2 and 4:1 reset the radio.
 
 ## Invariants (never violate)
 - **Irreversible steps have a hard gate** (flash write, EEPROM write outside `codeplug.apply`, hot air,

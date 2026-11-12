@@ -59,6 +59,9 @@ TX enable). Then read the symptom:
 - Probing ASFIC image bits (`0x37AC` + `asfic_push.S`) can **reset the radio** (byte 1 bit 2 did, once;
   the ASFIC also makes the CPU clock). It recovered by itself; stop the live panel first and expect to
   restart it (`systemctl --user reset-failed gm600live` before re-running the unit).
+- **Any flash patch must keep the boot flash XOR at `0xFF`** (FIRMWARE.md "Boot flash check"), or the
+  radio boots to `- 1`. Add a compensation byte and check with `pl_patch.flash_xor()`; boot the patched
+  image in the VM before going near hardware.
 - Flash: 12 V on pin 12 **only after boot** (at reset = bootstrap mode); hash the deployed stub against
   the repo; read + back up the live sector first; any unexpected before-image = stop
   ([FLASH_WRITE.md](FLASH_WRITE.md), [RECOVERY.md](RECOVERY.md)).

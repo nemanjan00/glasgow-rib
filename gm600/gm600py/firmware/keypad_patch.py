@@ -59,16 +59,31 @@ MAGIC1, MAGIC2 = 0xA5, 0x5A
 RELEASED = 0xFF                           # idle A/D level (no key)
 
 
+def _xor(bs):
+    x = 0
+    for b in bs:
+        x ^= b
+    return x
+
+
+# The firmware XOR-checks its flash at boot (CPU 0x8DE8, see pl_patch.flash_xor): the XOR over the
+# banked pages + fixed region must stay 0xFF, or the radio shows "- 1". One compensation byte right
+# after the stub (same 256-byte sector, never executed) cancels the patch's change to that XOR.
+COMP_SITE = STUB_SITE + len(STUB)
+COMP = 0xFF ^ _xor(PATCH_ORIG) ^ _xor(PATCH_NEW) ^ _xor(b"\xFF" * len(STUB)) ^ _xor(STUB)
+
+
 def patch_image(flash):
     """Return a patched copy of a 256 KB flash image. Raises if the sites don't look right."""
     buf = bytearray(flash)
     if bytes(buf[PATCH_SITE:PATCH_SITE + 3]) != PATCH_ORIG:
         raise ValueError("read_adc site 0x%05X is not `ldab ADR1` (got %s); wrong image?"
                          % (PATCH_SITE, bytes(buf[PATCH_SITE:PATCH_SITE + 3]).hex()))
-    if any(b != 0xFF for b in buf[STUB_SITE:STUB_SITE + len(STUB)]):
+    if any(b != 0xFF for b in buf[STUB_SITE:COMP_SITE + 1]):
         raise ValueError("stub area 0x%05X is not free (0xFF); wrong image?" % STUB_SITE)
     buf[PATCH_SITE:PATCH_SITE + 3] = PATCH_NEW
     buf[STUB_SITE:STUB_SITE + len(STUB)] = STUB
+    buf[COMP_SITE] = COMP
     return bytes(buf)
 
 
@@ -76,7 +91,8 @@ def patch_diff():
     """The flash byte changes to apply the patch, as (file_offset, original, patched) tuples.
     Reverting is the same tuples with original/patched swapped."""
     return [(PATCH_SITE, PATCH_ORIG, PATCH_NEW),
-            (STUB_SITE, b"\xFF" * len(STUB), STUB)]
+            (STUB_SITE, b"\xFF" * len(STUB), STUB),
+            (COMP_SITE, b"\xFF", bytes([COMP]))]
 
 
 # ---- press/release against a running patched radio (SBEP 0x17 writes) ----

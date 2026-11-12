@@ -125,3 +125,17 @@ host→radio write burst dropping the applet link** — a transport issue, not t
 in-circuit sector program on the radio waits on that. A botched page-0 write is recoverable (boot/SBEP
 live in the fixed region `0x8000+` and page 1, re-flashable), so proceed deliberately once the burst
 transfer is fixed.
+
+## Patches waiting for a real write (2026-11-12)
+
+| Patch | Sectors | Status |
+|--|--|--|
+| keypad override (`keypad_patch`) | page 0 `0x01000`, `0x01E00` | VM-verified; now with boot-XOR compensation |
+| pin 4 = unmuted (`pl_patch`) | fixed region `0x38F00`, `0x3DE00` | VM-verified (`PlPatchTest`) |
+
+- `flashtool.S` only accepts pages 0/12/13, so `pl_patch` needs the whitelist extended to those two
+  fixed-region sectors.
+- The 256-byte transfer issue still blocks any real sector write.
+- Every real write goes through the irreversible-step gate (STATE.md), with the owner at the bench:
+  12 V on pin 12 only after boot, a fresh full backup that matches the golden image, and the T48
+  ready.

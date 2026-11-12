@@ -485,6 +485,17 @@ Why `0x37AC` is the ASFIC image:
   - Limits: it needs the host connected (SBEP), and latency is one poll plus a push (~0.1–0.3 s on top
     of the radio's squelch timing).
   - A standalone version needs a firmware-side hook (copy NOT GCB0 → GCB1 where byte 8 is built).
+- **Standalone pin-4 output: flash patch designed, VM-verified, not flashed** (`gm600py/firmware/pl_patch.py`,
+  cave source `gm600py/stubs/pl_patch.S`):
+  - **Hook:** the start of entry 8 (CPU `0x8F7F`, `ldab #21; ldx #$37AC`) becomes `jsr $DE00; nop; nop`.
+  - **Cave:** 25 bytes at `0xDE00` (erased fixed-bank flash) set GCB1 = NOT GCB0 with interrupts off,
+    redo the two instructions and return. So every image push carries pin 4 = "speaker unmuted".
+  - **Footprint:** two 256-byte sectors (`0x38F00`, `0x3DE00`), both outside the boot blocks.
+  - **VM results:** boots to 322; 512/515 SPI transfers identical to the golden image, the three
+    differences being exactly byte 8 `E4` → `E6`; every push satisfies GCB1 = NOT GCB0; power latch
+    untouched. Tests: `PlPatchTest`.
+  - **Semantics:** pin 4 follows *unmute*, so on a PL channel it's PL-decoded, but Monitor (and an
+    open carrier-squelch channel) also turn it on.
 - **The image also holds bits that upset the radio [HW].** These were found with `asfic_probe`
   (set + push + restore, one bit at a time):
   - after the byte 1 bit 2 trial, and again after the byte 4 bit 1 trial, the radio reset itself and
@@ -609,6 +620,17 @@ arm flags were moved to external RAM (`0x3FF0`–`0x3FF2`) so an override can't 
 **Live web panel for the real radio — `tools/gm600_live.py`.** The VM UI's page, backed by SBEP: screen
 from the display struct cached at `0x3495`, LEDs `0x34AE`, RX flags; keys through `keyevt.S` (tap /
 mouse-hold). Survives mode-switch resets (re-uploads the stub, retries the release).
+
+## Boot flash check — every flash patch must keep it (found 2026-11-12) [VM]
+
+At boot the firmware XORs every byte of the banked pages 0..n−1 (n = page-0 byte `0x5B50` = 13) and of
+the fixed region `0x8000`–`0xFFFF` (routine `0x8DE8`, helpers `0x8DCD`/`0x8DDB`). The result must be
+`0xFF`. Otherwise it sets an error flag (`0x3480 |= 0x81`) and the radio shows **`- 1`** instead of the
+idle number. Changing a single erased byte is enough to trip it.
+
+- `pl_patch.flash_xor()` reproduces the check; the golden image gives `0xFF`.
+- Both patch modules now add one **compensation byte** next to their code, in a sector they write
+  anyway. The keypad patch as first written would have tripped it (XOR `F3`); it was never flashed.
 
 ## Free RAM 0x3D80–0x3FFF — who owns which bytes
 

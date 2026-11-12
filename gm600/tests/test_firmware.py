@@ -116,7 +116,7 @@ class KeypadPatchTest(unittest.TestCase):
         import gm600_keypad_patch as kp
         f = bytearray(0x40000)
         f[kp.PATCH_SITE:kp.PATCH_SITE + 3] = kp.PATCH_ORIG     # ldab ADR1 at the site
-        f[kp.STUB_SITE:kp.STUB_SITE + len(kp.STUB)] = b"\xFF" * len(kp.STUB)
+        f[kp.STUB_SITE:kp.COMP_SITE + 1] = b"\xFF" * (kp.COMP_SITE + 1 - kp.STUB_SITE)   # stub + comp byte erased
         return bytes(f)
 
     def test_patch_applies_both_sites(self):
@@ -124,6 +124,7 @@ class KeypadPatchTest(unittest.TestCase):
         out = kp.patch_image(self._image())
         self.assertEqual(out[kp.PATCH_SITE:kp.PATCH_SITE + 3], kp.PATCH_NEW)
         self.assertEqual(out[kp.STUB_SITE:kp.STUB_SITE + len(kp.STUB)], kp.STUB)
+        self.assertEqual(out[kp.COMP_SITE], kp.COMP)                # boot flash-XOR compensation
 
     def test_patch_rejects_wrong_image(self):
         import gm600_keypad_patch as kp
@@ -369,6 +370,56 @@ class AsficPushTest(unittest.TestCase):
         self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")   # firmware still running normally
 
 
+class PlPatchTest(unittest.TestCase):
+    """pl_patch: pin 4 (GCB1) = NOT GCB0 in every ASFIC push; the boot flash-XOR check stays 0xFF."""
+
+    def _flash(self):
+        fw = os.environ.get("GM600_FW")
+        if not fw:
+            self.skipTest("set GM600_FW=motofix.BIN to run this")
+        with open(fw, "rb") as f:
+            return f.read()
+
+    def test_boot_check_xor_kept(self):
+        from gm600py.firmware import pl_patch, keypad_patch
+        g = self._flash()
+        self.assertEqual(pl_patch.flash_xor(g), 0xFF)
+        self.assertEqual(pl_patch.flash_xor(pl_patch.patch_image(g)), 0xFF)
+        self.assertEqual(pl_patch.flash_xor(keypad_patch.patch_image(g)), 0xFF)
+        diff = pl_patch.patch_diff(g)
+        self.assertEqual([s for s, _, _ in diff], [0x38F00, 0x3DE00])      # two sectors, fixed region
+        for s, _, _ in diff:
+            self.assertTrue(0x02000 <= s < 0x3E000)                          # outside both boot blocks
+
+    def test_patched_firmware_drives_gcb1_from_mute_in_vm(self):
+        import emu6811
+        from gm600py.firmware import pl_patch
+        cp = os.environ.get("GM600_CP")
+        if not cp:
+            self.skipTest("set GM600_CP=<640-byte codeplug> to run this")
+        with open(cp, "rb") as f:
+            m = emu6811.Mem(pl_patch.patch_image(self._flash()), f.read())
+        c = emu6811.CPU(m)
+        pushes, cur = [], []
+
+        def watch(addr, v):
+            if addr == 0x102A and m.reg[0x7E] & 0x61 == 0x01:              # ASFIC select (decoder Y2)
+                cur.append(v)
+            elif addr == 0x107E and cur:
+                if len(cur) == 21:
+                    pushes.append(bytes(cur))
+                cur.clear()
+        m.watch = watch
+        c.reset()
+        c.run(max_insns=3_000_000, cop_timeout=150000)
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")              # boot check passed, normal idle
+        self.assertTrue(pushes)
+        for p in pushes:
+            self.assertEqual(bool(p[8] & 0x02), not p[8] & 0x01)           # GCB1 = NOT GCB0
+            self.assertTrue(p[8] & 0x04)                                    # power latch untouched (on)
+        self.assertTrue(any(not p[8] & 0x01 for p in pushes))              # an unmuted push was seen
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -477,6 +528,56 @@ class AsficPushTest(unittest.TestCase):
         self.assertFalse(m.ram[0x37B4] & 0x02)
         c.run(max_insns=1_000_000, cop_timeout=150000)
         self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")   # firmware still running normally
+
+
+class PlPatchTest(unittest.TestCase):
+    """pl_patch: pin 4 (GCB1) = NOT GCB0 in every ASFIC push; the boot flash-XOR check stays 0xFF."""
+
+    def _flash(self):
+        fw = os.environ.get("GM600_FW")
+        if not fw:
+            self.skipTest("set GM600_FW=motofix.BIN to run this")
+        with open(fw, "rb") as f:
+            return f.read()
+
+    def test_boot_check_xor_kept(self):
+        from gm600py.firmware import pl_patch, keypad_patch
+        g = self._flash()
+        self.assertEqual(pl_patch.flash_xor(g), 0xFF)
+        self.assertEqual(pl_patch.flash_xor(pl_patch.patch_image(g)), 0xFF)
+        self.assertEqual(pl_patch.flash_xor(keypad_patch.patch_image(g)), 0xFF)
+        diff = pl_patch.patch_diff(g)
+        self.assertEqual([s for s, _, _ in diff], [0x38F00, 0x3DE00])      # two sectors, fixed region
+        for s, _, _ in diff:
+            self.assertTrue(0x02000 <= s < 0x3E000)                          # outside both boot blocks
+
+    def test_patched_firmware_drives_gcb1_from_mute_in_vm(self):
+        import emu6811
+        from gm600py.firmware import pl_patch
+        cp = os.environ.get("GM600_CP")
+        if not cp:
+            self.skipTest("set GM600_CP=<640-byte codeplug> to run this")
+        with open(cp, "rb") as f:
+            m = emu6811.Mem(pl_patch.patch_image(self._flash()), f.read())
+        c = emu6811.CPU(m)
+        pushes, cur = [], []
+
+        def watch(addr, v):
+            if addr == 0x102A and m.reg[0x7E] & 0x61 == 0x01:              # ASFIC select (decoder Y2)
+                cur.append(v)
+            elif addr == 0x107E and cur:
+                if len(cur) == 21:
+                    pushes.append(bytes(cur))
+                cur.clear()
+        m.watch = watch
+        c.reset()
+        c.run(max_insns=3_000_000, cop_timeout=150000)
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")              # boot check passed, normal idle
+        self.assertTrue(pushes)
+        for p in pushes:
+            self.assertEqual(bool(p[8] & 0x02), not p[8] & 0x01)           # GCB1 = NOT GCB0
+            self.assertTrue(p[8] & 0x04)                                    # power latch untouched (on)
+        self.assertTrue(any(not p[8] & 0x01 for p in pushes))              # an unmuted push was seen
 
 
 if __name__ == "__main__":
