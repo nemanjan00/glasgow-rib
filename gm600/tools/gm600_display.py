@@ -189,8 +189,11 @@ border-radius:6px;margin:3px;padding:4px 8px;font:13px monospace;cursor:pointer}
 <div id="k">raw key codes: CODES</div><script>
 async function press(q){document.getElementById('p').textContent='pressing '+q+' ...';
 const r=await fetch('/press?'+q,{method:'POST'});document.getElementById('p').textContent=await r.text()}
-document.getElementById('d').addEventListener('click',e=>{const k=e.target.closest('[data-key]');
-if(k)press('key='+k.dataset.key)});
+let held=null;
+document.getElementById('d').addEventListener('pointerdown',e=>{const k=e.target.closest('[data-key]');
+if(!k)return;e.preventDefault();held=k.dataset.key;press('key='+held+'&action=down')});
+function release(){if(held){press('key='+held+'&action=up');held=null}}
+document.addEventListener('pointerup',release);document.addEventListener('pointercancel',release);
 async function tick(){try{const r=await fetch('/display.svg',{cache:'no-store'});
 document.getElementById('d').innerHTML=await r.text();
 const j=await (await fetch('/state.json',{cache:'no-store'})).json();
@@ -201,8 +204,8 @@ document.getElementById('s').textContent='frames '+j.frames+' \u00b7 '+(j.segmen
 
 def serve_ui(get_state, port=8600, press=None):
     """Serve the live display at http://127.0.0.1:<port>/. ``get_state`` returns a dict with
-    ``segments``, ``leds`` and ``frames``; ``press(code)`` (optional) presses a key code, and makes
-    the panel's buttons clickable. Runs in a daemon thread; returns the bound port."""
+    ``segments``, ``leds`` and ``frames``; ``press(code, action)`` (optional; action = tap / down / up)
+    makes the panel's buttons pressable: pointer-down holds the key, pointer-up releases it. Runs in a daemon thread; returns the bound port."""
     import urllib.parse
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -225,8 +228,13 @@ def serve_ui(get_state, port=8600, press=None):
             except (KeyError, ValueError, IndexError):
                 self.send_error(400, "unknown key")
                 return
-            press(code)
-            body = f"pressed {label}".encode()
+            action = q.get("action", ["tap"])[0]
+            if action not in ("tap", "down", "up"):
+                self.send_error(400, "action must be tap, down or up")
+                return
+            press(code, action)
+            body = {"tap": f"tapped {label}", "down": f"holding {label}",
+                    "up": f"released {label}"}[action].encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()

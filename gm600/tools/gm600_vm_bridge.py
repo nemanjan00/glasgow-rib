@@ -22,7 +22,9 @@ exactly as a real GM600 answers (byte-for-byte compatible with mock_radio.py / a
 
 --ui[=PORT] also keeps the firmware running in the background and serves a live view of the
 control head (digits, icons, LEDs, backlight) at http://127.0.0.1:8600/ (gm600_display.py); click
-the panel's buttons (or the raw key-code row) to press keys through the keypad A/D.
+the panel's buttons (or the raw key-code row) to press keys through the keypad A/D: a click is a tap,
+holding the mouse button down holds the key (the VM runs ~6x slower than the radio, so a 7 s
+firmware long-hold, e.g. A for conventional, takes ~40 s of real holding).
 
 usage: gm600_vm_bridge.py <motofix.BIN> <codeplug.bin> [PORT] [--ui[=PORT]]   (default port 2399)
 """
@@ -56,26 +58,37 @@ class VMRadio:
         self.c.run(max_insns=BOOT_INSNS, cop_timeout=150000)   # boot the firmware
         self.lock = threading.Lock()
 
-    HOLD_INSNS = 300_000            # key held this long (the firmware debounces over two reads)
+    TAP_INSNS = 50_000              # a tap: a few keypad scans (debounce needs two equal reads);
+    #                                 150k already auto-repeats scroll keys, 25k-100k = one step
+    MAX_HOLD_INSNS = 40_000_000     # safety: a held key is released after this many instructions
 
     def free_run(self, chunk=20_000):
         """Keep the firmware running between queries (for the UI: its display task refreshes)."""
         self._release_in = None
+        self._held_for = 0
         while True:
             with self.lock:
                 self.c.run(max_insns=chunk, cop_timeout=150000)
+                self._held_for += chunk
                 if self._release_in is not None:
                     self._release_in -= chunk
                     if self._release_in <= 0:
                         self.m.adc = list(emu6811.IDLE_ADC)
                         self._release_in = None
 
-    def press(self, code):
-        """Press key ``code`` (gm600_display.KEY_CODES) via the keypad A/D; free_run releases it."""
+    def press(self, code, action="tap"):
+        """Key ``code`` (gm600_display.KEY_CODES) via the keypad A/D. ``tap``: down for TAP_INSNS;
+        ``down``: held until ``up`` (or MAX_HOLD_INSNS); ``up``: release now."""
         import gm600_display
         with self.lock:
+            if action == "up":
+                # a quick click (down+up within a few ms of wall time) still gets a full tap, so the
+                # firmware's debounce sees the key
+                self._release_in = max(self.TAP_INSNS - getattr(self, "_held_for", 0), 1)
+                return
             self.m.adc = gm600_display.adc_for(code)
-            self._release_in = self.HOLD_INSNS
+            self._held_for = 0
+            self._release_in = self.TAP_INSNS if action == "tap" else self.MAX_HOLD_INSNS
 
     def _vm_query_23(self, frame, index):
         """Feed a 0x23 query and read back the reply the firmware builds in RAM."""
