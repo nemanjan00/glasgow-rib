@@ -8,9 +8,10 @@ radio instead of the VM:
            controller (icons + the three 7-seg digits), decoded with gm600_display; LEDs = 0x34AE;
            receive flags 0x347F (carrier) / 0x347E (PL decoded = RX active) shown on the status line
   keys     the non-halting RAM stub keyevt.S, launched with 0x26, posts the key event through the
-           firmware's own routine 0x4D8B (event number == key code, e.g. A = 0x14). A tap posts
-           "pressed" and the keypad task's next real scan reports the release; a hold pauses the
-           keypad task (TCB flags 0x11D8 |= 0x10) until the mouse button is released.
+           firmware's own routine 0x4D8B (event number == key code, e.g. A = 0x14). A click (released
+           within 0.4 s, decided by the page) is a tap: post "pressed" only, the keypad task's next real
+           scan reports the release. Holding longer pauses the keypad task (TCB flags 0x11D8 |= 0x10)
+           until the mouse button is released.
 
 Runs on the host with the rib applet (SBEP_ADDR, default 127.0.0.1:2324; single client — stop other
 SBEP tools first). Open from another machine with ``ssh -L 8600:127.0.0.1:8600 <lab>`` or bind
@@ -91,8 +92,9 @@ class LiveRadio:
     def press(self, code, action="tap"):
         with self.lock:
             if action == "tap":
+                # post "pressed" only: the keypad task is running, so its next real scan (a few ms
+                # later) reports the release - a short, single press (one key click, no auto-repeat)
                 self._post(code, True)
-                self._post(code, False)
             elif action == "down":
                 if self.held is not None:
                     self._post(self.held, False)

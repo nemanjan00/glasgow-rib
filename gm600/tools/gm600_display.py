@@ -189,10 +189,15 @@ border-radius:6px;margin:3px;padding:4px 8px;font:13px monospace;cursor:pointer}
 <div id="k">raw key codes: CODES</div><script>
 async function press(q){document.getElementById('p').textContent='pressing '+q+' ...';
 const r=await fetch('/press?'+q,{method:'POST'});document.getElementById('p').textContent=await r.text()}
-let held=null;
+// A quick click is a single tap; only a press held past HOLD_MS becomes a hold (down ... up), so a
+// click never turns into a long press (and auto-repeat) through request latency.
+const HOLD_MS=400;let pending=null,timer=null,holding=null;
 document.getElementById('d').addEventListener('pointerdown',e=>{const k=e.target.closest('[data-key]');
-if(!k)return;e.preventDefault();held=k.dataset.key;press('key='+held+'&action=down')});
-function release(){if(held){press('key='+held+'&action=up');held=null}}
+if(!k)return;e.preventDefault();pending=k.dataset.key;
+timer=setTimeout(()=>{holding=pending;pending=null;press('key='+holding+'&action=down')},HOLD_MS)});
+function release(){clearTimeout(timer);
+if(pending){press('key='+pending+'&action=tap');pending=null}
+if(holding){press('key='+holding+'&action=up');holding=null}}
 document.addEventListener('pointerup',release);document.addEventListener('pointercancel',release);
 async function tick(){try{const r=await fetch('/display.svg',{cache:'no-store'});
 document.getElementById('d').innerHTML=await r.text();
