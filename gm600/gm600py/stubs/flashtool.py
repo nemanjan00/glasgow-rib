@@ -8,8 +8,13 @@ the keypad-remote firmware patch (see ../FIRMWARE.md and ../FLASH_WRITE.md).
 
     python3 flashtool.py probe                      # SAFE: AT29C020 ID + boot-block lockout
     python3 flashtool.py read  0x1000 out.bin       # read the 256-byte sector at a device address
-    python3 flashtool.py patch flash.bin            # apply the keypad patch (reads/writes 2 sectors)
-    python3 flashtool.py revert flash.bin           # restore the original bytes of those 2 sectors
+    python3 flashtool.py echo                       # SAFE: 256-byte host->stub->host transport test
+    python3 flashtool.py patch [keypad|pl] flash.bin   # apply a patch (keypad = default)
+    python3 flashtool.py revert [keypad|pl] flash.bin  # restore the original bytes of its sectors
+
+    keypad: the read_adc override (page 0, 3 sectors). pl: accessory pin 4 = "speaker unmuted"
+    (gm600py.firmware.pl_patch; 2 fixed-region sectors 0x38F00 + 0x3DE00). flash.bin = the golden image;
+    for pl every live sector must equal the golden's (or already the patched) bytes before a write.
 
 DANGER — UNTESTED on hardware. No flash write has been done on this radio. `probe` is read-only and
 safe; `read` only reads; `patch`/`revert` ERASE AND PROGRAM flash sectors. `patch`/`revert` first
@@ -24,7 +29,8 @@ import time
 
 import gm600py.firmware.asm6811 as asm6811
 import gm600py.link.sbep as sbep
-from gm600py.firmware.keypad_patch import patch_diff
+from gm600py.firmware.keypad_patch import patch_diff, STUB_SITE
+import gm600py.firmware.pl_patch as pl_patch
 
 STUB_S = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flashtool.S")
 SECTOR = 256
@@ -111,6 +117,12 @@ def read_sector(radio, dev_addr):
 
 
 
+def echo_test(radio, pattern=None):
+    """Send 256 bytes with 'E' and return what the stub sends back (no flash access)."""
+    pattern = pattern if pattern is not None else bytes((i * 37 + 11) & 0xFF for i in range(SECTOR))
+    return pattern, _cmd(radio, b"E" + pattern, SECTOR, timeout=4.0)
+
+
 def _backup_live(base, data):
     """Save a live sector's before-image to disk so any write is recoverable. The lack of this is
     exactly why the mis-banked 0xC000 write could not be undone in-circuit (see ../RECOVERY.md)."""
@@ -146,6 +158,38 @@ def _require_writable(radio):
         sys.exit("ABORT: lower boot block is LOCKED (lockout != FE); the read_adc patch lives there "
                  "and cannot be flashed. Use the hardware keypad-line drive instead.")
     print("lower boot block is programmable.")
+
+
+def _apply_pl(radio, revert, golden):
+    """Apply (or revert) pl_patch: whole-sector writes, cave sector first on apply, jsr sector first on
+    revert. Refuses unless each live sector is exactly the golden original or the patched version."""
+    mfr, dev, lo, up = probe(radio)
+    print(f"probe: mfr={mfr:02X} device={dev:02X} lower-lockout={lo:02X} upper-lockout={up:02X}")
+    if (mfr, dev) != (0x1F, 0xDA):
+        sys.exit(f"ABORT: not an AT29C020 (expected 1F/DA, got {mfr:02X}/{dev:02X}).")
+    steps = pl_patch.patch_diff(golden)               # safe apply order (cave, then hook)
+    if revert:
+        steps = steps[::-1]                           # revert: hook first, then the cave
+    diff = {base: (orig, new) for base, orig, new in steps}
+    order = [base for base, _, _ in steps]
+    for base in order:
+        orig, new = diff[base]
+        want = orig if revert else new
+        cur = read_sector(radio, base)
+        if cur == want:
+            print(f"sector 0x{base:05X}: already correct, skipping")
+            continue
+        if cur not in (orig, new):
+            sys.exit(f"ABORT: live sector 0x{base:05X} is neither the golden original nor the patched "
+                     f"version (starts {cur[:8].hex()}); not writing.")
+        print(f"sector 0x{base:05X}: programming...")
+        write_sector(radio, base, want)
+        back = read_sector(radio, base)
+        if back != want:
+            sys.exit(f"VERIFY FAILED @0x{base:05X}: read back {back[:8].hex()}...; the radio may be "
+                     "partly written — re-run after fixing the cause (the T48 + golden image recover it).")
+        print(f"sector 0x{base:05X}: verified.")
+    print("done ('revert')." if revert else "done — pl patch applied; power-cycle (12 V off first).")
 
 
 def _apply(radio, revert):
@@ -187,8 +231,20 @@ def _apply(radio, revert):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("probe", "read", "patch", "revert"):
+    if len(argv) < 2 or argv[1] not in ("probe", "read", "echo", "patch", "revert"):
         sys.exit(__doc__)
+    which, golden = "keypad", None
+    if argv[1] in ("patch", "revert"):
+        rest = argv[2:]
+        if rest and rest[0] in ("keypad", "pl"):
+            which, rest = rest[0], rest[1:]
+        if which == "pl":
+            if not rest:
+                sys.exit("usage: flashtool.py patch|revert pl <golden flash.bin>")
+            import hashlib
+            golden = open(rest[0], "rb").read()
+            if hashlib.sha256(golden).hexdigest() != pl_patch.GOLDEN_SHA256:
+                sys.exit("ABORT: the image given is not the golden motofix.BIN (SHA-256 mismatch).")
     org, stub = build_stub()
     with sbep.Radio() as radio:
         print(f"serial {radio.id_string(1)}; uploading {len(stub)}-byte stub, launching...")
@@ -199,6 +255,13 @@ def main(argv):
             print(f"mfr={mfr:02X} device={dev:02X} lower-lockout={lo:02X} upper-lockout={up:02X}  "
                   f"({'AT29C020' if (mfr,dev)==(0x1F,0xDA) else 'UNKNOWN'}; lower block "
                   f"{'programmable' if lo==0xFE else 'LOCKED' if lo==0xFF else '?'})")
+        elif cmd == "echo":
+            sent, got = echo_test(radio)
+            bad = [i for i in range(SECTOR) if sent[i] != got[i]]
+            print(f"echo: {SECTOR - len(bad)}/{SECTOR} bytes back intact"
+                  + (f"; first mismatch at {bad[0]}: sent {sent[bad[0]]:02X} got {got[bad[0]]:02X}" if bad else ""))
+            if bad:
+                raise SystemExit(1)
         elif cmd == "read":
             if len(argv) < 4:
                 sys.exit("usage: flashtool.py read <dev_addr_hex> <out.bin>")
@@ -206,6 +269,8 @@ def main(argv):
             data = read_sector(radio, addr)
             open(argv[3], "wb").write(data)
             print(f"read sector 0x{addr & ~0xFF:05X} ({SECTOR} B) -> {argv[3]}")
+        elif which == "pl":
+            _apply_pl(radio, revert=(cmd == "revert"), golden=golden)
         else:
             _apply(radio, revert=(cmd == "revert"))
     print("power-cycle the radio now (the stub left it halted).")

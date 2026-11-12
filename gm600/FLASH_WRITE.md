@@ -120,22 +120,32 @@ the AT29C020 command/program state machine, and the boot-block bits; see
 `tests/test_firmware.py::VmFlashWriteModelTest`). The emulator run reproduces the exact patched image, and it
 caught a real stub bug (the tWC delay clobbering its counter via the COP kick). The stub refuses any
 page outside 0/12/13, and `flashtool.py` programs the stub sector first then the read_adc jsr sites
-(so read_adc never points at a stub that isn't there yet). The one open item is the **256-byte
-host→radio write burst dropping the applet link** — a transport issue, not the flash; a real
-in-circuit sector program on the radio waits on that. A botched page-0 write is recoverable (boot/SBEP
-live in the fixed region `0x8000+` and page 1, re-flashable), so proceed deliberately once the burst
-transfer is fixed.
+(so read_adc never points at a stub that isn't there yet). The 256-byte host→radio burst that once dropped the applet link is handled in the host (32-byte
+chunks, echo drained per chunk); `flashtool.py echo` proves it on the radio without a write (see the
+end of this file). A botched page-0 write is recoverable (boot/SBEP live in the fixed region `0x8000+`
+and page 1, re-flashable) — but a radio whose flash XOR is wrong boots into `- 1` and refuses SBEP
+writes [VM], so keep the stub session open until the final state verifies.
 
 ## Patches waiting for a real write (2026-11-12)
 
 | Patch | Sectors | Status |
 |--|--|--|
 | keypad override (`keypad_patch`) | page 0 `0x01000`, `0x01E00` | VM-verified; now with boot-XOR compensation |
-| pin 4 = unmuted (`pl_patch`) | fixed region `0x38F00`, `0x3DE00` | VM-verified (`PlPatchTest`) |
+| pin 4 = unmuted (`pl_patch`) | fixed region `0x3DE00` (cave) then `0x38F00` (hook) | VM-verified (`PlPatchTest`, flash-write model); every partial state boots |
 
-- `flashtool.S` only accepts pages 0/12/13, so `pl_patch` needs the whitelist extended to those two
-  fixed-region sectors.
-- The 256-byte transfer issue still blocks any real sector write.
+- `flashtool.S` whitelist: pages 0/12/13 through the bank window, plus **exactly** the two
+  `pl_patch` sectors (page 14 window `0x4F00` = `0x38F00`, page 15 window `0x5E00` = `0x3DE00`). Every
+  other page-14/15 sector, including the vectors and the upper boot block, gets `0x85` [VM-tested].
+- **Transport:** the host already sends in 32-byte chunks and drains each echo. `flashtool.py echo`
+  (stub command `E`) sends 256 bytes into the stub's sector buffer and gets them back, with no flash
+  access and no 12 V. It's the hardware proof of the transfer before any write; afterwards the radio
+  needs a PSU power cycle (halting stub).
+- `flashtool.py patch pl motofix.BIN` (golden image required, SHA-256 checked) writes the cave first,
+  then the hook (`revert pl`: reverse). Before each write the live sector must equal the golden
+  original or the already-patched version, otherwise it aborts.
+- **A radio that boots into `- 1` (flash XOR wrong) refuses SBEP reads/writes [VM]** — recovery is
+  then off-board only. `pl_patch` avoids that state by keeping each sector XOR-neutral; still, don't
+  power-cycle until the final state reads back right.
 - Every real write goes through the irreversible-step gate (STATE.md), with the owner at the bench:
   12 V on pin 12 only after boot, a fresh full backup that matches the golden image, and the T48
   ready.

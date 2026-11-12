@@ -295,6 +295,24 @@ class FlashStubIntegrationTest(unittest.TestCase):
         self.assertEqual(bytes(self.m.flash), kp.patch_image(self.flash))
 
 
+    def test_echo_and_pl_patch_through_the_stub(self):
+        from gm600py.firmware import pl_patch
+        pat = bytes((i * 37 + 11) & 0xFF for i in range(256))
+        before = bytes(self.m.flash)
+        self.assertEqual(self._cmd([ord("E")] + list(pat), 256), pat)      # transport test
+        self.assertEqual(bytes(self.m.flash), before)                     # ...touches no flash
+        # page 14/15: only the two pl_patch sectors; the rest of those pages (vectors!) are refused
+        for p, wh in ((14, 0x4E), (15, 0x7F), (15, 0x5F), (14, 0x7F)):
+            self.assertEqual(self._cmd([ord("W"), p, wh, 0] + [0xAA] * 256, 1), b"\x85")
+        self.assertEqual(bytes(self.m.flash), before)
+        for base, orig, new in pl_patch.patch_diff(self.flash):           # safe order, as flashtool does
+            w = 0x4000 | (base & 0x3FFF); p, wh, wl = base >> 14, w >> 8, w & 0xFF
+            self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), orig)
+            self.assertEqual(self._cmd([ord("W"), p, wh, wl] + list(new), 1), b"\x84")
+            self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), new)
+        self.assertEqual(bytes(self.m.flash), pl_patch.patch_image(self.flash))
+
+
 class BootFaultInjectionTest(unittest.TestCase):
     """Reproduce the real-radio brick in the VM: corrupting page 3 (device 0xC000 — boot-path code)
     makes the firmware execute garbage, hit an SWI, vector to the 0x8EE4 'BRA *' fault spin, and
@@ -387,9 +405,15 @@ class PlPatchTest(unittest.TestCase):
         self.assertEqual(pl_patch.flash_xor(pl_patch.patch_image(g)), 0xFF)
         self.assertEqual(pl_patch.flash_xor(keypad_patch.patch_image(g)), 0xFF)
         diff = pl_patch.patch_diff(g)
-        self.assertEqual([s for s, _, _ in diff], [0x38F00, 0x3DE00])      # two sectors, fixed region
+        self.assertEqual([s for s, _, _ in diff], [0x3DE00, 0x38F00])      # cave FIRST, then the hook
+        self.assertEqual(g[0x3DE00:0x3DF00], b"\xff" * 256)                 # whole cave sector erased
         for s, _, _ in diff:
             self.assertTrue(0x02000 <= s < 0x3E000)                          # outside both boot blocks
+        for steps in (diff, diff[::-1]):                                     # every partial state boots
+            img = bytearray(g)
+            for s, _, new in steps:
+                img[s:s + 256] = new
+                self.assertEqual(pl_patch.flash_xor(img), 0xFF)
 
     def test_patched_firmware_drives_gcb1_from_mute_in_vm(self):
         import emu6811
@@ -547,9 +571,15 @@ class PlPatchTest(unittest.TestCase):
         self.assertEqual(pl_patch.flash_xor(pl_patch.patch_image(g)), 0xFF)
         self.assertEqual(pl_patch.flash_xor(keypad_patch.patch_image(g)), 0xFF)
         diff = pl_patch.patch_diff(g)
-        self.assertEqual([s for s, _, _ in diff], [0x38F00, 0x3DE00])      # two sectors, fixed region
+        self.assertEqual([s for s, _, _ in diff], [0x3DE00, 0x38F00])      # cave FIRST, then the hook
+        self.assertEqual(g[0x3DE00:0x3DF00], b"\xff" * 256)                 # whole cave sector erased
         for s, _, _ in diff:
             self.assertTrue(0x02000 <= s < 0x3E000)                          # outside both boot blocks
+        for steps in (diff, diff[::-1]):                                     # every partial state boots
+            img = bytearray(g)
+            for s, _, new in steps:
+                img[s:s + 256] = new
+                self.assertEqual(pl_patch.flash_xor(img), 0xFF)
 
     def test_patched_firmware_drives_gcb1_from_mute_in_vm(self):
         import emu6811

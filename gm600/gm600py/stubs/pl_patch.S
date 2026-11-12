@@ -4,7 +4,7 @@
 ; byte is GCB0 = speaker-amp mute (1 = muted), which the firmware clears when the squelch opens (on a
 ; PL channel: when the tone is decoded). Every send of the image goes through SPI-dispatcher entry 8
 ; (CPU 0x8F7F, fixed bank: `ldab #21; ldx #$37AC; ...`). The patch replaces those two instructions
-; (5 bytes) with `jsr plfix; nop; nop`. plfix sets GCB1 = NOT GCB0 in the image (interrupts off, so it
+; (5 bytes) with `jsr plfix; brn k` (k: an XOR-balancing byte; see pl_patch.py). plfix sets GCB1 = NOT GCB0 in the image (interrupts off, so it
 ; can't interleave with the firmware's own updates of byte 8; the power-latch bit 2 is not touched),
 ; then does the two replaced instructions and returns. So the ASFIC always receives pin 4 = unmuted.
 ;

@@ -4,14 +4,23 @@
 See gm600py/stubs/pl_patch.S for the mechanism. Two changes to the 256 KB flash image:
 
   * PATCH_SITE (CPU 0x8F7F, file 0x38F7F, fixed bank): `ldab #$15; ldx #$37AC` (C6 15 CE 37 AC)
-    -> `jsr $DE00; nop; nop` (BD DE 00 01 01) — the start of SPI-dispatcher entry 8 (ASFIC image push)
-  * CAVE (CPU 0xDE00, file 0x3DE00): the 25-byte plfix routine, in flash that is erased (FF) in the
-    golden image and referenced by nothing, followed by ONE compensation byte (never executed)
+    -> `jsr $DE00; brn k` (BD DE 00 21 kk) — the start of SPI-dispatcher entry 8 (ASFIC image push).
+    BRN ("branch never") is a 2-byte no-op whose operand k is free: it is chosen so this sector's XOR
+    is unchanged.
+  * CAVE (CPU 0xDE00, file 0x3DE00): the 25-byte plfix routine, in a sector that is entirely erased
+    (FF) in the golden image and referenced by nothing, followed by ONE compensation byte (never
+    executed) that makes this sector's XOR unchanged too.
 
 The firmware checks its flash at boot (CPU 0x8DE8): XOR of every byte of the banked pages (count from
 page 0 0x5B50) and of the fixed 0x8000-0xFFFF region must be 0xFF, else it sets an error flag (0x3480)
-and the display shows "- 1" (found in the emulator: changing ONE erased byte does it). The
-compensation byte keeps that XOR at 0xFF; flash_xor() reproduces the check.
+and the display shows "- 1" (found in the emulator: changing ONE erased byte does it). In that state
+the firmware NAKs SBEP 0x11/0x17 [VM], so it can't be repaired over BUS+ — only off-board (T48).
+Because EACH sector is XOR-neutral on its own, every intermediate state (cave written, hook not yet;
+or the reverse) still passes the check. flash_xor() reproduces it.
+
+Write order matters for a different reason: the hook must never point at an unwritten cave (FF FF =
+`stx $FFxx`, a crash on the first unmute). patch_diff() returns the sectors in the safe apply order
+(cave first, then the hook); revert in the reverse order (hook first, then the cave).
 
 Both land in the fixed region (pages 14/15) and outside the AT29C020 boot blocks (first and last 8 KB).
 This module builds the patched image and the per-sector diff for a flash writer; it refuses an image
@@ -27,7 +36,15 @@ import gm600py.stubs as stubs
 GOLDEN_SHA256 = "db74c7c88911e9df1f7328e09975ae3a2db5d212be3df74bdeee0dd00aa530b9"
 PATCH_SITE = 0x38F7F                          # file offset (CPU 0x8F7F)
 PATCH_ORIG = bytes.fromhex("C615CE37AC")      # ldab #$15; ldx #$37AC
-PATCH_NEW = bytes.fromhex("BDDE000101")       # jsr $DE00; nop; nop
+def _xor(bs):
+    x = 0
+    for b in bs:
+        x ^= b
+    return x
+
+
+# jsr $DE00; brn k — k makes the 5-byte replacement XOR-neutral (sector XOR unchanged)
+PATCH_NEW = bytes([0xBD, 0xDE, 0x00, 0x21]) + bytes([_xor(PATCH_ORIG) ^ _xor(b"\xBD\xDE\x00\x21")])
 CAVE_CPU = 0xDE00
 CAVE_SITE = 0x38000 + (CAVE_CPU - 0x8000)     # file 0x3DE00
 SECTOR = 256                                  # AT29C020 program granularity
@@ -61,22 +78,23 @@ def patch_image(flash):
         raise ValueError(f"unexpected bytes at 0x{PATCH_SITE:05X}: {bytes(img[PATCH_SITE:PATCH_SITE + 5]).hex()}")
     if any(b != 0xFF for b in img[CAVE_SITE:CAVE_SITE + len(code) + 1]):
         raise ValueError(f"cave at 0x{CAVE_SITE:05X} is not erased")
-    before = flash_xor(img)
+    if any(b != 0xFF for b in img[CAVE_SITE & ~0xFF:(CAVE_SITE & ~0xFF) + SECTOR]):
+        raise ValueError("the whole cave sector must be erased (a rewrite reprograms all 256 bytes)")
+    assert _xor(PATCH_NEW) == _xor(PATCH_ORIG)    # the hook sector alone is XOR-neutral
     img[PATCH_SITE:PATCH_SITE + 5] = PATCH_NEW
     img[CAVE_SITE:CAVE_SITE + len(code)] = code
-    comp = CAVE_SITE + len(code)                  # compensation byte, right after the code
-    img[comp] = 0xFF ^ flash_xor(img) ^ before    # was FF; restores the boot-check XOR
-    assert flash_xor(img) == before
+    comp = CAVE_SITE + len(code)                  # compensation byte, right after the code: was FF;
+    img[comp] = 0xFF ^ _xor(code) ^ _xor(b"\xFF" * len(code))   # makes the cave sector XOR-neutral
     return bytes(img)
 
 
 def patch_diff(flash):
-    """[(sector file offset, original 256 bytes, patched 256 bytes)] for the sectors that change."""
+    """[(sector file offset, original 256 bytes, patched 256 bytes)] in the SAFE APPLY ORDER: the cave
+    sector first, then the hook. Revert = the same list reversed, writing the originals. Each sector on
+    its own keeps the boot-check XOR, so any prefix of either sequence boots."""
     new = patch_image(flash)
-    out = []
-    for s in sorted({PATCH_SITE // SECTOR * SECTOR, CAVE_SITE // SECTOR * SECTOR}):
-        out.append((s, bytes(flash[s:s + SECTOR]), new[s:s + SECTOR]))
-    return out
+    return [(s, bytes(flash[s:s + SECTOR]), new[s:s + SECTOR])
+            for s in (CAVE_SITE // SECTOR * SECTOR, PATCH_SITE // SECTOR * SECTOR)]
 
 
 def main():

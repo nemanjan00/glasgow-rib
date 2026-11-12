@@ -13,6 +13,12 @@
 ;                      replies the 256 bytes of that sector.
 ;   'W' (0x57) WRITE : host sends page, winhi, winlo, then 256 data bytes; the stub issues the SDP
 ;                      program prefix, loads the sector, waits tWC, and replies status byte 0x84.
+;                      Whitelist: pages 0, 12, 13 (window 0x40-0x7F), and exactly two fixed-region
+;                      sectors for pl_patch: page 14 window 0x4F00 (dev 0x38F00) and page 15 window
+;                      0x5E00 (dev 0x3DE00). Anything else -> 0x85, nothing programmed.
+;   'E' (0x45) ECHO  : host sends 256 bytes; the stub stores them in BUF exactly as 'W' does and sends
+;                      them back. No flash access, PA6 untouched -> proves the 256-byte host->stub
+;                      transfer on the radio with no 12 V and no risk.
 ;
 ; The bus is single-wire half-duplex, so every byte the stub transmits echoes back onto its own RX;
 ; txb drains that echo. The host (flashtool.py) reads back each written sector to verify.
@@ -74,8 +80,11 @@ n1:     cmpb    #$52            ; 'R'
         bne     n2
         jmp     do_read
 n2:     cmpb    #$57            ; 'W'
-        bne     loop
+        bne     n3
         jmp     do_write
+n3:     cmpb    #$45            ; 'E'
+        bne     loop
+        jmp     do_echo
 
 ; ------------------------------------------------------------------ helpers
 cop:    ldaa    #$55            ; COP watchdog kick
@@ -209,6 +218,17 @@ wrxlp:  stx     CNT16
         cmpb    #12
         beq     wpg
         cmpb    #13
+        beq     wpg
+        cmpb    #14             ; page 14: ONLY the pl_patch jsr sector (window 0x4F00 = dev 0x38F00)
+        bne     wp15
+        ldab    WINPTR
+        cmpb    #$4F
+        bne     wrej
+        bra     wpg
+wp15:   cmpb    #15             ; page 15: ONLY the pl_patch cave sector (window 0x5E00 = dev 0x3DE00;
+        bne     wrej            ; vectors and the upper boot block 0x3E000+ stay unwritable)
+        ldab    WINPTR
+        cmpb    #$5E
         bne     wrej
 wpg:    ldab    WINPTR          ; window hi MUST be 0x40-0x7F (the bank window) — never the fixed
         cmpb    #$40            ; region ($80+), or a bad header byte could program pages 14/15
@@ -260,6 +280,34 @@ wdi:    dex
         jsr     we_off          ; PA6 low: back to read mode
         ldab    #$84            ; status
         jsr     txb
+        jmp     loop
+
+; ------------------------------------------------------------------ 'E' echo 256 bytes (transport test)
+do_echo:
+        ldx     #BUF            ; receive exactly like 'W' (same buffer, same per-byte loop)
+        stx     BUFPTR
+        ldx     #256
+erxlp:  stx     CNT16
+        jsr     rxb
+        ldx     BUFPTR
+        stab    0,x
+        inx
+        stx     BUFPTR
+        ldx     CNT16
+        dex
+        bne     erxlp
+        ldx     #BUF            ; then send the buffer back
+        stx     BUFPTR
+        ldx     #256
+etxlp:  stx     CNT16
+        ldx     BUFPTR
+        ldab    0,x
+        inx
+        stx     BUFPTR
+        jsr     txb
+        ldx     CNT16
+        dex
+        bne     etxlp
         jmp     loop
 
         .cksum16                ; zeroes both self-check sums (see the self-check at start)

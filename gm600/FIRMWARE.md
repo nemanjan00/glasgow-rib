@@ -487,10 +487,17 @@ Why `0x37AC` is the ASFIC image:
   - A standalone version needs a firmware-side hook (copy NOT GCB0 → GCB1 where byte 8 is built).
 - **Standalone pin-4 output: flash patch designed, VM-verified, not flashed** (`gm600py/firmware/pl_patch.py`,
   cave source `gm600py/stubs/pl_patch.S`):
-  - **Hook:** the start of entry 8 (CPU `0x8F7F`, `ldab #21; ldx #$37AC`) becomes `jsr $DE00; nop; nop`.
+  - **Hook:** the start of entry 8 (CPU `0x8F7F`, `ldab #21; ldx #$37AC`) becomes `jsr $DE00; brn k`
+    (`BD DE 00 21 C4`). BRN is a 2-byte no-op whose operand is chosen so the hook sector's flash XOR is
+    unchanged.
   - **Cave:** 25 bytes at `0xDE00` (erased fixed-bank flash) set GCB1 = NOT GCB0 with interrupts off,
     redo the two instructions and return. So every image push carries pin 4 = "speaker unmuted".
-  - **Footprint:** two 256-byte sectors (`0x38F00`, `0x3DE00`), both outside the boot blocks.
+  - **Footprint:** two 256-byte sectors, both outside the boot blocks. `0x3DE00` (cave) is erased in
+    full in the golden image; `0x38F00` holds the SPI dispatcher itself.
+  - **Write order and boot check:** `patch_diff()` returns the cave sector first, then the hook
+    (revert: reverse), so the hook never points at erased flash. Each sector is XOR-neutral on its own
+    (cave: one compensation byte; hook: the BRN operand), so every partial state still passes the
+    boot flash check [VM-tested].
   - **VM results:** boots to 322; 512/515 SPI transfers identical to the golden image, the three
     differences being exactly byte 8 `E4` → `E6`; every push satisfies GCB1 = NOT GCB0; power latch
     untouched. Tests: `PlPatchTest`.
@@ -629,8 +636,12 @@ the fixed region `0x8000`–`0xFFFF` (routine `0x8DE8`, helpers `0x8DCD`/`0x8DDB
 idle number. Changing a single erased byte is enough to trip it.
 
 - `pl_patch.flash_xor()` reproduces the check; the golden image gives `0xFF`.
-- Both patch modules now add one **compensation byte** next to their code, in a sector they write
-  anyway. The keypad patch as first written would have tripped it (XOR `F3`); it was never flashed.
+- Both patch modules keep it: `keypad_patch` with a compensation byte next to its stub; `pl_patch`
+  with each sector XOR-neutral on its own.
+- **A radio that boots into `- 1` NAKs SBEP `0x11` and `0x17` [VM]**: no RAM writes means no stub
+  upload, so it **cannot be repaired over BUS+**. Recovery would be the T48, or HC11 bootstrap mode
+  (12 V on pin 12 at reset), which is untested. The check runs only at boot, so an open flashtool
+  session can still finish or revert — don't power-cycle until the final state reads back right. The keypad patch as first written would have tripped it (XOR `F3`); it was never flashed.
 
 ## Free RAM 0x3D80–0x3FFF — who owns which bytes
 
@@ -644,7 +655,7 @@ else that can be present at the same time.
 | Range | Owner | Notes |
 |--|--|--|
 | `0x3D80`–`0x3DB8` | `keyevt.S` code (*live*) | non-halting; the live panel / `keyhold.py` keep it resident |
-| `0x3D80`–`0x3F47` | halting stubs' code: `ramdump.S`, `flashtool.S`, `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S` — fine, a halting stub ends with a power-cycle |
+| `0x3D80`–`0x3FAB` | halting stubs' code: `ramdump.S`, `flashtool.S` (to `0x3FAB`), `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S`/`asfic_push.S` — fine, a halting stub ends with a power-cycle |
 | `0x3DC0`–`0x3E08` | `asfic_push.S` code (*live*) | non-halting; `pl_out` / live panel `--pl-out` keep it resident next to `keyevt.S` |
 | `0x3E40`–`0x3F59` | `lcd_raw.S` code (halting) | |
 | `0x3F00`–`0x3F01` | `keyevt.S` parameters EVT, STATE (*live*) | written by the host before each `0x26` |
