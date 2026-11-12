@@ -277,6 +277,7 @@ class LcdTextTest(unittest.TestCase):
             a = asm6811.assemble_file(os.path.join(here, stub))
             m.ram[a.org:a.org + len(a.code)] = a.code
             m.reg[0x28] = 0x5C
+            m.pins[0x7E] = 0x00     # PORTG inputs low: compare only the select bits the code drives
             log = []
             m.watch = lambda ad, v: log.append((ad, v)) if ad in (0x1028, 0x107E, 0x102A) else None
             c.SP, c.PC = 0x3FFF, a.org
@@ -373,7 +374,7 @@ class BannerTest(unittest.TestCase):
 class StubSelfCheckTest(unittest.TestCase):
     """Every RAM stub carries a 16-bit (Fletcher-style) self-check and refuses to run if damaged."""
 
-    STUBS = ("ramdump.S", "flashtool.S", "lcd_text.S", "led_cmd.S", "lcd_raw.S")
+    STUBS = ("ramdump.S", "flashtool.S", "lcd_text.S", "led_cmd.S", "lcd_raw.S", "keyevt.S")
 
     def _run(self, a, code):
         import emu6811
@@ -485,6 +486,27 @@ class KeyHoldTest(unittest.TestCase):
         m.ram[0x11D8] &= ~0x10 & 0xFF                           # resume the keypad task
         c.run(max_insns=1_000_000, cop_timeout=150000)
         self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"  1")   # stays latched after release
+
+
+class CodeplugSummaryTest(unittest.TestCase):
+    """gm600_codeplug.summary decodes the documented reference-radio fields (FREQ_ENCODING.md)."""
+
+    def test_reference_channels(self):
+        import gm600_codeplug as g
+        cp = bytearray(640)
+        base = 0x0D80
+        cp[0x0F0B - base:0x0F0D - base] = (322).to_bytes(2, "big")
+        recs = ["AC6BAC6B001308", "AC75AC75000008", "AC6FAC6F000008", "31B52BC5130008"]
+        for n, h in enumerate(recs):
+            cp[0x0F67 - base + 7 * n:0x0F67 - base + 7 * (n + 1)] = bytes.fromhex(h)
+        g.fix_checksums(cp)
+        s = g.summary(bytes(cp))
+        self.assertEqual(s["own_unit"], 322)
+        self.assertEqual(s["checksums"], "all valid")
+        self.assertEqual([c["rx_mhz"] for c in s["channels"]], [446.06875, 446.13125, 446.09375, 438.625])
+        self.assertEqual(s["channels"][3]["tx_mhz"], 431.025)
+        self.assertEqual(s["channels"][0]["rx_pl"], "123.0 Hz (3Z)")
+        self.assertEqual(s["channels"][3]["tx_pl"], "123.0 Hz (3Z)")
 
 
 class EmulatorTest(unittest.TestCase):
@@ -785,7 +807,7 @@ class FlashStubIntegrationTest(unittest.TestCase):
             self.skipTest("set GM600_FW=/path/to/motofix.BIN (a flash dump) to run this")
         self.flash = open(fw, "rb").read()
         a = asm6811.assemble_file(os.path.join(HERE, "flashtool.S"))
-        self.org, self.stub = a.org, a.code
+        self.org, self.stub, self.loop = a.org, a.code, a.symbols["loop"]
         self.m, self.c = self._boot(emu6811)
 
     def _boot(self, emu6811):
@@ -796,6 +818,9 @@ class FlashStubIntegrationTest(unittest.TestCase):
         m.ram[self.org:self.org + len(self.stub)] = self.stub
         c.PC = self.org; c.sf(emu6811.I, True); c.SP = 0x01FF
         m.pin12_12v = True
+        # let the stub pass its self-check and clear the SCI (as the host's 0.3 s wait does) before
+        # any command arrives - an earlier byte would be dropped by that clear
+        c.run(max_insns=100_000, stop_pc=self.loop)
         return m, c
 
     def _cmd(self, payload, n, budget=3_000_000):

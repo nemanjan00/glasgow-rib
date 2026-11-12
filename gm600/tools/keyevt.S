@@ -21,7 +21,23 @@ STATE   = $3F01
 KEYEVT  = $4D8B         ; page 0: report key event (D = event, stack arg = state)
 EPILOG  = $4CE6         ; page 1: the 0x26 handler's own exit (pulx; rts)
 
-start:  cli                     ; a task normally runs with interrupts on
+start:  ldx     #start          ; self-check (Fletcher-style, like the other stubs): a damaged copy
+        clra                    ; must not run inside the live firmware - spin instead, the COP
+        clrb                    ; watchdog then resets the radio (safe)
+selfck: adda    0,x
+        psha
+        aba
+        tab
+        pula
+        inx
+        cpx     #codeend
+        bne     selfck
+        tsta
+        bne     damaged
+        tstb
+        beq     selfok
+damaged: bra    damaged
+selfok: cli                     ; a task normally runs with interrupts on
         ldaa    BANK            ; save the bank (page 1 while the SBEP handler runs)
         psha
         clra
@@ -37,3 +53,6 @@ start:  cli                     ; a task normally runs with interrupts on
         pula
         staa    BANK            ; back to the handler's page
         jmp     EPILOG          ; pulx; rts - return to the SBEP dispatcher
+
+        .cksum16                ; zeroes both self-check sums
+codeend:

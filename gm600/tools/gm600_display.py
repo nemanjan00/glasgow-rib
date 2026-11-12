@@ -184,9 +184,18 @@ _PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>GM600 display
 align-items:center;margin-top:30px}#d svg{width:min(1100px,96vw);height:auto}
 #d .hot:hover{fill-opacity:.12}#k button{background:#2a2c31;color:#ddd;border:1px solid #555;
 border-radius:6px;margin:3px;padding:4px 8px;font:13px monospace;cursor:pointer}
-#k button:hover{background:#3a3d44}#s,#p{margin:6px}</style></head>
+#k button:hover,#x button:hover{background:#3a3d44}#s,#p{margin:6px}
+#x button,#x a{background:#2a2c31;color:#ddd;border:1px solid #555;border-radius:6px;margin:3px;
+padding:4px 8px;font:13px monospace;cursor:pointer;text-decoration:none}#cp{font:12px monospace;color:#bbb}</style></head>
 <body><div id="d"></div><div id="s"></div><div id="p"></div>
-<div id="k">raw key codes: CODES</div><script>
+<div id="k">raw key codes: CODES</div>EXTRAS<pre id="cp"></pre><script>
+async function post(url){document.getElementById('p').textContent='working ...';
+const r=await fetch(url,{method:'POST'});document.getElementById('p').textContent=await r.text()}
+async function preview(){const pre=document.getElementById('cp');pre.textContent='reading codeplug ...';
+const j=await (await fetch('/codeplug.json',{cache:'no-store'})).json();
+let t='Own Unit No. '+j.own_unit+'   checksums: '+j.checksums+'\n\nch  rx MHz      tx MHz      rx PL            tx PL            opt\n';
+for(const c of j.channels)t+=String(c.channel).padEnd(4)+String(c.rx_mhz.toFixed(5)).padEnd(12)+String(c.tx_mhz.toFixed(5)).padEnd(12)+c.rx_pl.padEnd(17)+c.tx_pl.padEnd(17)+c.options+'\n';
+t+='\n'+j.hex;pre.textContent=t}
 async function press(q){document.getElementById('p').textContent='pressing '+q+' ...';
 const r=await fetch('/press?'+q,{method:'POST'});document.getElementById('p').textContent=await r.text()}
 // A quick click is a single tap; only a press held past HOLD_MS becomes a hold (down ... up), so a
@@ -207,7 +216,12 @@ document.getElementById('s').textContent=(j.rx?'RX: '+j.rx+' \u00b7 ':'')+'frame
 </script></body></html>"""
 
 
-def serve_ui(get_state, port=8600, press=None, host="127.0.0.1"):
+def _hexdump(data, base=0x0D80):
+    return "\n".join(f"{base + i:04X}  " + " ".join(f"{b:02X}" for b in data[i:i + 16])
+                     for i in range(0, len(data), 16))
+
+
+def serve_ui(get_state, port=8600, press=None, host="127.0.0.1", codeplug=None, set_mode=None):
     """Serve the live display at http://127.0.0.1:<port>/. ``get_state`` returns a dict with
     ``segments``, ``leds`` and ``frames``; ``press(code, action)`` (optional; action = tap / down / up)
     makes the panel's buttons pressable: pointer-down holds the key, pointer-up releases it. Runs in a daemon thread; returns the bound port."""
@@ -217,6 +231,22 @@ def serve_ui(get_state, port=8600, press=None, host="127.0.0.1"):
         def do_POST(self):
             url = urllib.parse.urlparse(self.path)
             q = urllib.parse.parse_qs(url.query)
+            if url.path == "/mode" and set_mode is not None:
+                to = q.get("to", [""])[0]
+                if to not in ("trunked", "conventional"):
+                    self.send_error(400, "to must be trunked or conventional")
+                    return
+                try:
+                    now = set_mode(to)
+                except Exception as e:
+                    self.send_error(503, f"mode change failed: {e}")
+                    return
+                body = f"mode now: {now}".encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if url.path != "/press" or press is None:
                 self.send_error(404)
                 return
@@ -256,10 +286,31 @@ def serve_ui(get_state, port=8600, press=None, host="127.0.0.1"):
                 ctype = "image/svg+xml"
             elif self.path.startswith("/state.json"):
                 body, ctype = json.dumps(st).encode(), "application/json"
+            elif self.path.startswith("/codeplug") and codeplug is not None:
+                try:
+                    cp = bytes(codeplug())
+                except Exception as e:
+                    self.send_error(503, f"codeplug read failed: {e}")
+                    return
+                if self.path.startswith("/codeplug.bin"):
+                    body, ctype = cp, "application/octet-stream"
+                else:
+                    from gm600_codeplug import summary
+                    body = json.dumps(dict(summary(cp), hex=_hexdump(cp))).encode()
+                    ctype = "application/json"
             elif self.path in ("/", "/index.html"):
                 codes = " ".join(f'<button onclick="press(\'code={c:02X}\')">{c:02X}</button>'
                                  for c in sorted(KEY_CODES)) if press else "(read-only)"
-                body, ctype = _PAGE.replace("CODES", codes).encode(), "text/html; charset=utf-8"
+                extras = []
+                if codeplug is not None:
+                    extras += ['<a href="/codeplug.bin" download="gm600-codeplug.bin">Download codeplug</a>',
+                               '<button onclick="preview()">Preview codeplug</button>']
+                if set_mode is not None:
+                    extras += ["<button onclick=\"post('/mode?to=trunked')\">Mode: trunked</button>",
+                               "<button onclick=\"post('/mode?to=conventional')\">Mode: conventional</button>"]
+                extra = f'<div id="x">{" ".join(extras)}</div>' if extras else ""
+                body = _PAGE.replace("CODES", codes).replace("EXTRAS", extra).encode()
+                ctype = "text/html; charset=utf-8"
             else:
                 self.send_error(404)
                 return

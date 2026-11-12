@@ -156,6 +156,24 @@ class Radio:
         op, data = decode(self._take(n))
         return status, op, data
 
+    def wait_ack(self, frame, timeout=None):
+        """After sending ``frame`` yourself: check its echo and that the radio answered with ACK
+        (``50``). Returns nothing; raises SBEPError on a wrong/short echo, no status, or NAK/refusal.
+        Used after a ``26`` launch, which has no reply frame."""
+        if timeout is None:
+            timeout = self.default_timeout(frame)
+        deadline = time.monotonic() + timeout
+        if not self._need(len(frame), deadline):
+            raise SBEPError(f"short echo for {frame.hex(' ')}: {bytes(self.buf).hex(' ')}")
+        echo = self._take(len(frame))
+        if echo != frame:
+            raise SBEPError(f"echo mismatch: sent {frame.hex(' ')}, got {echo.hex(' ')}")
+        if not self._need(1, time.monotonic() + timeout):
+            raise SBEPError(f"no status byte after {frame.hex(' ')}")
+        status = self._take(1)[0]
+        if status != ACK:
+            raise SBEPError(f"{frame.hex(' ')} not ACKed (status {status:02X})")
+
     def read_block(self, addr, length):
         """``11`` read of up to 64 bytes. Returns the data, checking the echoed address."""
         status, op, data = self.transact(encode(0x11, bytes([length]) + addr.to_bytes(3, "big")))
@@ -188,3 +206,15 @@ def launch_stub(radio, org, code):
     radio.drain()
     radio.sock.sendall(frame)
     return frame
+
+
+def launch_returning_stub(radio, org, code=None):
+    """Launch a NON-halting stub (one that returns into the firmware, e.g. keyevt.S) and check the
+    radio ACKed the ``26``. With ``code``, re-verify it first (see :func:`launch_stub`)."""
+    if code is not None:
+        frame = launch_stub(radio, org, code)
+    else:
+        frame = encode(0x26, org.to_bytes(2, "big"))
+        radio.drain()
+        radio.sock.sendall(frame)
+    radio.wait_ack(frame, timeout=0.5)

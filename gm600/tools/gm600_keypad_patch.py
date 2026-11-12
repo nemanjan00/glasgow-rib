@@ -11,12 +11,10 @@ event, this overrides its SOURCE: the one instruction in `read_adc` that reads t
 CPU 0x5E25 (file 0x1E25, an 8.6 KB run of 0xFF in page 0, reachable by a direct jsr since read_adc
 runs in page 0). The stub returns a host-controlled value from RAM when armed, else the real ADR1:
 
-    0x5E25  ldab FORCE_EN     ; F6 02 8B
-            beq  real         ; 27 04
-            ldab FORCE_VAL    ; F6 02 8C   -> armed: ignore the real button, use our value
-            rts               ; 39
-    real:   ldab ADR1         ; F6 10 31   -> disarmed: the real keypad, patch is transparent
-            rts               ; 39
+    0x5E25  ldaa FORCE_EN; cmpa #$A5; bne real   ; armed only when both magic bytes match
+            ldaa FORCE_M2; cmpa #$5A; bne real
+            ldab FORCE_VAL; rts                  -> armed: ignore the real button, use our value
+    real:   ldab ADR1; rts                       -> disarmed: the real keypad, patch is transparent
 
 With the patch in place the WHOLE real keypad path runs for a host-supplied level, so a press behaves
 exactly like a finger (validated in the emulator: a FORCE-injected key is byte-identical to a physical
@@ -24,14 +22,16 @@ press on the patched firmware). While armed the stub ignores the real line, so a
 remote can't fight. Press / release are just RAM writes (SBEP 0x17); reverting the flash bytes gives
 the buttons back.
 
-  * FORCE_EN  = 0x028B   armed only when == 0xA5 (magic 1); anything else = real buttons
-  * FORCE_M2  = 0x028D   armed only when == 0x5A (magic 2)
-  * FORCE_VAL = 0x028C   the A/D level for the key to inject (same value the key's ladder gives)
+  * FORCE_EN  = 0x3FF0   armed only when == 0xA5 (magic 1); anything else = real buttons
+  * FORCE_VAL = 0x3FF1   the A/D level for the key to inject (same value the key's ladder gives)
+  * FORCE_M2  = 0x3FF2   armed only when == 0x5A (magic 2)
 
 The override engages only when BOTH magic bytes match, so power-up garbage RAM arms it ~1-in-65536
 instead of a coin flip (a patched radio with no host attached boots and keys work normally). The
-host calls arm() after connecting to clear the control bytes, then press()/release(). The bytes sit
-in RAM the firmware never touches, well clear of the stack (SP never below ~0x00F5).
+host calls arm() after connecting to clear the control bytes, then press()/release(), and must disarm
+when it exits (even on errors). The bytes are in external RAM that the boot RAM test clears, so a
+reset or power cycle always disarms; internal RAM (0x0000-0x02FF) is NOT safe for this — it is
+retained across power-off. If this is ever flashed: test arm -> power-cycle -> real keys work.
 
 Applying the patch to a real radio needs an AT29C020 in-system sector write (apply + revert); this
 module produces the patched image and the exact byte diff for a flash writer. The press/release
@@ -48,11 +48,13 @@ STUB_SITE = 0x1E25                        # flash file offset for the stub (CPU 
 # a coin flip, so a patched radio with no host attached boots and keys work normally.
 #   ldaa FORCE_EN; cmpa #$A5; bne real; ldaa FORCE_M2; cmpa #$5A; bne real; ldab FORCE_VAL; rts
 #   real: ldab ADR1; rts
-STUB = bytes.fromhex("b6028b81a5260bb6028d815a2604f6028c39f6103139")
+STUB = bytes.fromhex("b63ff081a5260bb63ff2815a2604f63ff139f6103139")
 
-# RAM control bytes, in a region the firmware never touches and well clear of the stack (reset sets
-# SP=0x0114 and it never goes below ~0x00F5, verified in the emulator; FORCE sits at 0x028B+).
-FORCE_EN, FORCE_VAL, FORCE_M2 = 0x028B, 0x028C, 0x028D
+# RAM control bytes in EXTERNAL RAM (0x3FF0-0x3FF2): unreferenced by the firmware, zero in every RAM
+# dump, and cleared by the boot RAM test - so an armed override can never survive a reset or a power
+# cycle. (They used to be at 0x028B-0x028D, in the CPU's internal RAM, which is retained across power-off
+# by the standby supply; and 0x028C turned out to be firmware state that changes with the radio mode.)
+FORCE_EN, FORCE_VAL, FORCE_M2 = 0x3FF0, 0x3FF1, 0x3FF2
 MAGIC1, MAGIC2 = 0xA5, 0x5A
 RELEASED = 0xFF                           # idle A/D level (no key)
 

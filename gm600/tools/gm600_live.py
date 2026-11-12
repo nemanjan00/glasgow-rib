@@ -13,8 +13,12 @@ radio instead of the VM:
            until the mouse button is released.
 
 Runs on the host with the rib applet (SBEP_ADDR, default 127.0.0.1:2324; single client — stop other
-SBEP tools first). Open from another machine with ``ssh -L 8600:127.0.0.1:8600 <lab>`` or bind
-``--host 0.0.0.0``.
+SBEP tools first). Open from another machine with ``ssh -L 8608:127.0.0.1:8600 <lab>`` (preferred:
+the panel has no authentication), or ``--host 0.0.0.0`` on a trusted network only.
+
+Also: Download / Preview codeplug (640-byte EEPROM read live; preview decodes the Own Unit No., the
+conventional channels and the checksums) and Mode buttons (trunked/conventional via gm600_mode: two
+retained-RAM bytes + 0x10 reset, ~10 s).
 
   gm600_live.py [--port 8600] [--host 127.0.0.1] [--poll 0.3]
 """
@@ -27,6 +31,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import asm6811
 import gm600_display
+import gm600_mode
 import lcd_text
 import sbep
 
@@ -58,25 +63,20 @@ class LiveRadio:
 
     def _post(self, event, pressed, verify=True):
         self._write(EVT, [event, 1 if pressed else 0])
-        if verify:
-            try:
-                frame = sbep.launch_stub(self.r, self.org, self.code)   # re-verify, then 0x26
-            except sbep.SBEPError as e:
-                if "changed before launch" not in str(e):
-                    raise
-                # the radio reset (power cycle, or a trunked/conventional mode change) and its boot
-                # RAM test wiped the stub: put it back and try once more
-                self._upload()
-                self._write(EVT, [event, 1 if pressed else 0])
-                frame = sbep.launch_stub(self.r, self.org, self.code)
-        else:                                           # stub verified moments ago (same tap)
-            frame = sbep.encode(0x26, self.org.to_bytes(2, "big"))
-            self.r.drain()
-            self.r.sock.sendall(frame)
-        # the radio echoes the frame and ACKs, then runs the stub and returns to the firmware
-        self.r._need(len(frame) + 1, time.monotonic() + 0.5)
+        try:
+            # verify=False on a release: verified half a second earlier, and keyevt.S also checks
+            # itself before touching the firmware
+            sbep.launch_returning_stub(self.r, self.org, self.code if verify else None)
+        except sbep.SBEPError as e:
+            if "changed before launch" not in str(e):
+                raise
+            # the radio reset (power cycle, or a trunked/conventional mode change) and its boot
+            # RAM test wiped the stub: put it back and try once more
+            self._upload()
+            self._write(EVT, [event, 1 if pressed else 0])
+            sbep.launch_returning_stub(self.r, self.org, self.code)
         self.r.drain()
-        time.sleep(0.03)
+        time.sleep(0.03)                                # stub returns into the firmware
 
     def _keypad(self, paused):
         flags = self.r.read_block(KEYPAD_TCB_FLAGS, 1)[0]
@@ -135,6 +135,16 @@ class LiveRadio:
                 time.sleep(1.0)
             time.sleep(self.poll)
 
+    def codeplug(self):
+        """The 640-byte EEPROM codeplug (0x0D80-0x0FFF), read live."""
+        with self.lock:
+            return b"".join(self.r.read_block(a, 0x20) for a in range(0x0D80, 0x1000, 0x20))
+
+    def set_mode(self, to):
+        """Trunked/conventional via the two retained-RAM bytes + reset (gm600_mode)."""
+        with self.lock:
+            return gm600_mode.set_mode(self.r, to)
+
     def close(self):
         try:
             self.press(None, "up")
@@ -146,12 +156,20 @@ class LiveRadio:
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--port", type=int, default=8600)
-    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="address to listen on (default 127.0.0.1). The panel has NO authentication "
+                         "and can press keys (incl. on/off) and switch modes: use an ssh tunnel "
+                         "rather than 0.0.0.0 unless the network is trusted")
     ap.add_argument("--poll", type=float, default=0.15, help="seconds between screen reads")
     args = ap.parse_args()
     radio = LiveRadio(poll=args.poll)
     threading.Thread(target=radio.poll_forever, daemon=True).start()
-    port = gm600_display.serve_ui(lambda: radio.state, args.port, press=radio.press, host=args.host)
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"WARNING: listening on {args.host} with NO authentication - anyone who can reach it can "
+              "press keys, switch modes and read the codeplug. Prefer the default + an ssh tunnel.",
+              file=sys.stderr)
+    port = gm600_display.serve_ui(lambda: radio.state, args.port, press=radio.press, host=args.host,
+                                  codeplug=radio.codeplug, set_mode=radio.set_mode)
     print(f"GM600 {radio.serial} live panel: http://{args.host}:{port}/  (Ctrl-C to stop)", flush=True)
     try:
         while True:

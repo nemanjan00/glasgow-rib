@@ -189,7 +189,8 @@ if __name__ == "__main__":
     if ui:
         import gm600_display
         ui_port = int(ui[0].split("=", 1)[1]) if "=" in ui[0] else 8600
-        ui_port = gm600_display.serve_ui(radio.tap.state, ui_port, press=radio.press)
+        ui_port = gm600_display.serve_ui(radio.tap.state, ui_port, press=radio.press,
+                                         codeplug=lambda: bytes(radio.m.eeprom))
         threading.Thread(target=radio.free_run, daemon=True).start()
         print(f"GM600 VM display: http://127.0.0.1:{ui_port}/", flush=True)
     serve(radio, port)

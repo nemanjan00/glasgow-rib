@@ -36,8 +36,8 @@ def write(r, addr, data):
 
 def post(r, org, code, event, state):
     write(r, EVT, [event, state])
-    sbep.launch_stub(r, org, code)
-    time.sleep(0.3)                     # the stub returns; let the dispatcher finish
+    sbep.launch_returning_stub(r, org, code)
+    time.sleep(0.1)                     # the stub returns into the firmware
     r.drain()
 
 

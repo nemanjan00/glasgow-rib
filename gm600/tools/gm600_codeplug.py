@@ -75,3 +75,49 @@ if __name__ == "__main__":
         fix_checksums(data)
         open(sys.argv[3], "wb").write(data)
         print("fixed checksums written to", sys.argv[3])
+
+
+# --- human-readable summary (web preview, CLI) -------------------------------------------------
+
+CHANNELS, CHANNEL_LEN, N_CHANNELS = 0x0F67, 7, 4      # conventional channel table (CODEPLUG.md)
+OWN_UNIT = 0x0F0B                                     # MPT1327 Own Unit No. (BE16) = idle display
+
+
+def freq_mhz(word):
+    """FREQ_ENCODING.md: 375 MHz + (v & 0x7FFF) * (6.25 kHz if bit 15 else 5 kHz)."""
+    return 375.0 + (word & 0x7FFF) * (0.00625 if word & 0x8000 else 0.005)
+
+
+def pl_tones():
+    """index -> label ("123.0 Hz (3Z)"), read from the pl_tone enum in ../gm600_codeplug.ksy."""
+    import os
+    import re
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gm600_codeplug.ksy")
+    text = open(path).read()
+    block = text[text.index("  pl_tone:"):]
+    out = {}
+    for idx, doc in re.findall(r"\n    (\d+):\n      id: \w+\n      doc: ([^\n]+)", block):
+        out[int(idx)] = doc.strip()
+        if len(out) > 60:
+            break
+    return out
+
+
+def summary(cp, base=RADIO_BASE):
+    """Dict with the Own Unit No., the conventional channels and the block-checksum status."""
+    tones = pl_tones()
+    at = lambda a: a - base
+    chans = []
+    for n in range(N_CHANNELS):
+        r = cp[at(CHANNELS) + n * CHANNEL_LEN: at(CHANNELS) + (n + 1) * CHANNEL_LEN]
+        rx, tx = int.from_bytes(r[0:2], "big"), int.from_bytes(r[2:4], "big")
+        if rx == 0 and tx == 0:
+            continue
+        chans.append({"channel": n + 1, "rx_mhz": round(freq_mhz(rx), 5), "tx_mhz": round(freq_mhz(tx), 5),
+                      "tx_pl": tones.get(r[4], f"#{r[4]}"), "rx_pl": tones.get(r[5], f"#{r[5]}"),
+                      "options": f"0x{r[6]:02X}"})
+    bad = verify_checksums(bytes(cp), base)
+    return {"own_unit": int.from_bytes(cp[at(OWN_UNIT):at(OWN_UNIT) + 2], "big"),
+            "channels": chans,
+            "checksums": "all valid" if not bad else f"BAD: {bad}",
+            "size": len(cp)}
