@@ -43,8 +43,8 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
     GCB1 = NOT GCB0) VM-verified, NOT flashed. Flash path ready: exact-sector whitelist, safe order (cave then
     hook), each sector XOR-neutral; **256-byte transfer proven on the radio** (`flashtool.py echo`, 256/256,
     2026-11-12) [HW]; pages 14/15 through the bank window read identical to the fixed region and golden
-    (`flashtool.py check pl`) [HW]. Remaining: the real write — owner at the bench, 12 V on pin 12 after boot, fresh
-    backup, T48 ready (`flashtool.py patch pl motofix.BIN`). Image bits 1:2 and 4:1 reset the radio.
+    (`flashtool.py check pl`) [HW]. Remaining: the real write — owner at the bench; checklist incl. post-reboot checks in
+    FLASH_WRITE.md "pl_patch — real-write procedure". Image bits 1:2 and 4:1 reset the radio.
 
 ## Invariants (never violate)
 - **Irreversible steps have a hard gate** (flash write, EEPROM write outside `codeplug.apply`, hot air,

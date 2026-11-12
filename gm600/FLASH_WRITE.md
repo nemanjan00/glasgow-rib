@@ -155,3 +155,27 @@ writes [VM], so keep the stub session open until the final state verifies.
 - Every real write goes through the irreversible-step gate (STATE.md), with the owner at the bench:
   12 V on pin 12 only after boot, a fresh full backup that matches the golden image, and the T48
   ready.
+
+## pl_patch — real-write procedure (owner at the bench)
+
+Before:
+1. Radio on and booted (normal idle display). **Then** 12 V on pin 12 (never at reset = bootstrap mode).
+2. Fresh full flash backup that matches the golden image; T48 and `motofix.BIN` within reach.
+3. Nothing else on the SBEP slot: `systemctl --user stop gm600live`.
+
+Write:
+4. `python3 -m gm600py.stubs.flashtool patch pl ~/.local/share/gm600/motofix.BIN` — probe, then the cave
+   sector, then the hook sector, each checked against golden/patched first, backed up, written, and
+   read back through the bank window.
+5. Only if both sectors say "verified": remove the 12 V from pin 12, then power-cycle (`psu_reboot.py`).
+   If a read-back failed: **don't power-cycle**; the stub session is still open, re-run or `revert pl`.
+
+After the reboot (plan these before step 5):
+6. `flashtool.py check pl …` → **PATCHED in both views** (the firmware's own fixed-region view sees the
+   new code), then power-cycle again to leave the halted stub.
+7. The display shows the normal idle number, **not `- 1`**. If it shows `- 1`: don't power-cycle again —
+   SBEP writes are refused in that state [VM], so this is the T48 case, by design.
+8. Pin 4 with no host attached: ~12 V at idle, ~0.6 V while the HackRF sends 123.0 Hz PL on ch 004,
+   unchanged on a carrier without PL.
+
+Revert: `flashtool.py revert pl …` (hook first, then the cave), same gate.
