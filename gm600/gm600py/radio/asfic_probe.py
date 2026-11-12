@@ -50,7 +50,9 @@ def main():
     ap.add_argument("--dmm", required=True, help="DMM host (SCPI on port 5025)")
     ap.add_argument("--delta", type=float, default=1.0, help="volts change that counts as a hit")
     ap.add_argument("--settle", type=float, default=0.6)
+    ap.add_argument("--skip", default="", help="byte:bit pairs never to touch, e.g. 1:2 (reset the radio once)")
     args = ap.parse_args()
+    skip = {tuple(int(x) for x in p.split(":")) for p in args.skip.split(",") if p}
     idx = []
     for part in args.bytes.split(","):
         lo, _, hi = part.partition("-")
@@ -64,7 +66,13 @@ def main():
         print(f"image {bytes(r.read_block(IMAGE, 21)).hex(' ')}  baseline {base_v:.3f} V", flush=True)
         for i in idx:
             for bit in range(8):
-                cur = r.read_block(IMAGE + i, 1)[0]
+                if (i, bit) in skip:
+                    continue
+                try:
+                    cur = r.read_block(IMAGE + i, 1)[0]
+                except (sbep.SBEPError, OSError) as e:
+                    print(f"radio stopped answering after the previous trial (before byte {i} bit {bit}): {e}")
+                    return 2
                 if cur & (1 << bit):
                     continue
                 write(r, IMAGE + i, [cur | (1 << bit)])
