@@ -318,7 +318,7 @@ class FlashStubIntegrationTest(unittest.TestCase):
         before = bytes(self.m.flash)
         self.m.sci_out.clear()
         self.m.feed_rx(bytes([ord("W"), 15, 0x5E, 0x00]) + bytes(range(100)))   # a pl_patch sector, cut off
-        self.c.run(max_insns=4_000_000, cop_timeout=0)                         # > the ~1 s receive timeout
+        self.c.run(max_insns=4_000_000, cop_timeout=0)                         # > the stub receive timeout (65536 polls, ~0.7 s on the radio)
         pat = bytes((i * 37 + 11) & 0xFF for i in range(256))
         self.assertEqual(self._cmd([ord("E")] + list(pat), 256), pat)            # what --attach sends first
         self.assertEqual(bytes(self.m.flash), before)                           # nothing was programmed
