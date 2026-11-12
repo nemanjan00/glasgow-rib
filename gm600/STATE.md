@@ -37,10 +37,10 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
   - a channel once stepped by itself during real PMR traffic [HW observation; RF into the keypad ladders
     is a hypothesis, INF — test by logging AN0–AN2 while keying a transmitter nearby];
   - coax + attenuators for the RF link.
-  - **PL-decoded output on accessory pin 4** (repeater COR): pin 4 = ASFIC GCB1 via Q0411, idles 11.99 V
-    [HW, Rigol DM858 on pin 4/7]. The ASFIC image is RAM `0x37AC` (21 bytes, pushed by `asfic_push.S`). Bit probe:
-    byte 0 bits 1,3–7 and byte 1 bits 0–2 don't move pin 4; the byte 1 bit 2 trial reset the radio (recovered by
-    itself). Next: continue `asfic_probe` from byte 1 bit 3 (skip byte 1 bit 2) — FIRMWARE.md "SPI devices".
+  - **PL-decoded output on accessory pin 4** (repeater COR): pin 4 = ASFIC GCB1 = **byte 8 bit 1 of the
+    `0x37AC` image** — set + `asfic_push.S` pulls pin 4 to 0.61 V [HW]. Byte 8 bit 0 = GCB0 = amp mute (clears
+    when PL squelch opens [HW]). Next: make pin 4 follow `0x347E` (host-polling prototype first, then a
+    firmware-side hook). Image bits 1:2 and 4:1 reset the radio — FIRMWARE.md "SPI devices".
 
 ## Invariants (never violate)
 - **Irreversible steps have a hard gate** (flash write, EEPROM write outside `codeplug.apply`, hot air,

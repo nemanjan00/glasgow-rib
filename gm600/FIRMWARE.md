@@ -456,12 +456,24 @@ Why `0x37AC` is the ASFIC image:
 - `gm600py/stubs/asfic_push.S` pushes it on demand: page 4, bus acquire `0x5013`, entry 8, release
   `0x5032`, returning into the firmware [VM: transfer seen, firmware keeps running].
 - `gm600py/radio/asfic_probe.py` sets one bit at a time, pushes, and reads a networked DMM.
-- **Probe results on accessory pin 4 (GCB1) [HW, 2026-11-12]:**
-  - setting byte 0 bits 1, 3–7 and byte 1 bits 0–2 one at a time did **not** move pin 4 (stays 11.99 V);
-  - after the byte 1 bit 2 trial (already restored and re-pushed) the **radio reset itself** and came
-    back normally. A clock-control bit (the ASFIC generates the CPU clock UPCLK) is the likely cause
-    [INF]; bit 2 of byte 1 was never tried again.
-  - GCB1's position is still unknown.
+- **The general-control bits are byte 8 of the image, bit n = GCBn** [HW for GCB1; the rest from the
+  squelch data + schematic]. Idle byte 8 = `0xE5`.
+
+  | Byte 8 bit | GCB | Function | Evidence |
+  |--|--|--|--|
+  | 0 | GCB0 | speaker-amp **mute** (1 = muted; Q0401 pulls the TDA1519C M/SS pin low) | clears when PL squelch opens [HW] |
+  | 1 | GCB1 | **accessory pin 4** `EXTERNAL_ALARM` (1 = output on, pin pulled low) | set + push → pin 4 **11.99 V → 0.61 V**, restore → 12.01 V [HW] |
+  | 2 | GCB2 | `B+_CONTROL`, the power latch | **never touch** (set at idle; polarity unconfirmed) |
+  | 3 | GCB3 | accessory pin 12 `GPO1` | inferred; never set while 12 V is on pin 12 |
+
+- **The image also holds bits that upset the radio [HW].** These were found with `asfic_probe`
+  (set + push + restore, one bit at a time):
+  - after the byte 1 bit 2 trial, and again after the byte 4 bit 1 trial, the radio reset itself and
+    came back normally. The ASFIC also generates the CPU clock (UPCLK), the likely mechanism [INF].
+  - `asfic_probe.NEVER` hard-excludes 1:2, 4:1 and 8:2. **Don't sweep the image blindly**; target
+    known bits.
+  - Bits tried with no effect on pin 4: byte 0 bits 1, 3–7; byte 1 bits 0, 1, 3, 6, 7; byte 2 all;
+    byte 3 bits 1–5; byte 4 bit 0.
 
 ### 7-seg digits — entry 5, and a working RAM stub (cam-proven)
 SPI-dispatcher **entry 5 = `0x9018`**: takes a pointer (stack arg, read at `$C,y`) to a 5-byte struct

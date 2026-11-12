@@ -21,6 +21,9 @@ import gm600py.link.sbep as sbep
 import gm600py.stubs as stubs
 
 IMAGE = 0x37AC
+# (byte, bit) never touched, whatever --skip says. 8:2 = GCB2, the power latch (polarity unknown);
+# 1:2 and 4:1 were each followed by the radio resetting itself (the ASFIC also makes the CPU clock).
+NEVER = {(1, 2), (4, 1), (8, 2)}
 
 
 class DMM:
@@ -52,7 +55,7 @@ def main():
     ap.add_argument("--settle", type=float, default=0.6)
     ap.add_argument("--skip", default="", help="byte:bit pairs never to touch, e.g. 1:2 (reset the radio once)")
     args = ap.parse_args()
-    skip = {tuple(int(x) for x in p.split(":")) for p in args.skip.split(",") if p}
+    skip = NEVER | {tuple(int(x) for x in p.split(":")) for p in args.skip.split(",") if p}
     idx = []
     for part in args.bytes.split(","):
         lo, _, hi = part.partition("-")
