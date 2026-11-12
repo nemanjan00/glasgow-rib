@@ -34,6 +34,7 @@ import gm600py.ui.panel as gm600_display
 import gm600py.radio.mode as gm600_mode
 import gm600py.stubs.lcd_text as lcd_text
 import gm600py.link.sbep as sbep
+import gm600py.radio.pl_out as pl_out
 
 STRUCT, LEDS, RXFLAGS = 0x3495, 0x34AE, 0x347E
 KEYPAD_TCB_FLAGS, PAUSE = 0x11D8, 0x10
@@ -41,7 +42,7 @@ EVT, STATE = 0x3F00, 0x3F01
 
 
 class LiveRadio:
-    def __init__(self, addr=None, poll=0.15):
+    def __init__(self, addr=None, poll=0.15, pl_output=False):
         self.r = sbep.Radio(addr)
         self.lock = threading.Lock()
         self.poll = poll
@@ -51,6 +52,7 @@ class LiveRadio:
         a = asm6811.assemble_file(stubs.path("keyevt.S"))
         self.org, self.code = a.org, a.code
         self._upload()
+        self.pl_out = pl_out.PlOut(self.r) if pl_output else None
 
     def _upload(self):
         for off in range(0, len(self.code), 32):
@@ -120,6 +122,8 @@ class LiveRadio:
             struct = self.r.read_block(STRUCT, 5)
             leds = self.r.read_block(LEDS, 1)[0]
             pl, carrier = self.r.read_block(RXFLAGS, 2)
+            if self.pl_out is not None:                 # accessory pin 4 follows the PL flag
+                self.pl_out.sync(pl, self.r.read_block(pl_out.GCBYTE, 1)[0])
         ctrl = gm600_display.Controller()
         ctrl.feed(bytes(5) + lcd_text.pack(struct))
         rx = "RX (PL decoded)" if pl else ("carrier, no PL" if carrier else "idle")
@@ -146,6 +150,12 @@ class LiveRadio:
             return gm600_mode.set_mode(self.r, to)
 
     def close(self):
+        if self.pl_out is not None:
+            try:
+                with self.lock:
+                    self.pl_out.set_gcb1(False)         # leave pin 4 off
+            except (sbep.SBEPError, OSError) as e:
+                print(f"warning: could not turn pin 4 off: {e}", file=sys.stderr)
         try:
             self.press(None, "up")
         except (sbep.SBEPError, OSError) as e:
@@ -161,8 +171,10 @@ def main():
                          "and can press keys (incl. on/off) and switch modes: use an ssh tunnel "
                          "rather than 0.0.0.0 unless the network is trusted")
     ap.add_argument("--poll", type=float, default=0.15, help="seconds between screen reads")
+    ap.add_argument("--pl-out", action="store_true",
+                    help="drive accessory pin 4 (ASFIC GCB1) from the PL-decoded flag (gm600py.radio.pl_out)")
     args = ap.parse_args()
-    radio = LiveRadio(poll=args.poll)
+    radio = LiveRadio(poll=args.poll, pl_output=args.pl_out)
     threading.Thread(target=radio.poll_forever, daemon=True).start()
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print(f"WARNING: listening on {args.host} with NO authentication - anyone who can reach it can "

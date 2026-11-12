@@ -42,6 +42,7 @@ def write(r, addr, data):
 
 
 def push(r, stub):
+    write(r, 0x3F02, [0x80])                 # asfic_push.S GCB1REQ: plain push, image untouched
     sbep.launch_returning_stub(r, stub.org, stub.code)
     r.drain()
     time.sleep(0.3)

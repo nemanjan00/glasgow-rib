@@ -67,7 +67,7 @@ class RamdumpAssemblerTest(unittest.TestCase):
 class StubSelfCheckTest(unittest.TestCase):
     """Every RAM stub carries a 16-bit (Fletcher-style) self-check and refuses to run if damaged."""
 
-    STUBS = ("ramdump.S", "flashtool.S", "lcd_text.S", "led_cmd.S", "lcd_raw.S", "keyevt.S")
+    STUBS = ("ramdump.S", "flashtool.S", "lcd_text.S", "led_cmd.S", "lcd_raw.S", "keyevt.S", "asfic_push.S")
 
     def _run(self, a, code):
         import emu6811
@@ -319,6 +319,46 @@ class BootFaultInjectionTest(unittest.TestCase):
         self.assertFalse(self._reaches_fault(bytes(recovered)), "restoring 0xC000 must boot clean")
 
 
+class AsficPushTest(unittest.TestCase):
+    """asfic_push.S sets/clears GCB1 (byte 8 bit 1 of the 0x37AC ASFIC image) and pushes the image."""
+
+    def test_gcb1_set_and_clear_in_vm(self):
+        import asm6811
+        import emu6811
+        import sbep
+        fw, cp = os.environ.get("GM600_FW"), os.environ.get("GM600_CP")
+        if not fw or not cp:
+            self.skipTest("set GM600_FW=motofix.BIN and GM600_CP=<640-byte codeplug> to run this")
+        with open(fw, "rb") as f:
+            flash = f.read()
+        with open(cp, "rb") as f:
+            m = emu6811.Mem(flash, f.read())
+        c = emu6811.CPU(m)
+        c.reset()
+        c.run(max_insns=3_000_000, cop_timeout=150000)
+        a = asm6811.assemble_file(os.path.join(STUBS, "asfic_push.S"))
+        self.assertGreaterEqual(a.org, 0x3DB9)                  # clear of the resident keyevt.S
+        m.ram[a.org:a.org + len(a.code)] = a.code
+        pushed = []
+        m.watch = lambda addr, v: pushed.append(v) if addr == 0x102A and m.reg[0x7E] & 0x61 == 0x01 else None
+
+        def launch(req):
+            m.ram[0x3F02] = req
+            pushed.clear()
+            m.feed_rx(sbep.encode(0x26, a.org.to_bytes(2, "big")))
+            c.run(max_insns=300_000, cop_timeout=150000)
+
+        power = m.ram[0x37B4] & 0x04
+        launch(1)
+        self.assertTrue(m.ram[0x37B4] & 0x02)                   # GCB1 set in the image
+        self.assertEqual(m.ram[0x37B4] & 0x04, power)           # power latch untouched
+        self.assertTrue(pushed and pushed[8] & 0x02)            # and sent to the ASFIC select
+        launch(0)
+        self.assertFalse(m.ram[0x37B4] & 0x02)
+        c.run(max_insns=1_000_000, cop_timeout=150000)
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")   # firmware still running normally
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -387,6 +427,46 @@ class KeyHoldTest(unittest.TestCase):
         m.ram[0x11D8] &= ~0x10 & 0xFF                           # resume the keypad task
         c.run(max_insns=1_000_000, cop_timeout=150000)
         self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"  1")   # stays latched after release
+
+
+class AsficPushTest(unittest.TestCase):
+    """asfic_push.S sets/clears GCB1 (byte 8 bit 1 of the 0x37AC ASFIC image) and pushes the image."""
+
+    def test_gcb1_set_and_clear_in_vm(self):
+        import asm6811
+        import emu6811
+        import sbep
+        fw, cp = os.environ.get("GM600_FW"), os.environ.get("GM600_CP")
+        if not fw or not cp:
+            self.skipTest("set GM600_FW=motofix.BIN and GM600_CP=<640-byte codeplug> to run this")
+        with open(fw, "rb") as f:
+            flash = f.read()
+        with open(cp, "rb") as f:
+            m = emu6811.Mem(flash, f.read())
+        c = emu6811.CPU(m)
+        c.reset()
+        c.run(max_insns=3_000_000, cop_timeout=150000)
+        a = asm6811.assemble_file(os.path.join(STUBS, "asfic_push.S"))
+        self.assertGreaterEqual(a.org, 0x3DB9)                  # clear of the resident keyevt.S
+        m.ram[a.org:a.org + len(a.code)] = a.code
+        pushed = []
+        m.watch = lambda addr, v: pushed.append(v) if addr == 0x102A and m.reg[0x7E] & 0x61 == 0x01 else None
+
+        def launch(req):
+            m.ram[0x3F02] = req
+            pushed.clear()
+            m.feed_rx(sbep.encode(0x26, a.org.to_bytes(2, "big")))
+            c.run(max_insns=300_000, cop_timeout=150000)
+
+        power = m.ram[0x37B4] & 0x04
+        launch(1)
+        self.assertTrue(m.ram[0x37B4] & 0x02)                   # GCB1 set in the image
+        self.assertEqual(m.ram[0x37B4] & 0x04, power)           # power latch untouched
+        self.assertTrue(pushed and pushed[8] & 0x02)            # and sent to the ASFIC select
+        launch(0)
+        self.assertFalse(m.ram[0x37B4] & 0x02)
+        c.run(max_insns=1_000_000, cop_timeout=150000)
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")   # firmware still running normally
 
 
 if __name__ == "__main__":
