@@ -1,30 +1,12 @@
 #!/usr/bin/env python3
-"""Minimal read-only SBEP client for the GM600 via the glasgow-rib applet socket.
+"""Shim: the code lives in gm600py.link.sbep_client. Keeps `python3 tools/sbep_client.py ...` and `import sbep_client` working."""
+import importlib
+import os
+import runpy
+import sys
 
-Queries the serial number (``23 01``) and reads 32 bytes at 0x0F60 (the channel region), printing
-what came back. Use ``sbep.Radio`` directly for anything more:
-
-    from sbep import Radio, encode
-    with Radio() as r:
-        print(r.id_string(1))
-        data = r.read_block(0x0F60, 0x20)
-        status, op, data = r.transact(encode(0x13))
-
-usage: sbep_client.py      (SBEP_ADDR=host:port, default 127.0.0.1:2324)
-"""
-from sbep import Radio, SBEPError
-
-
-def main():
-    try:
-        with Radio() as radio:
-            print("serial       :", radio.id_string(1))
-            data = radio.read_block(0x0F60, 0x20)
-            print("0x0F60 (32 B):", data.hex(" "))
-    except SBEPError as e:
-        print("failed:", e)
-        raise SystemExit(1)
-
-
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if __name__ == "__main__":
-    main()
+    runpy.run_module("gm600py.link.sbep_client", run_name="__main__", alter_sys=True)
+else:
+    sys.modules[__name__] = importlib.import_module("gm600py.link.sbep_client")

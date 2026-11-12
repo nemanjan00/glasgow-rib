@@ -49,11 +49,11 @@ the git-ignored **`CLAUDE.local.md`** — read that first). The repo there is gi
 - **Displayed idle number = MPT1327 Own Unit No. = codeplug 0x0F0B–0x0F0C, big-endian 16-bit**
   (322=0x0142), block checksum at **0x0FF4** = `(Σ(0x0F08..0x0FF3) − 0x55) & 0xFF`. Change it via
   `setunit.py` (direct SBEP + reset) or DPS. Cam-verified 322/456/712.
-- **Arbitrary text on the 3 digits = `tools/lcd_text.S` / `lcd_text.py`** (cam-proven). The digits
+- **Arbitrary text on the 3 digits = `gm600py/stubs/lcd_text.S` / `lcd_text.py`** (cam-proven). The digits
   are on their own 7-seg controller via SPI-dispatcher **entry 5 (`0x9018`)**, struct `[00 40 d0 d1 d2]`,
   cached at `0x3495`; font bit0 f, 1 a, 2 b, 4 e, 5 g, 6 d, 7 c. **`0x37AC` (entry 8) is icons only** —
   pushing it never changes the number. Find display buffers by RAM-diffing two known states.
-  `tools/lcd_raw.S` does the same with its own SPI code (no firmware calls) + backlight; segment
+  `gm600py/stubs/lcd_raw.S` does the same with its own SPI code (no firmware calls) + backlight; segment
   photos and data-bit map in `images/lcd_segments/`. Live view of the emulated head:
   `gm600_vm_bridge.py … --ui` (http://127.0.0.1:8600/, `gm600_display.py`) — boots to 322 like the radio,
   buttons clickable. The emulator models the bench radio's input pins + A/D levels; without them the
@@ -102,7 +102,8 @@ the git-ignored **`CLAUDE.local.md`** — read that first). The repo there is gi
 - The owner may be using Glasgow for DPS sessions (QEMU → `socat` → applet `socket` on
   `127.0.0.1:2324`). Check `ps` for a running `glasgow run rib` before using it, and ask.
 - The applet's `socket` serves one client at a time.
-- Test tool changes against `tools/mock_radio.py` (`cd tools && python3 -m unittest test_tools`)
+- Test tool changes against the mock radio (`gm600py/link/mock_radio.py`):
+  `python3 -m unittest discover -s gm600/tests -t gm600/tests` from the repo root
   before pointing them at the radio.
 - Capture logs from DPS sessions are in `~/captures/` (not in git).
 

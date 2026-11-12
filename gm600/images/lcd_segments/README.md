@@ -1,7 +1,7 @@
 # GM600 display: one photo per segment
 
 Taken 2026-11-11 on the bench radio (serial 807IYA0903) with the webcam, backlight on, by
-`tools/lcd_photos.py`. The radio runs `tools/lcd_raw.S`, which drives the display controller with its own
+`tools/lcd_photos.py`. The radio runs `gm600py/stubs/lcd_raw.S`, which drives the display controller with its own
 SPI code (no firmware calls), so nothing else is drawn on the glass.
 
 The glass is one controller (SPI chip-select `0x61` on `0x107E`, SPCR `0x52`) carrying 3 seven-segment

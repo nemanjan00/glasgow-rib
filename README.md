@@ -206,7 +206,7 @@ idle. **Send one whole message per call.**
 
 ```sh
 python -m unittest glasgow_rib.test glasgow_rib.test_component     # applet + gateware
-python3 -m unittest discover -s gm600/tools                         # GM600 tools, against a mock radio
+python3 -m unittest discover -s gm600/tests -t gm600/tests          # GM600 tools, against a mock radio
 ```
 
 - **Applet tests** (`glasgow_rib/test.py`), through the host pipe: echo, gap-free bursts, waiting
@@ -215,7 +215,7 @@ python3 -m unittest discover -s gm600/tools                         # GM600 tool
 - **Component tests** (`glasgow_rib/test_component.py`), cycle-exact: a trickled frame staying in
   one burst, separate writes waiting for idle, manual BUSY, active-high BUSY, the BUSY reset mode,
   and receive framing errors and overflow.
-- **Tool tests** (`gm600/tools/test_tools.py`): the SBEP codec, and the dump, read and write tools
+- **Tool tests** (`gm600/tests/`): the SBEP codec, and the dump, read and write tools
   against `mock_radio.py`, including aborting a write stream on a failed block.
 
 Reference material (service manuals, schematics) goes in `docs/`, which is gitignored.

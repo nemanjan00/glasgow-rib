@@ -239,7 +239,7 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
   byte from RAM shadow **`0x34AE`** to the front-panel **LED** shift register (so
   `ldab #10; jsr $8F1F` = "update LEDs"); **entry 8** sends the 21-byte **LCD** buffer from `0x37AC`.
   - **LED shift-register bit map** (byte at `0x34AE`), verified on the real radio by driving each bit
-    from a RAM stub (`tools/led_cmd.S` + `tools/lab/led_demo.py`) and watching the panel over a webcam
+    from a RAM stub (`gm600py/stubs/led_cmd.S` + `tools/lab/led_demo.py`) and watching the panel over a webcam
     (per-bit photos: [images/led_bitmap.jpg](images/led_bitmap.jpg); all LEDs on:
     [images/front_panel_all_leds.jpg](images/front_panel_all_leds.jpg)):
 
@@ -269,7 +269,7 @@ above — lifting the single-bank limitation. Full byte-level analysis lives in 
     state, repeats entry 8 (the controller auto-wraps after 21 bytes).
   - **Driving the LCD — see the consolidated "## LCD" section below for the settled facts.** Short
     version: change the displayed idle number via the **Own Unit No.** codeplug field (`tools/setunit.py`
-    / DPS, cam-verified); show **arbitrary text** on the 3 digits with the `tools/lcd_text.S` RAM stub
+    / DPS, cam-verified); show **arbitrary text** on the 3 digits with the `gm600py/stubs/lcd_text.S` RAM stub
     (entry 5, the separate 7-seg controller — cam-proven). `0x37AC` holds icons/framing only, not the
     digits; the SBEP-`0x17` "race" on it is **unreliable** (RAM writes don't ACK).
 - **In-circuit patching over BUS+, self-healing.** The OC3/4/5 timer ISRs (`0x92A1`/`0x92AA`/
@@ -368,7 +368,7 @@ A refresh (emulator-traced) is:
 The firmware brackets updates with an SPI-bus acquire/release (`0x5013`/`0x5032` → device-manager
 `0x9FFB`/`0xA01A`, device struct `D=0x0245`); boot inits the controller with entries 5,4,3 once.
 
-### LED shadow `0x34AE` bit map (verified on the radio via `tools/led_cmd.S` + webcam)
+### LED shadow `0x34AE` bit map (verified on the radio via `gm600py/stubs/led_cmd.S` + webcam)
 | bit | mask | element | | bit | mask | element |
 |--|--|--|--|--|--|--|
 | 0 | `0x01` | amber status LED | | 2 | `0x04` | green status LED |
@@ -410,13 +410,13 @@ both, `ldd #$0245; jsr $A01A` (unlock).
 
 e.g. `2`=`76`, `3`=`E6`, `6`=`F3`, `8`=`F7` (matches `0x3497` on the radio).
 
-**`tools/lcd_text.S` + `lcd_text.py`** — RAM stub (upload `0x17`, launch `0x26`): `sei`, then loop:
+**`gm600py/stubs/lcd_text.S` + `lcd_text.py`** — RAM stub (upload `0x17`, launch `0x26`): `sei`, then loop:
 wait for sync `A5`, read 5 bytes from the SCI, call entry 5 with them (no lock). Proven on the radio:
 "322" pushed over a 686 codeplug while the firmware was halted, then HI / HEL / LO / AbC / PSU / 147 /
 -9- ([images/lcd_text_stub.png](images/lcd_text_stub.png)). `lcd_text.py HEL LO`, `--scroll`, `--raw
 e67676`, `--no-launch`. The firmware is halted while it runs: recover with `psu_reboot.py`.
 
-**`tools/lcd_raw.S` — the same, with NO firmware code.** Our own SPI driver: `SPCR &= 0xF3; SPCR =
+**`gm600py/stubs/lcd_raw.S` — the same, with NO firmware code.** Our own SPI driver: `SPCR &= 0xF3; SPCR =
 0x52`, `0x107E |= 0x61`, the 10 wire bytes out through SPDR polling SPIF, `0x107E &= 0x9E`, `SPCR |=
 0x0C`. The host sends all 10 wire bytes (normally 5 × `00` + `lcd_text.pack(struct)`, a Python port of
 `0x9018` cross-checked against the firmware in `emu6811`). The SPCR/select/SPDR write sequence is
@@ -485,7 +485,7 @@ bit 1) flashes "channel busy". `0x347E` sets within ~0.1 s of a matching PL.
 **Pausing a task.** Setting bit `0x10` (or `0x20`/`0x04`/`0x01`) in a TCB's flag byte (TCB+8) makes the
 scheduler skip it until cleared; `0x88`/`0xC0` are cleared back. Keypad task: `0x11D8`.
 
-**Remote key presses without a flash patch — `tools/keyhold.py` + `tools/keyevt.S`.** Pause the
+**Remote key presses without a flash patch — `tools/keyhold.py` + `gm600py/stubs/keyevt.S`.** Pause the
 keypad task (so no real scan reports the key released), then post the event with a *non-halting* RAM
 stub launched through the firmware's own `0x26` handler: it switches to page 0, calls `0x4D8B`,
 restores the bank, re-enables interrupts and exits through the handler's epilogue (`0x4CE6`:

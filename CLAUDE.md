@@ -26,7 +26,7 @@ python3 -m venv .venv
 export GLASGOW_OUT_OF_TREE_APPLETS=I-am-okay-with-breaking-changes
 .venv/bin/glasgow run rib --help
 .venv/bin/python -m unittest glasgow_rib.test glasgow_rib.test_component   # ~90 s
-python3 -m unittest discover -s gm600/tools          # tools vs mock radio, ~2 s
+python3 -m unittest discover -s gm600/tests -t gm600/tests   # GM600 tools vs mock radio, ~15 s (GM600_FW/GM600_CP add firmware tests)
 ```
 
 - Build against current Glasgow main (applet API V2: `GlasgowAppletV2`, `assembly.add_*`). Older

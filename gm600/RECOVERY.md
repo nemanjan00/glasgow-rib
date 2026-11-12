@@ -2,7 +2,7 @@
 
 ## What happened
 
-The in-circuit flash writer (`tools/flashtool.S`) had a **bank-encoding bug**: `do_read`/`do_write`
+The in-circuit flash writer (`gm600py/stubs/flashtool.S`) had a **bank-encoding bug**: `do_read`/`do_write`
 wrote the **raw page number** to `MM1CR` (`0x1058`) instead of **`page << 2`** (which `ramdump.S`
 does correctly). A "safe test" write aimed at page 13 (device `0x34000`, erased) therefore set
 `BANK = 0x0D` → `(0x0D >> 2) = page 3` → **device `0xC000` = live firmware**. The read path used the
@@ -32,7 +32,7 @@ SCI download, and the single beep is just the audio side powering up; the extern
 run. (COP is otherwise enabled — `CONFIG = 0xD9`, `NOCOP=0` — which is why the 12 V-*off* bootloop is
 the COP resetting the crashed spin.)
 
-Emulator proof (`tools/test_tools.py::BootFaultInjectionTest`, needs `GM600_FW=motofix.BIN`):
+Emulator proof (`tests/test_firmware.py::BootFaultInjectionTest`, needs `GM600_FW=motofix.BIN`):
 golden boots to the main loop (`PC=0xCE98`) and never reaches `0x8EE4`; the reconstructed broken
 image reaches the `0x8EE4` spin; **restoring `0xC000` from the golden dump boots identically to
 golden.** The recovery content is therefore known and verified: `motofix.BIN[0xC000:0xC100]`.

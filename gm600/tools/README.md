@@ -7,6 +7,25 @@ for the applet's echo. Validated on a real GM600 (serial `807IYA0903`), 2026-11-
 Prereqs: 9 V on HOOK (see [../CONNECTION.md](../CONNECTION.md)); the applet listening on `2324`;
 **nothing else connected to `2324`** — it serves one client at a time (see "Capture rig" below).
 
+
+## Layout (2026-11-12)
+
+The code is the **`gm600py` package** (`../gm600py/`); the `*.py` files here are thin shims, so the
+commands below (`python3 tools/<name>.py ...`) and `import <name>` from this folder keep working.
+
+| package | what | old names (shims here) |
+|--|--|--|
+| `gm600py.link` | SBEP framing + client, mock radio | `sbep`, `mock_radio`, `sbep_client` |
+| `gm600py.codeplug` | checksums, decoded `summary`, **`apply`** (the one safe write path: backup, checksum fix, changed chunks only, read-back verify, reset), dump / write CLIs | `gm600_codeplug`, `dump_codeplug`, `sbep_write` |
+| `gm600py.firmware` | 68HC11 emulator + assembler, display/keypad model, keypad flash patch | `emu6811`, `asm6811`, `gm600_keypad_patch` |
+| `gm600py.stubs` | RAM stubs `*.S` + their host tools | `ramdump`, `flashtool`, `flash_write_test`, `lcd_text`, `lcd_photos` |
+| `gm600py.radio` | radio actions | `gm600_mode`, `keyhold`, `setunit`, `setpl`, `psu_reboot` |
+| `gm600py.ui` | web panel, live radio server, VM bridge, remote | `gm600_display`, `gm600_live`, `gm600_vm_bridge`, `gm600_remote` |
+| `gm600py.rf` | HackRF CTCSS TX + squelch test | `ctcss_tx`, `squelch_test` |
+| `gm600py.dpsvm` | DPS Win3.1 VM helpers | `mouse_ctl`, `typestr` |
+
+Tests: `python3 -m unittest discover -s gm600/tests -t gm600/tests` (repo root). New codeplug-editing
+tools should build on `gm600py.codeplug.apply` (see `radio/setpl.py`, `radio/setunit.py`).
 ## `sbep.py` — shared framing and client
 
 The SBEP codec from [../PROTOCOL.md](../PROTOCOL.md) (`encode`, `decode`, `frame_length`,
@@ -114,7 +133,7 @@ The stub is `ramdump.S` — readable 68HC11 assembly with the register map as a 
 — assembled by `asm6811.py`, a tiny bundled 6811 assembler (`python3 asm6811.py ramdump.S` prints
 the bytes). No external toolchain. **Verified in-circuit on `807IYA0903`: the output is byte-for-byte
 identical (same SHA-256) to the off-board T48 read (`motofix.BIN`), all 16 pages.**
-`test_tools.py::RamdumpAssemblerTest` checks the assembler reproduces the verified stub from the
+`tests/test_firmware.py::RamdumpAssemblerTest` checks the assembler reproduces the verified stub from the
 `.S`, no hardware needed. The `0x26` jump runs arbitrary code with interrupts off — only ever launch
 the address you just uploaded.
 
@@ -147,7 +166,7 @@ echo) fixes the applet link-drop on a 256-byte write.
 **Validated on the radio** (12 V on pin-12): probe `1F DA FE FE`, a page-13 (`0x34000`) write +
 read-back with **`0xC000` left untouched** (proves the bank fix), then restored to FF — run by
 `flash_write_test.py`. The full keypad-patch apply is validated in the emulator, which models the
-write path including `page<<2` (`test_tools.py::VmFlashWriteModelTest`,
+write path including `page<<2` (`tests/test_firmware.py::VmFlashWriteModelTest`,
 `FlashStubIntegrationTest::test_nonzero_page_bank_encoding`). `../datasheets/` holds the AT29C020 and
 68HC11K4 datasheets (gitignored).
 
@@ -178,7 +197,7 @@ is observable. Memory model: RAM, registers (bank `0x1058`, SPI/SCI captured, AD
 internal EEPROM, and the banked + fixed flash from the 256 KB image. The firmware image
 (`motofix.BIN`) is Motorola's and is **not** in the repo — supply your own dump (see `ramdump.py`).
 Next: find the displayed-number variable and decode the digit encoding, then inject a scheduler
-task (unused OC ISR RAM pointers `$A4`/`$A6`) for remote control. `test_tools.py::EmulatorTest`
+task (unused OC ISR RAM pointers `$A4`/`$A6`) for remote control. `tests/test_firmware.py::EmulatorTest`
 checks the core, no firmware needed.
 
 ## `gm600_vm_bridge.py` — the emulated radio as a serial SBEP endpoint
@@ -354,7 +373,7 @@ python3 gm600_keypad_patch.py --patch flash.bin out.bin   # produce a patched fl
 A/D value that key's ladder produces (characterise per radio). Applying/reverting the patch on a real
 radio is an AT29C020 in-system sector write — `patch_diff()` gives the exact bytes.
 
-## `mock_radio.py` and `test_tools.py` — no hardware needed
+## `mock_radio.py` and `../tests/` — no hardware needed
 
 `mock_radio.py` is a fake GM600 behind a fake applet socket: it echoes, ACKs, and answers `23`
 (ID), `13` (block size), `11` (reads from an EEPROM image), `17` (writes) and `10` like the real
@@ -367,7 +386,7 @@ python3 mock_radio.py dump.bin 2399        # then SBEP_ADDR=127.0.0.1:2399 for a
 ```
 
 **It is faithful enough that Motorola's own DPS reads it.** Its reply bytes are identical to a real
-radio's, verified against a capture (`test_tools.py::DPSReadTest`), so you can load a saved codeplug
+radio's, verified against a capture (`tests/test_link.py::DPSReadTest`), so you can load a saved codeplug
 into DPS with no hardware — then browse or edit it (including fields we never byte-bound in the raw
 codeplug, like the trunking/conventional mode, which DPS knows how to pack) and Save a `.rad`. To do
 it, point the mock at the DPS VM's COM1 the same way the applet is bridged (see the capture rig
@@ -381,8 +400,9 @@ tmux new -d -s bridge 'socat TCP-LISTEN:2323,reuseaddr,fork TCP:127.0.0.1:2324'
 # QEMU serial is a reconnecting client to 2323 (see below); then Read Radio in DPS.
 ```
 
-`test_tools.py` uses the mock to test the codec and every tool (including DPS's exact read sequence
-and a write stream aborting on a failed block): `python3 -m unittest test_tools`.
+`../tests/` uses the mock to test the codec and every tool (including DPS's exact read sequence
+and a write stream aborting on a failed block): `python3 -m unittest discover -s gm600/tests -t gm600/tests`
+from the repo root.
 
 ## `mouse_ctl.py` — closed-loop headless mouse (now working)
 

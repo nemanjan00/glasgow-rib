@@ -106,7 +106,7 @@ writes. The two patch sectors are both page 0.
 
 ## Tooling
 
-`tools/flashtool.py` + `tools/flashtool.S` extend the RAM-stub idea (`ramdump`) to a resident stub
+`tools/flashtool.py` + `gm600py/stubs/flashtool.S` extend the RAM-stub idea (`ramdump`) to a resident stub
 driven over SCI: **probe** (ID + lockout — safe, no writes), **read** sector, **program** sector.
 The host refuses to program unless the probe reports the lower boot block unlocked. Applying the
 keypad patch = probe → for each of the 2 patch sectors: read it, splice in the patched bytes
@@ -117,7 +117,7 @@ bytes back.
 `1F DA FE FE` (AT29C020, writes reach the chip, both boot blocks unlocked) — and the **full keypad
 patch apply is validated end-to-end in the emulator** (`emu6811` now models the PA6+12 V `/OE` gate,
 the AT29C020 command/program state machine, and the boot-block bits; see
-`test_tools.py::VmFlashWriteModelTest`). The emulator run reproduces the exact patched image, and it
+`tests/test_firmware.py::VmFlashWriteModelTest`). The emulator run reproduces the exact patched image, and it
 caught a real stub bug (the tWC delay clobbering its counter via the COP kick). The stub refuses any
 page outside 0/12/13, and `flashtool.py` programs the stub sector first then the read_adc jsr sites
 (so read_adc never points at a stub that isn't there yet). The one open item is the **256-byte
