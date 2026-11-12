@@ -50,6 +50,9 @@ TX enable). Then read the symptom:
   resident stubs must be re-uploaded.
 - After a `0x26` launch, clear the UART (the ACK's echo) and wait ~0.3 s before the first command.
 - A hung `sei` stub can only be recovered by a PSU power-cycle (`radio/psu_reboot.py`), not `0x10`.
+- CONFIG (`0x103F` = `0xD9`) is a non-volatile EEPROM byte and the firmware leaves it unprotected
+  (BPROT `0x40`, PTCON = 0): an EEPROM-programming stub with a wrong address can rewrite it, and in
+  bootstrap mode it's freely writable. Keep the recorded value ([FIRMWARE.md](FIRMWARE.md)).
 - Flash: 12 V on pin 12 **only after boot** (at reset = bootstrap mode); hash the deployed stub against
   the repo; read + back up the live sector first; any unexpected before-image = stop
   ([FLASH_WRITE.md](FLASH_WRITE.md), [RECOVERY.md](RECOVERY.md)).

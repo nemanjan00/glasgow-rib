@@ -24,6 +24,9 @@ trusting a result that had no positive control (see §9).
      once you have one;
    - CPU-internal memories you can reach (on the GM600, internal RAM `0x0000`–`0x02FF` survives
      power-off and holds state such as the mode).
+   - non-volatile CPU configuration and the registers around it: on an HC11 that's CONFIG (an
+     EEPROM byte that sets ROM, EEPROM and watchdog enables), plus INIT/INIT2/BPROT/HPRIO. They're
+     especially worth recording before bootstrap mode, where they become writable.
 
    Hash each image, record what state the radio was in, and keep copies off the bench machine. Don't
    overwrite an old backup; a new one gets a new name. The GM600 brick was recoverable only because

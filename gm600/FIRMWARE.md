@@ -32,8 +32,36 @@ K-series memory-management unit (bank register at `0x1058`, MMU control register
 > to the off-board flash chip** (`motofix.BIN` pages 14/15), and the reset vector at `0xFFFE` points
 > into that external code — if on-chip ROM were mapped there, the CPU's view would differ. `CONFIG`
 > (`0x103F`) reads `0xD9` (EEON set, internal EEPROM enabled). So the radio runs as a K1-equivalent:
-> internal RAM + EEPROM, all code external. The only on-chip non-volatile store is the 640-byte
-> EEPROM codeplug (`dump_codeplug.py`, or `ramdump.py --with-eeprom`).
+> internal RAM + EEPROM, all code external. On-chip non-volatile state is the 640-byte EEPROM codeplug
+> (`dump_codeplug.py`, or `ramdump.py --with-eeprom`) **plus the CONFIG byte** (below), and the
+> internal RAM `0x0000`–`0x02FF` is kept alive through power-off.
+
+### CPU configuration registers (back these up with the codeplug)
+
+Read over SBEP `0x11` from the CPU-view dump `gm600-807IYA0903-2026-11-03-cpu64k.bin` [HW]. Bit meanings
+come from the MC68HC11K4 datasheet ([datasheets/MC68HC11K4.pdf](datasheets/MC68HC11K4.pdf)).
+
+| Reg | Addr | Value | Meaning |
+|--|--|--|--|
+| CONFIG | `0x103F` | `0xD9` | ROMAD 1, CLKX 0, PAREN 1, NOSEC 1, **NOCOP 0 (watchdog on)**, **ROMON 0 (no on-chip ROM mapped)**, EEON 1 |
+| INIT2 | `0x1037` | `0x00` | EE[3:0] = 0 → EEPROM at `0x0D80`–`0x0FFF` (this register, not CONFIG, places the EEPROM on the K4) |
+| INIT | `0x103D` | `0x01` | RAM at `0x0000`, registers at `0x1000` |
+| HPRIO | `0x103C` | `0x26` | RBOOT 0, SMOD 0, MDA 1 → normal expanded mode |
+| BPROT | `0x1035` | `0x40` | LVPEN 1; BULKP, BPRT4–0 and **PTCON all 0 — no EEPROM block protection, CONFIG not protected** |
+
+- **CONFIG is itself an EEPROM byte** (outside the 640-byte array), programmed with the same
+  procedure as any EEPROM byte. Reads return latches loaded at reset, so a change takes effect on the
+  next reset.
+  - In normal mode it can only be changed by the EEPROM programming sequence. Because the firmware
+    leaves PTCON = 0, that sequence is *not* blocked: a stray EEPROM-programming stub could rewrite it.
+  - In special modes (bootstrap, i.e. 12 V on pin 12 at reset) CONFIG, BPROT and INIT2 are all
+    writable at any time.
+- What a wrong CONFIG would do [INF, from the datasheet; not tried]:
+  - ROMON = 1 would map the (masked) on-chip ROM over the external firmware at `0xA000`–`0xFFFF`;
+  - EEON = 0 would remove the codeplug from the map;
+  - NOCOP = 1 would disable the watchdog that the `0x10` reset relies on.
+- Recovery is the same way in: bootstrap mode, then reprogram CONFIG to `0xD9` [INF, untested]. Record the value
+  before any bootstrap-mode or EEPROM-programming experiment.
 
 | Range | Contents |
 |---|---|
