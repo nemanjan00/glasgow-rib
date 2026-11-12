@@ -17,14 +17,27 @@ trusting a result that had no positive control (see §9).
    manual answered in minutes what four days of codeplug edits didn't (GM600 conventional mode is a
    7-second hold of button A).
 2. **Get the PHY working** and prove it with an unchanged read/write round-trip (§2).
-3. **Capture the vendor tool** reading and writing the radio, *before* deep static work on address
+3. **Back up every image as soon as you can read it, before any experiment that writes.** Back up
+   all of these:
+   - the codeplug / EEPROM, raw over the protocol and as the vendor tool's own file (`.rad`/`.per`);
+   - the external flash, with a chip programmer off-board, or in-circuit with a read-only RAM stub
+     once you have one;
+   - CPU-internal memories you can reach (on the GM600, internal RAM `0x0000`–`0x02FF` survives
+     power-off and holds state such as the mode).
+
+   Hash each image, record what state the radio was in, and keep copies off the bench machine. Don't
+   overwrite an old backup; a new one gets a new name. The GM600 brick was recoverable only because
+   a golden flash image already existed (T48 + `motofix.BIN`). A dated EEPROM dump is also what lets
+   you diff what a later experiment changed; an unrecorded one leaves a "3-byte difference" nobody
+   can explain.
+4. **Capture the vendor tool** reading and writing the radio, *before* deep static work on address
    maps. One sniffed "Read Radio" settled in minutes what three hours of static DPS reversing
    didn't (the codeplug is the 640-byte EEPROM, read as 32-byte blocks).
-4. **Write-contrast through the vendor GUI** for anything it can edit (§3). One contrast (Own Unit
+5. **Write-contrast through the vendor GUI** for anything it can edit (§3). One contrast (Own Unit
    No. 322 → 456) found in two bytes what hours of emulator searching didn't.
-5. **Live RAM as an instrument** for behaviour the codeplug doesn't show (§4).
-6. **Firmware static + emulator** only for what's left (§5, §6) — and confirm on hardware.
-7. **Your own code on the radio** (RAM stubs, §7) when you need to *do* something the firmware
+6. **Live RAM as an instrument** for behaviour the codeplug doesn't show (§4).
+7. **Firmware static + emulator** only for what's left (§5, §6) — and confirm on hardware.
+8. **Your own code on the radio** (RAM stubs, §7) when you need to *do* something the firmware
    won't let you.
 
 Ask the owner for one observable ground-truth value early (what the display shows, a channel,
