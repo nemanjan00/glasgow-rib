@@ -280,7 +280,8 @@ pressing the bench radio:
 ## `ctcss_tx.py` / `squelch_test.py` — open a conventional channel's tone squelch (HackRF)
 
 ```
-python3 ctcss_tx.py                         # 446.06875 MHz, PL 123.0 Hz + 1 kHz audio, Ctrl-C to stop
+python3 ctcss_tx.py                         # 438.625 MHz (ch 004), PL 123.0 Hz + 1 kHz audio, Ctrl-C to stop
+python3 setpl.py 4 rx 123.0                 # give a conventional channel an RX PL (backup + checksums)
 python3 ctcss_tx.py --no-tone --seconds 10  # same without PL: a PL channel must stay squelched
 python3 squelch_test.py --out /tmp/sqt      # baseline / no PL / PL / off, logs LEDs + display + webcam
 ```

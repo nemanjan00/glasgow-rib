@@ -23,8 +23,9 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
     state (no EEPROM write), so a power-cycle returns to trunked.
   - **RX flags (RAM, input-state array `0x3460+event`): `0x347F` = carrier, `0x347E` = PL decoded /
     RX active.** Carrier without/with wrong PL: PORTH `0x107C` bit 3 high + red "busy" LED.
-  - HackRF on the lab PC: `tools/ctcss_tx.py` (446.06875 MHz, PL 123.0, VGA 35, `--cal-hz 2500`) and
-    `tools/squelch_test.py` (logs RX flags/LEDs/display). Link is marginal (~1 in 3 tone phases missed).
+  - HackRF on the lab PC: `tools/ctcss_tx.py` / `tools/squelch_test.py`, now on **channel 004 (438.625
+    MHz, 70 cm amateur band; RX PL 123.0 set via `setpl.py`)** — 3/3 clean runs. (PMR446 ch 001 was
+    marginal.) Radio currently conventional on `  4`.
   - To repeat: power on → `keyhold.py` → `squelch_test.py`.
 - **Also this session (2026-11-11/12):** arbitrary text on the glass (`lcd_text.S` via firmware,
   `lcd_raw.S` standalone; controller = start bit + 33 data bits; segment atlas in

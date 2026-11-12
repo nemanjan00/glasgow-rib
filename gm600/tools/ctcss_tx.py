@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Transmit a narrowband-FM test signal with an optional CTCSS (PL) tone from a HackRF.
 
-For opening a GM600 conventional channel's tone squelch on the bench: channel 001 on the reference
-radio is 446.06875 MHz (PMR446 channel 6) with RxPL 3Z = 123.0 Hz. The HackRF is tuned 250 kHz
+For opening a GM600 conventional channel's tone squelch on the bench. Default: channel 004 of the
+reference radio, RX 438.625 MHz (70 cm amateur band, the owner's licence applies) with RX PL 3Z =
+123.0 Hz (set with setpl.py). Channel 001 = 446.06875 MHz is PMR446 channel 6. The HackRF is tuned 250 kHz
 below the channel and the signal is shifted up digitally, so the HackRF's own LO leakage lands
 outside the channel. Defaults: amp off, TX VGA 30 dB — a few cm-to-metre bench link (VGA 0 was too
 weak for the bench radio to see a carrier; 35 decodes PL reliably), plus a +2.5 kHz frequency
 correction measured for the bench HackRF (``--cal-hz``). Still far below PMR446's 500 mW.
 
-  ctcss_tx.py                       # 446.06875 MHz, 123.0 Hz PL + 1 kHz audio, until Ctrl-C
+  ctcss_tx.py                       # 438.625 MHz, 123.0 Hz PL + 1 kHz audio, until Ctrl-C
   ctcss_tx.py --no-tone             # same carrier and audio, no PL (squelch must stay closed)
   ctcss_tx.py --freq 446.13125 --tone 88.5 --seconds 10
   ctcss_tx.py --write-only out.iq   # just generate the 8-bit IQ file (hackrf_transfer format)
@@ -79,7 +80,8 @@ def transmit(path, freq_hz, seconds=None, vga=35, amp=False):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--freq", type=float, default=446.06875, help="channel, MHz")
+    ap.add_argument("--freq", type=float, default=438.625,
+                    help="channel, MHz (default: ch 004 RX, 70 cm amateur band; PMR446 ch 001 = 446.06875)")
     ap.add_argument("--tone", type=float, default=123.0, help="CTCSS tone, Hz")
     ap.add_argument("--no-tone", action="store_true")
     ap.add_argument("--audio", type=float, default=1000.0, help="audio test tone, Hz (0 = none)")

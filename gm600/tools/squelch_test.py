@@ -34,7 +34,7 @@ def shot(video, path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--freq", type=float, default=446.06875)
+    ap.add_argument("--freq", type=float, default=438.625, help="MHz (default: ch 004 RX)")
     ap.add_argument("--tone", type=float, default=123.0)
     ap.add_argument("--seconds", type=float, default=6.0)
     ap.add_argument("--vga", type=int, default=35, help="HackRF TX VGA gain, dB")

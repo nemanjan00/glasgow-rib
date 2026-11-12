@@ -92,6 +92,14 @@ carrier at all (HackRF start-up) — so repeat a phase rather than trusting a si
 | carrier, no PL | 1 | 0 | flashing (busy) |
 | carrier + 88.5 Hz (wrong) | 1 | 0 | flashing (busy) |
 | carrier + 123.0 Hz | 1 | **1** | (flashes in some runs) |
+
+**Use channel 004 for this (2026-11-12): 438.625 MHz, inside the 70 cm amateur band.** Its RX PL was
+set to 123.0 Hz with `tools/setpl.py 4 rx 123.0` (TX PL already was). `squelch_test.py` now defaults
+to it; 3 of 3 runs gave exactly the table above (no misses at all — 0/0, 1/0 + busy, 1/1, 0/0) with the
+channel steady on `  4`. Best still: coax + attenuators instead of over the air. On 004 the `b1.4`
+dash icon is off — it's the "TX frequency = RX frequency" icon, and 004 is duplex.
+(Once, on 001-003, the channel stepped down by itself during a test while real PMR traffic was on
+channel 3 — not seen on 004; unexplained.)
 `001` on the reference radio expects **123.0 Hz (3Z)**. Feed a carrier on the channel frequency
 with 123.0 Hz PL and squelch opens. (The recovered sub-audible PL tone is present in the receive
 audio path whenever that carrier is received, independent of the squelch decision — handy for
