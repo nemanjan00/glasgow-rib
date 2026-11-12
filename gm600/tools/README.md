@@ -293,8 +293,10 @@ FM-demodulating it (`CtcssTxTest`). Put the radio on the conventional channel fi
 ## `gm600_live.py` — live web front panel for the REAL radio
 
 ```
-python3 gm600_live.py                      # on the lab PC (owns the SBEP link): http://127.0.0.1:8600/
-ssh -L 8600:127.0.0.1:8600 <lab>           # then open http://127.0.0.1:8600/ locally
+systemd-run --user --unit=gm600live --working-directory=$HOME/glasgow-rib/gm600/tools \
+    python3 gm600_live.py                  # on the lab PC (a plain nohup dies with the ssh session)
+ssh -L 8608:127.0.0.1:8600 <lab>           # then open http://127.0.0.1:8608/ locally
+systemctl --user stop gm600live            # frees the single SBEP slot for other tools
 python3 gm600_live.py --host 0.0.0.0       # or listen on the LAN
 ```
 

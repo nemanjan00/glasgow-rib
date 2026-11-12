@@ -5,9 +5,11 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 `CLAUDE.local.md`.
 
 ## Now
-- **Radio: ON, trunked `322`, with `gm600_live.py` running on the lab PC** (from `~/glasgow-rib`,
-  `http://127.0.0.1:8600/` there; log `/tmp/live.log`). It holds the single SBEP slot — stop it
-  (`pkill -f "[g]m600_live"`) before other SBEP tools. Power off: MP305 `output_off()`.
+- **Radio: ON, trunked `322`, with `gm600_live.py` running on the lab PC** as the systemd user unit
+  `gm600live` (from `~/glasgow-rib/gm600/tools`, `http://127.0.0.1:8600/` there; logs
+  `journalctl --user -u gm600live`). It holds the single SBEP slot — `systemctl --user stop gm600live`
+  before other SBEP tools. Long-running lab processes must be `systemd-run --user` units: plain
+  `nohup`/`setsid` ones are killed when the ssh session ends. Power off: MP305 `output_off()`.
 - **Deploy to the lab PC with git**, not scp: push here, `git pull --ff-only` in `~/glasgow-rib` there
   (now current; only lab-only `tools/lab/lcd_disp.S`, `lcd_e8.S`, `lcd_segstub.S` untracked).
 - **Conventional mode survives power-off** (RAM retained across main power, EEPROM unchanged) —
