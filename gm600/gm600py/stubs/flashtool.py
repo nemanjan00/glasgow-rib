@@ -9,6 +9,8 @@ the keypad-remote firmware patch (see ../FIRMWARE.md and ../FLASH_WRITE.md).
     python3 flashtool.py probe                      # SAFE: AT29C020 ID + boot-block lockout
     python3 flashtool.py read  0x1000 out.bin       # read the 256-byte sector at a device address
     python3 flashtool.py echo                       # SAFE: 256-byte host->stub->host transport test
+    python3 flashtool.py check pl flash.bin         # SAFE: read the pl_patch sectors through the fixed
+                                                    #   region (SBEP 0x11) AND the bank window (stub 'R')
     python3 flashtool.py patch [keypad|pl] flash.bin   # apply a patch (keypad = default)
     python3 flashtool.py revert [keypad|pl] flash.bin  # restore the original bytes of its sectors
 
@@ -231,10 +233,10 @@ def _apply(radio, revert):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("probe", "read", "echo", "patch", "revert"):
+    if len(argv) < 2 or argv[1] not in ("probe", "read", "echo", "check", "patch", "revert"):
         sys.exit(__doc__)
     which, golden = "keypad", None
-    if argv[1] in ("patch", "revert"):
+    if argv[1] in ("patch", "revert", "check"):
         rest = argv[2:]
         if rest and rest[0] in ("keypad", "pl"):
             which, rest = rest[0], rest[1:]
@@ -247,6 +249,11 @@ def main(argv):
                 sys.exit("ABORT: the image given is not the golden motofix.BIN (SHA-256 mismatch).")
     org, stub = build_stub()
     with sbep.Radio() as radio:
+        fixed = {}
+        if argv[1] == "check":                       # fixed-region view, while the firmware still runs
+            for base, _, _ in pl_patch.patch_diff(golden):
+                cpu = 0x8000 + (base - 0x38000)
+                fixed[base] = b"".join(radio.read_block(cpu + o, 64) for o in range(0, SECTOR, 64))
         print(f"serial {radio.id_string(1)}; uploading {len(stub)}-byte stub, launching...")
         upload_and_launch(radio, org, stub)
         cmd = argv[1]
@@ -261,6 +268,17 @@ def main(argv):
             print(f"echo: {SECTOR - len(bad)}/{SECTOR} bytes back intact"
                   + (f"; first mismatch at {bad[0]}: sent {sent[bad[0]]:02X} got {got[bad[0]]:02X}" if bad else ""))
             if bad:
+                raise SystemExit(1)
+        elif cmd == "check":
+            ok = True
+            for base, orig, new in pl_patch.patch_diff(golden):
+                win = read_sector(radio, base)
+                state = lambda b: "golden original" if b == orig else "PATCHED" if b == new else "UNEXPECTED"
+                print(f"sector 0x{base:05X}: fixed region (0x11) = {state(fixed[base])}, "
+                      f"bank window page {base >> 14} (stub R) = {state(win)}, "
+                      f"views {'identical' if win == fixed[base] else 'DIFFER'}")
+                ok &= win == fixed[base] and state(win) != "UNEXPECTED"
+            if not ok:
                 raise SystemExit(1)
         elif cmd == "read":
             if len(argv) < 4:
