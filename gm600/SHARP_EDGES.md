@@ -53,6 +53,9 @@ TX enable). Then read the symptom:
 - CONFIG (`0x103F` = `0xD9`) is a non-volatile EEPROM byte and the firmware leaves it unprotected
   (BPROT `0x40`, PTCON = 0): an EEPROM-programming stub with a wrong address can rewrite it, and in
   bootstrap mode it's freely writable. Keep the recorded value ([FIRMWARE.md](FIRMWARE.md)).
+- Accessory pin 12 is both the VPP/12 V write-enable and the GPO1 output (Q0432, ASFIC GCB3):
+  **never turn GPO1 on while 12 V is applied** — it shorts the 12 V source. When writing ASFIC control
+  bits, leave GCB2 (`B+_CONTROL`, the power latch) set or the radio switches itself off.
 - Flash: 12 V on pin 12 **only after boot** (at reset = bootstrap mode); hash the deployed stub against
   the repo; read + back up the live sector first; any unexpected before-image = stop
   ([FLASH_WRITE.md](FLASH_WRITE.md), [RECOVERY.md](RECOVERY.md)).

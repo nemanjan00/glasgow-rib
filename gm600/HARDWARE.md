@@ -10,7 +10,7 @@ inline** — notably **pin 8 is unpopulated on the GM600** (see its row and CONN
 | 1 | SPKR- | Analog O/P | bridge PA, min 3.2 Ω load (with pin 16) |
 | 2 | Ext. Mic Audio | Analog I/P | 80 mV = 60% dev; common with mic-connector mic |
 | 3 | GP1 | Digital I/P | codeplug-assignable; primary = external PTT |
-| 4 | GP2 | Digital O/P | codeplug-assignable; primary = external alarm |
+| 4 | GP2 | Digital O/P | codeplug-assignable; primary = external alarm. GM600: ASFIC GCB1 → Darlington Q0411, pulled up to supply (idles ~12 V) |
 | **5** | **Flat TX Audio** | Analog I/P | **unfiltered TX path inject (e.g. modem), 150 mVRMS = 60% dev, >25 kΩ** |
 | **6** | **BUS+** | Digital I/O | **radio SCI serial bus — programming & tuning (= SBEP). Also mic-conn pin 7** |
 | 7 | GND | Ground | analog + digital ground |
@@ -18,7 +18,7 @@ inline** — notably **pin 8 is unpopulated on the GM600** (see its row and CONN
 | 9 | GP4 | Digital I/P | codeplug-assignable; **grounding forces radio ON** (usually emergency) |
 | 10 | Ignition Sense | Digital I/P | ignition auto-on; R0423 (4.7k, not fitted) = permanent-on |
 | 11 | **RX Audio** | Analog O/P | **continuous discriminator (flat/unfiltered) RX audio, 330 mVRMS = 60% dev, 600 Ω** |
-| 12 | GP5 | Digital I/O | codeplug-assignable |
+| 12 | GP5 | Digital I/O | codeplug-assignable; **GM600: output-only** (read-back Q0431 NU), driven by ASFIC GCB3 via Q0432; same net as the VPP/bootstrap 12 V — see "Firmware-driven outputs" |
 | 13 | SW B+ Sense | Analog O/P | solder-link configurable (SWB+ default); R0455=0 Ω, max 300 mA — fuse it |
 | **14** | **Hook** | Digital I/P | 0=on-hook,1=off-hook; pull-up to +5 V. (Rig note: ~9 V here enables programming mode.) |
 | 15 | RSSI | Analog O/P | buffered RSSI voltage |
@@ -59,22 +59,32 @@ Microphone connector (8-pin): 3=Mic Hook, 4=GND, 5=Mic Audio, 6=Mic PTT, 7=**BUS
 
 ## Firmware-driven outputs on the accessory connector (2026-11-12)
 
-Both digital outputs come from the **ASFIC's general-control bits**, not from CPU port pins
-(schematic 8402626Y08, I/O sheet 2 of 2):
+The digital outputs come from the **ASFIC's general-control bits**, not from CPU port pins
+(schematic 8402626Y08, controller sheet 1 and I/O sheet 2; traced independently twice):
 
-| Acc. pin | Net | Driver | Source |
-|--|--|--|--|
-| 4 (GP2) | `EXTERNAL_ALARM` | Q0411, open collector, R0412 4.7 kΩ pull-up to `FLT_A+` (B+) | ASFIC **GCB1** |
-| 12 (GP5) | `GPI/O` (also the VPP / bootstrap net) | Q0432 pull-down via R0435 | `GPO1` = ASFIC **GCB3** |
+| ASFIC pin | Bit | Net | Circuit | Acc. pin |
+|--|--|--|--|--|
+| B5 | GCB0 | `AUDIO_PA_ENABLE` | Q0401 switches the TDA1519C speaker amp | 1/16 (indirect) |
+| A3 | GCB1 | `EXTERNAL_ALARM` | R0411 → Q0411 (Darlington), open collector; R0412 4.7 kΩ pull-up to `FLT_A+` (supply), VR0412 33 V clamp | **4** |
+| B4 | GCB2 | `B+_CONTROL` | the radio's power latch — **clearing it powers the radio off** | — |
+| B3 | GCB3 | `GPO1` | R0435 → Q0432, open collector; R0433 4.7 kΩ pull-up to **+5 V** | **12** |
 
-- **Pin 4 idles at 11.98 V** with the radio on (bench PSU 12 V; networked DMM) [HW], so the pull-up
-  is fitted and the output is off at idle.
-- Pin 12 is read back by the CPU through Q0431 (`GPI1`).
-- Driving either pin from our own code means reprogramming the ASFIC. How the firmware does that
-  is not found yet (see FIRMWARE.md, "SPI devices").
+- **Pin 4** idles at supply voltage: **11.98 V** measured with the radio on and the bench PSU at
+  12 V (Rigol DM858 on pins 4/7) [HW]. So the pull-up is fitted and the output is off at idle.
+  - It is not logic level: a logic input needs a divider or clamp.
+  - It suits a relay or optocoupler, or a COR input that tolerates the supply voltage.
+- **Pin 12** is logic-friendly (5 V pull-up, open-collector pull-down), but **output-only** on this
+  board: the read-back transistor Q0431 (`GPI1` sense) is NU (not fitted).
+- **Never turn GPO1 on while 12 V is on pin 12.** Pin 12 is the same net as the VPP/bootstrap
+  write-enable. Q0432 (0.2 A part) would short the 12 V source to ground, limited only by that
+  supply's current limit.
+- **Pin 8** (`SCI_DATA_OUT`): the CPU's SCI TX → R0421 → Q0421 → pin 8, but Q0421, R0428 and VR0421
+  are NU. Fitting them would give an inverting open-collector copy of TX — redundant with BUS+.
+- Driving pin 4 or 12 from our own code means reprogramming the ASFIC's GCB bits, without touching
+  GCB2 (power) or GCB0 (audio PA). How the firmware programs the ASFIC is not found yet (see below and
+  FIRMWARE.md, "SPI devices").
 - The goal this is for: pin 4 as a **PL-decoded (tone-squelch-open) output** for a repeater
-  controller, following the RX flag `0x347E`. It's open collector to ground, which suits a COR
-  input; the controller must tolerate the B+ pull-up voltage.
+  controller, following the RX flag `0x347E`.
 
 **SPI chip selects** come from a 74HC138 decoder, U0105:
 
