@@ -494,7 +494,16 @@ restores the bank, re-enables interrupts and exits through the handler's epilogu
 channel `1`. **The conventional latch is RAM state** — no EEPROM write happens (the EEPROM-write
 routine `0x5259`–`0x5293` never runs; a codeplug dump is identical in both modes). On the bench radio
 it **survives a PSU power-off** (booted back into conventional), so that RAM is retained across main
-power — most likely the HC11 standby supply (VSTBY). Switching mode re-runs the self-test.
+power — the HC11 standby supply (MODB/VSTBY) keeps the K4's **internal RAM `0x0000`–`0x02FF`** alive
+(external RAM is cleared by the boot RAM test, which is why stubs at `0x3D80` vanish on a reset).
+Switching mode re-runs the self-test.
+
+**The mode bytes** (internal-RAM diff of both modes on the radio, then bisected in `emu6811` with a
+warm reset): **`0x0085`** = `FF` conventional / `01` trunked, and **`0x0089`** bit 1 = conventional /
+bit 2 = trunked (other bits untouched). Both are needed. The firmware reads them at boot, so two `0x17`
+writes + a `0x10` reset switch the mode (`tools/gm600_mode.py`, ~10 s, both ways on the radio).
+Consequence for anything parked in internal RAM: it survives power-off — e.g. the keypad patch's
+arm flags were moved to external RAM (`0x3FF0`–`0x3FF2`) so an override can't outlive a reset.
 
 **Live web panel for the real radio — `tools/gm600_live.py`.** The VM UI's page, backed by SBEP: screen
 from the display struct cached at `0x3495`, LEDs `0x34AE`, RX flags; keys through `keyevt.S` (tap /

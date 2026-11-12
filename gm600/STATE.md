@@ -12,8 +12,10 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
   `nohup`/`setsid` ones are killed when the ssh session ends. Power off: MP305 `output_off()`.
 - **Deploy to the lab PC with git**, not scp: push here, `git pull --ff-only` in `~/glasgow-rib` there
   (now current; only lab-only `tools/lab/lcd_disp.S`, `lcd_e8.S`, `lcd_segstub.S` untracked).
-- **Conventional mode survives power-off** (RAM retained across main power, EEPROM unchanged) —
-  corrected in FAQ/FIRMWARE.
+- **Mode = two retained internal-RAM bytes** (`0x0085` FF/01, `0x0089` bit1/bit2) → `gm600_mode.py`
+  and the live panel's Mode buttons switch it in ~10 s (writes + `0x10`). Internal RAM `0x0000`–`0x02FF`
+  survives power-off (VSTBY); external RAM is cleared at boot. Live panel also downloads/previews the
+  codeplug.
 - **Latest (2026-11-12): remote conventional + tone squelch + RX flags — DONE, pushed (`953e4cc`).**
   - `tools/keyhold.py` = remote key hold over SBEP: pause keypad task (`0x11D8 |= 0x10`), post the
     event through firmware `0x4D8B` with the non-halting stub `keyevt.S` (launched by `0x26`, returns

@@ -300,11 +300,23 @@ systemctl --user stop gm600live            # frees the single SBEP slot for othe
 python3 gm600_live.py --host 0.0.0.0       # or listen on the LAN
 ```
 
-Same page as `gm600_vm_bridge.py --ui`, but the radio: display (icons + digits) from the struct the
+Same page as `gm600_vm_bridge.py --ui` (plus **Download / Preview codeplug** and **Mode:
+trunked / conventional** buttons), but the radio: display (icons + digits) from the struct the
 firmware caches at `0x3495`, LEDs/backlight from `0x34AE`, RX state (`0x347E`/`0x347F`) on the status
 line, ~3 reads/s. Click = tap, mouse-hold = hold (a 7 s hold of A switches trunked ↔ conventional; the
 radio re-runs its self-test, which the server rides out). Single SBEP client: stop it before running
-other SBEP tools. Ctrl-C releases any held key and resumes the keypad task.
+other SBEP tools. Ctrl-C releases any held key and resumes the keypad task. **No authentication** —
+keep the default `127.0.0.1` and use an ssh tunnel; `--host 0.0.0.0` prints a warning.
+
+## `gm600_mode.py` — trunked / conventional with two RAM writes
+
+```
+python3 gm600_mode.py          # show the current mode
+python3 gm600_mode.py conv     # -> conventional (radio resets, ~10 s)
+python3 gm600_mode.py trunk    # -> trunked
+```
+
+Writes `0x0085` and `0x0089` (retained internal RAM, see FIRMWARE.md) and resets with `0x10`.
 
 ## `keyhold.py` / `keyevt.S` — press and hold a key remotely (no flash patch)
 

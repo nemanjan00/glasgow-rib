@@ -27,6 +27,10 @@ on the long-hold.
   byte-identical in both modes. So it's kept in RAM that outlives the main supply (most likely the
   HC11's standby RAM supply, VSTBY); older notes saying "a power-cycle returns to trunked" were wrong
   or saw the backup run down.
+- **Fastest, over SBEP: `tools/gm600_mode.py conv|trunk`** — the mode is two bytes in the CPU's
+  internal RAM (kept by the standby supply): `0x0085` (`FF` conventional / `01` trunked) and `0x0089`
+  bit 1 (conventional) / bit 2 (trunked). Write both and reset with `0x10`; ~10 s, verified both ways.
+  Also a button in the live web panel (`tools/gm600_live.py`).
 - **Remotely, over SBEP:** `tools/keyhold.py` (default: long-hold A for 9 s). It pauses the keypad
   task and posts the key event through the firmware's own routine — no flash patch, nothing written to
   the codeplug; the radio keeps running. Verified on the bench radio (`322` → `---` → `  1`).
