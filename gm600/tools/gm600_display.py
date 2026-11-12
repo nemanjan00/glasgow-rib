@@ -193,9 +193,9 @@ async function post(url){document.getElementById('p').textContent='working ...';
 const r=await fetch(url,{method:'POST'});document.getElementById('p').textContent=await r.text()}
 async function preview(){const pre=document.getElementById('cp');pre.textContent='reading codeplug ...';
 const j=await (await fetch('/codeplug.json',{cache:'no-store'})).json();
-let t='Own Unit No. '+j.own_unit+'   checksums: '+j.checksums+'\n\nch  rx MHz      tx MHz      rx PL            tx PL            opt\n';
-for(const c of j.channels)t+=String(c.channel).padEnd(4)+String(c.rx_mhz.toFixed(5)).padEnd(12)+String(c.tx_mhz.toFixed(5)).padEnd(12)+c.rx_pl.padEnd(17)+c.tx_pl.padEnd(17)+c.options+'\n';
-t+='\n'+j.hex;pre.textContent=t}
+let t='Own Unit No. '+j.own_unit+'   checksums: '+j.checksums+'\\n\\nch  rx MHz      tx MHz      rx PL            tx PL            opt\\n';
+for(const c of j.channels)t+=String(c.channel).padEnd(4)+String(c.rx_mhz.toFixed(5)).padEnd(12)+String(c.tx_mhz.toFixed(5)).padEnd(12)+c.rx_pl.padEnd(17)+c.tx_pl.padEnd(17)+c.options+'\\n';
+t+='\\n'+j.hex;pre.textContent=t}
 async function press(q){document.getElementById('p').textContent='pressing '+q+' ...';
 const r=await fetch('/press?'+q,{method:'POST'});document.getElementById('p').textContent=await r.text()}
 // A quick click is a single tap; only a press held past HOLD_MS becomes a hold (down ... up), so a

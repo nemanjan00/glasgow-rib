@@ -509,6 +509,26 @@ class CodeplugSummaryTest(unittest.TestCase):
         self.assertEqual(s["channels"][3]["tx_pl"], "123.0 Hz (3Z)")
 
 
+class PageScriptTest(unittest.TestCase):
+    """The web panel's JavaScript must parse (a raw newline in a JS string once broke the page)."""
+
+    def test_page_js_parses(self):
+        import re
+        import shutil
+        import subprocess
+        import gm600_display
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        js = re.search(r"<script>(.*)</script>", gm600_display._PAGE, re.S).group(1)
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+            f.write(js)
+        try:
+            r = subprocess.run(["node", "--check", f.name], capture_output=True, text=True)
+        finally:
+            os.unlink(f.name)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
 class EmulatorTest(unittest.TestCase):
     """The 68HC11 core must execute correctly (validated on a known program)."""
 
