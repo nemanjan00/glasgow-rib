@@ -21,8 +21,12 @@ on the long-hold.
 - A **short** press of A is *momentary* only: the radio shows `---` (a prompt) and drops straight
   back to trunked (`322`) with a short error beep when you release. That's expected — it isn't a
   rejection, it's just that a brief press doesn't latch.
-- The **~7 s long-hold** toggles conventional on (and off again). A power-cycle also returns it to
-  trunked.
+- The **~7 s long-hold** toggles conventional on (and off again). Switching mode re-runs the
+  self-test (all segments, `888`). **The mode survives a power-off** (seen 2026-11-12: PSU output off,
+  then on — the radio booted straight back into conventional `1`), yet the EEPROM codeplug is
+  byte-identical in both modes. So it's kept in RAM that outlives the main supply (most likely the
+  HC11's standby RAM supply, VSTBY); older notes saying "a power-cycle returns to trunked" were wrong
+  or saw the backup run down.
 - **Remotely, over SBEP:** `tools/keyhold.py` (default: long-hold A for 9 s). It pauses the keypad
   task and posts the key event through the firmware's own routine — no flash patch, nothing written to
   the codeplug; the radio keeps running. Verified on the bench radio (`322` → `---` → `  1`).
@@ -50,12 +54,14 @@ conventional channel stops the hunt.
 
 ## Does the long-hold write anything to the codeplug?
 
-No. The latch is RAM state. In the emulator, which now boots like the real radio: Holding A latches conventional channel
+No — confirmed on the radio: a 640-byte codeplug dump in conventional mode is byte-identical to the
+trunked one. The mode lives in RAM that survives power-off (see above). In the emulator, which now boots
+like the real radio: Holding A latches conventional channel
 `  1` with **no EEPROM write**: the firmware's EEPROM-write routine (page 0 `0x5259`–`0x5293`) never
 runs, during the hold or for 5 M instructions after it. Booting with every value of the
 Conventional Mode field (`0x0E45` bits 6:5 — Inhibit/Dealer/All/RegioNet43, checksums fixed) still
-comes up trunked (`322`). So as far as the firmware shows, conventional is RAM state, consistent with
-the power-cycle reverting it. [RECOVERY.md](RECOVERY.md) attributes a 3-byte EEPROM difference to the
+comes up trunked (`322`). So the mode is RAM state; the emulator starts with cleared RAM, which is
+why it always boots trunked. [RECOVERY.md](RECOVERY.md) attributes a 3-byte EEPROM difference to the
 mode switch, but its addresses were never recorded; to settle it on hardware, dump the codeplug
 (`dump_codeplug.py`) in trunked mode, long-hold A, dump again, and diff.
 

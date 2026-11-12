@@ -492,4 +492,10 @@ restores the bank, re-enables interrupts and exits through the handler's epilogu
 `pulx; rts`), so the radio keeps running. Release + resume afterwards. Validated in the emulator
 (`KeyHoldTest`) and on the radio: a remote long-hold of A put the bench radio into conventional
 channel `1`. **The conventional latch is RAM state** — no EEPROM write happens (the EEPROM-write
-routine `0x5259`–`0x5293` never runs), which is why a power-cycle returns to trunked.
+routine `0x5259`–`0x5293` never runs; a codeplug dump is identical in both modes). On the bench radio
+it **survives a PSU power-off** (booted back into conventional), so that RAM is retained across main
+power — most likely the HC11 standby supply (VSTBY). Switching mode re-runs the self-test.
+
+**Live web panel for the real radio — `tools/gm600_live.py`.** The VM UI's page, backed by SBEP: screen
+from the display struct cached at `0x3495`, LEDs `0x34AE`, RX flags; keys through `keyevt.S` (tap /
+mouse-hold). Survives mode-switch resets (re-uploads the stub, retries the release).

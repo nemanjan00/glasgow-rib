@@ -290,6 +290,20 @@ leak is out of band, amp off. The generator self-checks its IQ by
 FM-demodulating it (`CtcssTxTest`). Put the radio on the conventional channel first with
 `keyhold.py` (or a ~7 s hand-hold of A). Defaults: TX VGA 35, `--cal-hz 2500` (bench HackRF).
 
+## `gm600_live.py` — live web front panel for the REAL radio
+
+```
+python3 gm600_live.py                      # on the lab PC (owns the SBEP link): http://127.0.0.1:8600/
+ssh -L 8600:127.0.0.1:8600 <lab>           # then open http://127.0.0.1:8600/ locally
+python3 gm600_live.py --host 0.0.0.0       # or listen on the LAN
+```
+
+Same page as `gm600_vm_bridge.py --ui`, but the radio: display (icons + digits) from the struct the
+firmware caches at `0x3495`, LEDs/backlight from `0x34AE`, RX state (`0x347E`/`0x347F`) on the status
+line, ~3 reads/s. Click = tap, mouse-hold = hold (a 7 s hold of A switches trunked ↔ conventional; the
+radio re-runs its self-test, which the server rides out). Single SBEP client: stop it before running
+other SBEP tools. Ctrl-C releases any held key and resumes the keypad task.
+
 ## `keyhold.py` / `keyevt.S` — press and hold a key remotely (no flash patch)
 
 ```

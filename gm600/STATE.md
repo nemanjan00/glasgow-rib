@@ -5,8 +5,13 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 `CLAUDE.local.md`.
 
 ## Now
-- **Radio: POWERED OFF** (MP305 output off, 2026-11-12). Power on with `tools/psu_reboot.py` (or
-  `output_on()`); it boots trunked showing `322`.
+- **Radio: ON, trunked `322`, with `gm600_live.py` running on the lab PC** (from `~/glasgow-rib`,
+  `http://127.0.0.1:8600/` there; log `/tmp/live.log`). It holds the single SBEP slot — stop it
+  (`pkill -f "[g]m600_live"`) before other SBEP tools. Power off: MP305 `output_off()`.
+- **Deploy to the lab PC with git**, not scp: push here, `git pull --ff-only` in `~/glasgow-rib` there
+  (now current; only lab-only `tools/lab/lcd_disp.S`, `lcd_e8.S`, `lcd_segstub.S` untracked).
+- **Conventional mode survives power-off** (RAM retained across main power, EEPROM unchanged) —
+  corrected in FAQ/FIRMWARE.
 - **Latest (2026-11-12): remote conventional + tone squelch + RX flags — DONE, pushed (`953e4cc`).**
   - `tools/keyhold.py` = remote key hold over SBEP: pause keypad task (`0x11D8 |= 0x10`), post the
     event through firmware `0x4D8B` with the non-halting stub `keyevt.S` (launched by `0x26`, returns
@@ -24,8 +29,6 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 - **Next (optional):** confirm the VM-derived key names on the bench (hold each button, read
   `0x33FC`–`0x33FE`); dump the codeplug before/after a hand long-hold of A to close the RECOVERY.md
   "3-byte" note; a stronger/cleaner RF link (amp, attenuator, cable) for the squelch test.
-- **Lab host checkout `~/glasgow-rib` is 15 commits behind** (`git pull --ff-only` aborts on untracked
-  `tools/lab/` files the new commits add). This session ran tools from copies in `/tmp/gt`.
 
 ## Invariants (never violate)
 - **12 V on pin 12 only AFTER boot; off before any power-cycle.** 12 V at reset = CPU bootstrap mode.
