@@ -141,6 +141,11 @@ writes [VM], so keep the stub session open until the final state verifies.
   access and no 12 V. It's the hardware proof of the transfer before any write; afterwards the radio
   needs a PSU power cycle (halting stub). **Done on the radio 2026-11-12: 256/256 bytes intact [HW]**;
   the radio rebooted clean afterwards.
+- **Bank-window path to pages 14/15 proven read-only [HW, 2026-11-12]:** `flashtool.py check pl` read
+  both pl_patch sectors through the fixed region (SBEP `0x11` at `0x8F00`/`0xDE00`) and through the
+  bank window (stub `R`, page 14 window `0x4F00`, page 15 window `0x5E00`). Both views are identical and
+  equal the golden original. The write uses that same window path, and `patch pl` re-reads each sector
+  through it before writing.
 - `flashtool.py patch pl motofix.BIN` (golden image required, SHA-256 checked) writes the cave first,
   then the hook (`revert pl`: reverse). Before each write the live sector must equal the golden
   original or the already-patched version, otherwise it aborts.
