@@ -197,12 +197,12 @@ document.addEventListener('pointerup',release);document.addEventListener('pointe
 async function tick(){try{const r=await fetch('/display.svg',{cache:'no-store'});
 document.getElementById('d').innerHTML=await r.text();
 const j=await (await fetch('/state.json',{cache:'no-store'})).json();
-document.getElementById('s').textContent='frames '+j.frames+' \u00b7 '+(j.segments.join(' ')||'(blank)');
+document.getElementById('s').textContent=(j.rx?'RX: '+j.rx+' \u00b7 ':'')+'frames '+j.frames+' \u00b7 '+(j.segments.join(' ')||'(blank)');
 }catch(e){document.getElementById('s').textContent='disconnected'}setTimeout(tick,200)}tick();
 </script></body></html>"""
 
 
-def serve_ui(get_state, port=8600, press=None):
+def serve_ui(get_state, port=8600, press=None, host="127.0.0.1"):
     """Serve the live display at http://127.0.0.1:<port>/. ``get_state`` returns a dict with
     ``segments``, ``leds`` and ``frames``; ``press(code, action)`` (optional; action = tap / down / up)
     makes the panel's buttons pressable: pointer-down holds the key, pointer-up releases it. Runs in a daemon thread; returns the bound port."""
@@ -232,7 +232,11 @@ def serve_ui(get_state, port=8600, press=None):
             if action not in ("tap", "down", "up"):
                 self.send_error(400, "action must be tap, down or up")
                 return
-            press(code, action)
+            try:
+                press(code, action)
+            except Exception as e:                    # radio busy/resetting: report, keep serving
+                self.send_error(503, f"{action} {label} failed: {e}")
+                return
             body = {"tap": f"tapped {label}", "down": f"holding {label}",
                     "up": f"released {label}"}[action].encode()
             self.send_response(200)
@@ -263,7 +267,7 @@ def serve_ui(get_state, port=8600, press=None):
         def log_message(self, *args):
             pass
 
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv = http.server.ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv.server_address[1]
 
