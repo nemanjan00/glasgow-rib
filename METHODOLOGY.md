@@ -222,6 +222,17 @@ state from RAM (§4) rather than eyeballing LEDs. Coax + attenuators beat over-t
 - When the owner insists on something they observed, **re-test it on hardware** instead of arguing
   from the emulator. Say "impossible *without X*" and offer X, never just "impossible".
 - Don't copy numbers from pasted chats into docs without a source.
+- **Tag every claim with its evidence level** wherever it's written down — docs, state file, commit
+  messages: **[HW]** measured on the hardware, **[VM]** seen in the emulator only, **[INF]** inferred.
+  Several wrong turns came from an inferred claim later being read as established ("the display
+  number is runtime-derived", "the mode doesn't survive power-off"). Upgrade a tag only with new
+  evidence; when an [INF] or [VM] claim matters for a decision, test it on hardware first.
+- **Irreversible steps get a hard gate.** Before anything a reset can't undo (flash write, EEPROM
+  write outside the safe write path, hot air, cutting a trace): (1) every assumption it depends on has
+  hardware evidence — not emulator, not inference; (2) a verified backup of what you're about to change
+  exists (read back and compared); (3) a recovery route is known and available (e.g. off-board
+  programmer + golden image). The GM600 brick came from exactly one unchecked assumption ("this sector
+  is erased") before an irreversible write.
 
 ## 10. Working with the owner and the tools
 

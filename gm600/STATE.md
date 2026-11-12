@@ -5,40 +5,43 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 `CLAUDE.local.md`.
 
 ## Now
-- **Radio: ON, with the live panel running on the lab PC** as the systemd user unit `gm600live`
-  (`python3 -m gm600py.ui.live` from `~/glasgow-rib/gm600`, `http://127.0.0.1:8600/` there; logs
-  `journalctl --user -u gm600live`). It holds the single SBEP slot — `systemctl --user stop gm600live`
-  before other SBEP tools. Long-running lab processes must be `systemd-run --user` units: plain
-  `nohup`/`setsid` ones are killed when the ssh session ends. Power off: MP305 `output_off()`.
-- **Code layout:** `gm600/gm600py/` package (link, codeplug, firmware, stubs, radio, ui, rf, dpsvm);
-  `tools/*.py` are compatibility shims; tests in `gm600/tests/`. Backups → `~/.local/share/gm600/`
-  (or `$GM600_BACKUP_DIR`).
-- **Deploy to the lab PC with git**, not scp: push here, `git pull --ff-only` in `~/glasgow-rib` there
-  (now current; only lab-only `tools/lab/lcd_disp.S`, `lcd_e8.S`, `lcd_segstub.S` untracked).
-- **Mode = two retained internal-RAM bytes** (`0x0085` FF/01, `0x0089` bit1/bit2) → `gm600_mode.py`
-  and the live panel's Mode buttons switch it in ~10 s (writes + `0x10`). Internal RAM `0x0000`–`0x02FF`
-  survives power-off (VSTBY); external RAM is cleared at boot. Live panel also downloads/previews the
-  codeplug.
-- **Latest (2026-11-12): remote conventional + tone squelch + RX flags — DONE, pushed (`953e4cc`).**
-  - `tools/keyhold.py` = remote key hold over SBEP: pause keypad task (`0x11D8 |= 0x10`), post the
-    event through firmware `0x4D8B` with the non-halting stub `keyevt.S` (launched by `0x26`, returns
-    via `0x4CE6`). Default: long-hold A → conventional channel `1`. RAM only; conventional latch is RAM
-    state (no EEPROM write), so a power-cycle returns to trunked.
-  - **RX flags (RAM, input-state array `0x3460+event`): `0x347F` = carrier, `0x347E` = PL decoded /
-    RX active.** Carrier without/with wrong PL: PORTH `0x107C` bit 3 high + red "busy" LED.
-  - HackRF on the lab PC: `tools/ctcss_tx.py` / `tools/squelch_test.py`, now on **channel 004 (438.625
-    MHz, 70 cm amateur band; RX PL 123.0 set via `setpl.py`)** — 3/3 clean runs. (PMR446 ch 001 was
-    marginal.) Radio currently conventional on `  4`.
-  - To repeat: power on → `keyhold.py` → `squelch_test.py`.
-- **Also this session (2026-11-11/12):** arbitrary text on the glass (`lcd_text.S` via firmware,
-  `lcd_raw.S` standalone; controller = start bit + 33 data bits; segment atlas in
-  `images/lcd_segments/`); emulator boots to the real idle screen (port pins + A/D modelled) with a live
-  web UI (`gm600_vm_bridge.py --ui`, clickable keys/LEDs); keypad decoded (3 A/D ladders, 11 keys).
-- **Next (optional):** confirm the VM-derived key names on the bench (hold each button, read
-  `0x33FC`–`0x33FE`); dump the codeplug before/after a hand long-hold of A to close the RECOVERY.md
-  "3-byte" note; a stronger/cleaner RF link (amp, attenuator, cable) for the squelch test.
+Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
+unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
+
+- **Radio: ON, conventional, channel `  1`** (last read 2026-11-12) [HW], live panel running on the
+  lab PC as the systemd user unit `gm600live` (`python3 -m gm600py.ui.live` from `~/glasgow-rib/gm600`,
+  `http://127.0.0.1:8600/` there; logs `journalctl --user -u gm600live`). It holds the single SBEP
+  slot — `systemctl --user stop gm600live` before other SBEP tools. Long-running lab processes must be
+  `systemd-run --user` units. Power off: MP305 `output_off()`.
+- **Code layout:** `gm600/gm600py/` package; `tools/*.py` are compatibility shims; tests in
+  `gm600/tests/`. Backups → `~/.local/share/gm600/` (or `$GM600_BACKUP_DIR`). Deploy to the lab PC with
+  git (push here, `git pull --ff-only` in `~/glasgow-rib` there).
+- **Mode = two internal-RAM bytes** `0x0085` (FF conv / 01 trunk) + `0x0089` (bit 1 conv / bit 2 trunk)
+  [HW: both directions via writes + `0x10`; minimal set found by bisection in the VM]. Internal RAM
+  `0x0000`–`0x02FF` survives a PSU power-off [HW: radio booted back conventional, EEPROM unchanged];
+  the mechanism is the HC11 standby supply (VSTBY) [INF — not traced on the schematic]. External RAM is
+  cleared at boot [HW: stubs at `0x3D80` gone after a reset].
+- **Remote keys** (`keyhold.py`, live panel): pause keypad task `0x11D8 |= 0x10`, post the event via
+  `0x4D8B` with the non-halting `keyevt.S` [HW: long-hold A → conventional; scroll taps step channels].
+  Button names for the 11 key codes [VM — derived from what each code does; not yet checked by pressing
+  the real buttons].
+- **RX flags:** `0x347F` = carrier, `0x347E` = PL decoded / RX active [HW: RAM diff + live polls; ch 001
+  and ch 004]. Carrier without/with wrong PL → PORTH `0x107C` bit 3 high + red "busy" LED [HW].
+- **HackRF squelch test** on ch 004 (438.625 MHz, RX PL 123.0 set via `setpl.py`) [HW: 3/3 clean].
+  The bench HackRF's +2.5 kHz offset [HW, measured indirectly: decode works at +2.5 kHz, marginal at 0].
+- **Display:** digits = entry-5 controller, struct at `0x3495` [HW]; `0x37AC` = icons only [HW]; controller
+  = start bit + 33 data bits [HW: model reproduces 79 + 12 photos]; MC145453-class part [INF].
+- **Open / next:**
+  - confirm the VM-derived key names on the bench (hold each button, read `0x33FC`–`0x33FE`);
+  - the RECOVERY.md "3-byte" EEPROM difference — which bytes, and why [unknown; not the mode switch, HW];
+  - a channel once stepped by itself during real PMR traffic [HW observation; RF into the keypad ladders
+    is a hypothesis, INF — test by logging AN0–AN2 while keying a transmitter nearby];
+  - coax + attenuators for the RF link.
 
 ## Invariants (never violate)
+- **Irreversible steps have a hard gate** (flash write, EEPROM write outside `codeplug.apply`, hot air,
+  anything a reset can't undo): every assumption it depends on has [HW] evidence (not [VM]/[INF]),
+  a verified backup exists, and a recovery route is known and available. Otherwise don't do it.
 - **12 V on pin 12 only AFTER boot; off before any power-cycle.** 12 V at reset = CPU bootstrap mode.
 - **Radio power = ISDT MP305B bench PSU (12 V / 0.5 A) via pymp305.** The rib applet's `-V 5` does
   NOT power the radio. Reboot = `tools/psu_reboot.py` (this is the ONLY recovery from a hung `sei`
