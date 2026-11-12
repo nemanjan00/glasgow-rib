@@ -58,6 +58,16 @@ class RamdumpAssemblerTest(unittest.TestCase):
             "        bne loop\n")        # REL back to $100 from $105 -> -7 (F9)
         self.assertEqual(a.code, bytes.fromhex("8680b7107726f9"))
 
+    def test_andb_orab_encodings(self):
+        import asm6811
+        a = asm6811.assemble(
+            "        .org $100\n"
+            "        andb #$01\n"        # C4 01
+            "        andb $37B4\n"       # F4 37 B4
+            "        orab #$02\n"        # CA 02
+            "        orab $37B4\n")      # FA 37 B4
+        self.assertEqual(a.code, bytes.fromhex("c401f437b4ca02fa37b4"))
+
     def test_branch_out_of_range_rejected(self):
         import asm6811
         with self.assertRaises(asm6811.AsmError):

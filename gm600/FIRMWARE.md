@@ -478,8 +478,10 @@ Why `0x37AC` is the ASFIC image:
   | after TX stops | 11.99 V again, 1.27 s later (mostly the radio's own PL-loss time) |
   | carrier without PL | no change |
 
-  - When the firmware re-mutes on squelch close it updates only its own bit (`0xE4` → `0xE7` with
-    our GCB1 still set), so the host acts only on changes.
+  - The firmware updates only its own bit in byte 8. Trace (values `pl_out` read before each push):
+    `0xE5` idle → `0xE4` (firmware unmutes on PL) → `0xE6` after our push sets GCB1 → `0xE7` (firmware
+    re-mutes on squelch close, our GCB1 still set) → `0xE5` after our push clears it. So the host acts
+    only on changes; the firmware's pushes don't glitch pin 4.
   - Limits: it needs the host connected (SBEP), and latency is one poll plus a push (~0.1–0.3 s on top
     of the radio's squelch timing).
   - A standalone version needs a firmware-side hook (copy NOT GCB0 → GCB1 where byte 8 is built).
@@ -621,8 +623,10 @@ else that can be present at the same time.
 |--|--|--|
 | `0x3D80`–`0x3DB8` | `keyevt.S` code (*live*) | non-halting; the live panel / `keyhold.py` keep it resident |
 | `0x3D80`–`0x3F47` | halting stubs' code: `ramdump.S`, `flashtool.S`, `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S` — fine, a halting stub ends with a power-cycle |
+| `0x3DC0`–`0x3E08` | `asfic_push.S` code (*live*) | non-halting; `pl_out` / live panel `--pl-out` keep it resident next to `keyevt.S` |
 | `0x3E40`–`0x3F59` | `lcd_raw.S` code (halting) | |
 | `0x3F00`–`0x3F01` | `keyevt.S` parameters EVT, STATE (*live*) | written by the host before each `0x26` |
+| `0x3F02` | `asfic_push.S` parameter GCB1REQ (*live*) | 0/1 = clear/set GCB1, bit 7 = plain push; written before each `0x26` |
 | `0x3F80`–`0x3F8C` | `lcd_raw.S` / `lcd_text.S` buffers (halting) | |
 | `0x3FF0`–`0x3FF2` | keypad patch FORCE_EN / FORCE_VAL / FORCE_M2 (*live*, only if that patch is flashed) | cleared at boot by design |
 | ↓ from `0x3FFF` | stack of halting stubs that `lds #$3FFF` | grows down over `0x3FF0`–; harmless (firmware is halted, power-cycle follows) |
