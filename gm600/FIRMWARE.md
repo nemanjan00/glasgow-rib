@@ -378,8 +378,9 @@ hardware step; the module emits the exact byte diff for a flash writer.
 ## LCD — settled facts
 
 The control head is a segment LCD on the CPU's SPI bus (not BUS+), driven by **two controllers**:
-the **three main 7-seg digits** go through SPI-dispatcher **entry 5** (see "7-seg digits" below), and the
-icons/annunciators/framing come from a 21-byte shadow at **`0x37AC`** (entry 8). `0x37AC` does **not**
+the **three main 7-seg digits** go through SPI-dispatcher **entry 5** (see "7-seg digits" below). **Correction
+(2026-11-12):** the 21-byte `0x37AC` buffer (entry 8) is the **ASFIC** programming image, not the icons —
+see "SPI devices" above; the icon claims in this section predate that. `0x37AC` does **not**
 contain the digits — a RAM diff of the running radio at Own Unit No. 322 vs 686 changes only
 `0x3497–0x3499` (+ ASCII at `0x34BD`), never `0x37AC` or `0x01F1`. Everything below is
 verified; the chronological dead-ends are in **Lessons** at the end.
@@ -421,29 +422,46 @@ Change it two ways, both cam-verified (322→456→712→322):
   `0x10` reset. (A DPS 322→456 write diffs to exactly these two bytes, which is what cracked it.)
 - **Vendor DPS:** File→Read Radio, Edit→Trunking→MPT Personality Data→"Own Unit No.", File→Write
   Radio; driven headless with `tools/mouse_ctl.py` + `tools/typestr.py`.
-### SPI devices seen in the emulator (boot + idle, 2026-11-12) [VM]
+### SPI devices — and `0x37AC` is the ASFIC image, not an icon buffer (2026-11-12)
 
-Every SPDR write during an 8 M-instruction boot of `motofix.BIN` with the bench codeplug goes through
-primitive `0x9102`, with the device chosen by PORTG (`0x107E`) bits 0/5/6 on top of the base `0x98`.
-The dispatcher `0x8F1F` word table at `0x8F44`:
+Every SPDR write during an emulator boot of `motofix.BIN` goes through primitive `0x9102`. The device
+is chosen by PORTG (`0x107E`) bits 0/5/6 on top of the base `0x98`; those three bits drive the 74HC138
+U0105 (HARDWARE.md). The dispatcher `0x8F1F` word table at `0x8F44`:
 
-| Entry | Routine | Sends | SPCR | PORTG |
-|--|--|--|--|--|
-| 2 | `0x8FB7` | 13 bytes from **`0x01F1`** | `0x50` | `0xB8` (bit 5) |
-| 3 | `0x8FD6` | 3 bytes from `0x01EE` (LCD command) | `0x57` | `0xD9` (bits 0, 6) |
-| 4 | `0x8FF0` | 1 byte from **`0x01FE`** (2 at boot) | `0x51` | `0xF8` (bits 5, 6) |
-| 5 | `0x9018` | 7-seg digit frame | `0x52` | `0xF9` (bits 0, 5, 6) |
-| 8 | `0x8F7F` | 21 bytes from `0x37AC` (icons) | `0x50` | `0x99` (bit 0) |
-| 10 | `0x8F64` | 1 byte `0x34AE` (LEDs), then strobe | `0x51` | `0x98` (none), strobe `0x21` |
-| 11 | `0x90F6` | entry 8 then entry 2 | | |
+| Entry | Routine | Sends | PORTG | Decoder (A0=PG6, A1=PG0, A2=PG5) [INF] | Device |
+|--|--|--|--|--|--|
+| 2 | `0x8FB7` | 13 bytes from `0x01F1` | `0xB8` (bit 5) | Y4 `FRACN_CE` | synthesizer: byte `0x01FB` = `0xAE + 2·channel` in the trunked scan [VM]; bytes change with the conventional channel [HW] |
+| 3 | `0x8FD6` | 3 bytes from `0x01EE` | `0xD9` (bits 0, 6) | Y3 `DAC_CE` | `02 50 3F` / `02 60 3F` — earlier called "LCD command" |
+| 4 | `0x8FF0` | 1 byte from `0x01FE` (2 at boot) | `0xF8` (bits 5, 6) | Y5 `OPTION_BD_CE` | option board (none fitted) [INF] |
+| 5 | `0x9018` | 7-seg frame | `0xF9` (bits 0, 5, 6) | Y7 `LCD_CE` | control-head display [HW, cam] |
+| 8 | `0x8F7F` | 21 bytes from **`0x37AC`** | `0x99` (bit 0) | **Y2 → ASFIC PGMENAB** | **ASFIC programming image** |
+| 10 | `0x8F64` | 1 byte `0x34AE`, then strobe | `0x98`, strobe `0x21` (bits 0, 5) | Y6 `LED_CE` | LED shift register [HW, cam] |
+| 11 | `0x90F6` | entry 8 then entry 2 | | | |
 
-- **Entry 2's 13-byte device is most likely the synthesizer.** In the trunked control-channel
-  scan, byte `0x01FB` = `0xAE + 2·channel` for every control channel visited [VM].
-- **No ASFIC transfer appears at all.** All other SPI traffic is display/LED. So the ASFIC is either
-  bit-banged or programmed on a path this boot doesn't reach; the 2-byte entry-4 device
-  (`0x01FE`/`0x01FF`, many read-modify-write sites on page 4) is the open candidate [INF].
-- Mapping PORTG bit patterns to the 74HC138 outputs (HARDWARE.md) is not consistent yet, so the
-  icon controller's select path is unexplained.
+Why `0x37AC` is the ASFIC image:
+
+- **Schematic:** the ASFIC's PGMENAB (F2) runs to decoder output Y2. That's two independent traces;
+  my first reading sent Y2 to the serial EEPROM, which was wrong (that's Y1). With the mapping above,
+  every known device lands on its own decoder output.
+- **On the radio [HW]:** in the HackRF squelch test, three bits flip only while the PL squelch is
+  open (carrier alone changes nothing): byte 0 bit 5 set, byte 1 bit 0 set, byte 8 bit 0 cleared.
+  That's the RX-audio unmute.
+- **Per channel [HW]:** bytes 9–10 change with the channel, `af ea` on ch 1 (no RX PL) and `b0 12`
+  on ch 4 (RX PL 123.0), consistent with PL-decoder setup.
+- **Retracted:** the earlier "icons only [HW]" label for `0x37AC`. Pushing `0x37AC` never changed the
+  glass; the codeplug `0x0E07–0x0E0D` → `0x37AC` bit mapping was emulator-derived. The display's
+  icons are elsewhere (probably in the entry-5 frame or the control head) [INF].
+- **The firmware resends `0x37AC` only when it changes something.** It rebuilds the bytes it owns
+  from its own state: a bit we set in RAM was overwritten at the next squelch change [HW].
+- `gm600py/stubs/asfic_push.S` pushes it on demand: page 4, bus acquire `0x5013`, entry 8, release
+  `0x5032`, returning into the firmware [VM: transfer seen, firmware keeps running].
+- `gm600py/radio/asfic_probe.py` sets one bit at a time, pushes, and reads a networked DMM.
+- **Probe results on accessory pin 4 (GCB1) [HW, 2026-11-12]:**
+  - setting byte 0 bits 1, 3–7 and byte 1 bits 0–2 one at a time did **not** move pin 4 (stays 11.99 V);
+  - after the byte 1 bit 2 trial (already restored and re-pushed) the **radio reset itself** and came
+    back normally. A clock-control bit (the ASFIC generates the CPU clock UPCLK) is the likely cause
+    [INF]; bit 2 of byte 1 was never tried again.
+  - GCB1's position is still unknown.
 
 ### 7-seg digits — entry 5, and a working RAM stub (cam-proven)
 SPI-dispatcher **entry 5 = `0x9018`**: takes a pointer (stack arg, read at `$C,y`) to a 5-byte struct

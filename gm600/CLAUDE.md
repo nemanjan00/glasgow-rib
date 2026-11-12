@@ -55,8 +55,8 @@ the git-ignored **`CLAUDE.local.md`** — read that first). The repo there is gi
   `setunit.py` (direct SBEP + reset) or DPS. Cam-verified 322/456/712.
 - **Arbitrary text on the 3 digits = `gm600py/stubs/lcd_text.S` / `lcd_text.py`** (cam-proven). The digits
   are on their own 7-seg controller via SPI-dispatcher **entry 5 (`0x9018`)**, struct `[00 40 d0 d1 d2]`,
-  cached at `0x3495`; font bit0 f, 1 a, 2 b, 4 e, 5 g, 6 d, 7 c. **`0x37AC` (entry 8) is icons only** —
-  pushing it never changes the number. Find display buffers by RAM-diffing two known states.
+  cached at `0x3495`; font bit0 f, 1 a, 2 b, 4 e, 5 g, 6 d, 7 c. **`0x37AC` (entry 8) is the ASFIC programming
+  image, not the display** (corrected 2026-11-12; FIRMWARE.md "SPI devices") — pushing it never changes the glass. Find display buffers by RAM-diffing two known states.
   `gm600py/stubs/lcd_raw.S` does the same with its own SPI code (no firmware calls) + backlight; segment
   photos and data-bit map in `images/lcd_segments/`. Live view of the emulated head:
   `gm600_vm_bridge.py … --ui` (http://127.0.0.1:8600/, `gm600_display.py`) — boots to 322 like the radio,

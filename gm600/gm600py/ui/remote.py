@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Remote-control a GM600: read its screen (and press buttons) over the serial link.
 
-The point is the REAL radio. The control head is a multiplexed segment LCD the firmware renders
-into a 21-byte shadow buffer in RAM at 0x37AC (the ICON controller only - the three 7-segment digits
-are a separate controller whose struct is cached at 0x3495; see FIRMWARE.md "7-seg digits").
+The point is the REAL radio. NOTE (2026-11-12): the 21-byte buffer this tool reads at 0x37AC turned
+out to be the ASFIC (audio IC) programming image, not a display buffer (FIRMWARE.md "SPI devices");
+the three 7-segment digits are a separate controller whose struct is cached at 0x3495.
 SUPERSEDED for the real radio by gm600py.ui.live (decodes digits + icons + LEDs + RX state). With an LED
 shadow at 0x34AE. SBEP `0x11` reads any 24-bit address on a running radio, so we can read that live
 buffer over the wire while the radio operates normally -- a true screen mirror, no prog mode, no
@@ -30,10 +30,11 @@ import os
 import time
 
 
-LCD_ADDR, LCD_LEN = 0x37AC, 21          # icon-controller shadow buffer (NOT the digits)
+LCD_ADDR, LCD_LEN = 0x37AC, 21          # ASFIC programming image (not a display buffer; see docstring)
 LED_ADDR, LED_LEN = 0x34AE, 3           # LED shadow
 
-# LCD buffer layout, reversed by diffing captured states (splash / idle "322" / flashing):
+# Byte groups as first labelled when this was thought to be the LCD (kept for the old tool; the bytes are
+# ASFIC settings - e.g. bytes 0, 1, 8 hold the RX-unmute bits):
 #   bytes 0,1,2,8,19 = status icons / flashing indicators (scanning, the flashing LED, A/B/C marks)
 #   bytes 3,5,6,12,13,14,16,17,18,20 were once taken for the digits (an early emulator guess) - WRONG:
 #   they're icon/framing/state bytes; 0x37AC never changes with the displayed number.

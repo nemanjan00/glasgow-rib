@@ -90,16 +90,20 @@ The digital outputs come from the **ASFIC's general-control bits**, not from CPU
 
 | Output | Goes to |
 |--|--|
-| Y1, Y2 | serial-EEPROM footprints U0104/U0107, not fitted |
+| Y1 | serial-EEPROM footprint U0104, not fitted |
+| Y2 | **ASFIC PGMENAB** (F2) |
 | Y3 | `DAC_CE` |
 | Y4 | `FRACN_CE` (synthesizer) |
 | Y5 | `OPTION_BD_CE` |
 | Y6 | `LED_CE` |
 | Y7 | `LCD_CE` (inverted through Q0141) |
 
-The ASFIC (U0201) is **not** on the decoder: its programming pins are CLK (F1), DATA (E3) and
-active-low PGMENAB (F2), and PGMENAB's source isn't traced yet. PORTG bits 1–4 are flash address
-lines XA14–XA17, so only PG0, PG5 and PG6 are free for selects.
+The ASFIC (U0201) **is** on the SPI bus: CLK (F1) and DATA (E3) join the SPI clock/data nets, and
+active-low PGMENAB (F2) is decoder output **Y2** (two independent traces; an earlier reading of Y2 as an
+EEPROM select was wrong). It's write-only (no data-out pin). Decoder enable CS1 is pulled high
+(R0135), CS2/CS3 grounded. PORTG bits 1–4 are flash address lines XA14–XA17, so the selects are PG0,
+PG5, PG6. The firmware's select patterns fit **A0 = PG6, A1 = PG0, A2 = PG5** for every known device
+[INF from firmware + schematic; the A-line routing itself isn't traced].
 
 ## Repeater / squelch signals (from the CNTL GM600 schematic, sheet 8402626Y08)
 

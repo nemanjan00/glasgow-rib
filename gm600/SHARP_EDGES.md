@@ -56,6 +56,9 @@ TX enable). Then read the symptom:
 - Accessory pin 12 is both the VPP/12 V write-enable and the GPO1 output (Q0432, ASFIC GCB3):
   **never turn GPO1 on while 12 V is applied** — it shorts the 12 V source. When writing ASFIC control
   bits, leave GCB2 (`B+_CONTROL`, the power latch) set or the radio switches itself off.
+- Probing ASFIC image bits (`0x37AC` + `asfic_push.S`) can **reset the radio** (byte 1 bit 2 did, once;
+  the ASFIC also makes the CPU clock). It recovered by itself; stop the live panel first and expect to
+  restart it (`systemctl --user reset-failed gm600live` before re-running the unit).
 - Flash: 12 V on pin 12 **only after boot** (at reset = bootstrap mode); hash the deployed stub against
   the repo; read + back up the live sector first; any unexpected before-image = stop
   ([FLASH_WRITE.md](FLASH_WRITE.md), [RECOVERY.md](RECOVERY.md)).

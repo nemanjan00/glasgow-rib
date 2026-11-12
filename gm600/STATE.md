@@ -8,7 +8,7 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
 unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
 
-- **Radio: ON, conventional, channel `  1`** (last read 2026-11-12) [HW], live panel running on the
+- **Radio: ON, conventional, channel `  4`** (last read 2026-11-12 19:50) [HW], live panel running on the
   lab PC as the systemd user unit `gm600live` (`python3 -m gm600py.ui.live` from `~/glasgow-rib/gm600`,
   `http://127.0.0.1:8600/` there; logs `journalctl --user -u gm600live`). It holds the single SBEP
   slot — `systemctl --user stop gm600live` before other SBEP tools. Long-running lab processes must be
@@ -29,7 +29,7 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
   and ch 004]. Carrier without/with wrong PL → PORTH `0x107C` bit 3 high + red "busy" LED [HW].
 - **HackRF squelch test** on ch 004 (438.625 MHz, RX PL 123.0 set via `setpl.py`) [HW: 3/3 clean].
   The bench HackRF's +2.5 kHz offset [HW, measured indirectly: decode works at +2.5 kHz, marginal at 0].
-- **Display:** digits = entry-5 controller, struct at `0x3495` [HW]; `0x37AC` = icons only [HW]; controller
+- **Display:** digits = entry-5 controller, struct at `0x3495` [HW]; `0x37AC` is NOT icons — it is the ASFIC image (squelch-unmute bits follow PL decode [HW], PGMENAB = decoder Y2); controller
   = start bit + 33 data bits [HW: model reproduces 79 + 12 photos]; MC145453-class part [INF].
 - **Open / next:**
   - confirm the VM-derived key names on the bench (hold each button, read `0x33FC`–`0x33FE`);
@@ -37,9 +37,10 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
   - a channel once stepped by itself during real PMR traffic [HW observation; RF into the keypad ladders
     is a hypothesis, INF — test by logging AN0–AN2 while keying a transmitter nearby];
   - coax + attenuators for the RF link.
-  - **PL-decoded output on accessory pin 4** (repeater COR): pin 4 = ASFIC GCB1 via Q0411, idles 11.98 V
-    [HW, Rigol DM858 on pin 4/7]. Blocked on finding how the firmware programs the ASFIC (no ASFIC SPI
-    transfer seen in the VM; PGMENAB source untraced) — HARDWARE.md / FIRMWARE.md "SPI devices".
+  - **PL-decoded output on accessory pin 4** (repeater COR): pin 4 = ASFIC GCB1 via Q0411, idles 11.99 V
+    [HW, Rigol DM858 on pin 4/7]. The ASFIC image is RAM `0x37AC` (21 bytes, pushed by `asfic_push.S`). Bit probe:
+    byte 0 bits 1,3–7 and byte 1 bits 0–2 don't move pin 4; the byte 1 bit 2 trial reset the radio (recovered by
+    itself). Next: continue `asfic_probe` from byte 1 bit 3 (skip byte 1 bit 2) — FIRMWARE.md "SPI devices".
 
 ## Invariants (never violate)
 - **Irreversible steps have a hard gate** (flash write, EEPROM write outside `codeplug.apply`, hot air,
