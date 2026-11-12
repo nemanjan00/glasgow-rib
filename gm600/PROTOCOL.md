@@ -211,8 +211,7 @@ Checked against the dump: `0x0DDA`–`0x0DE7` holds seven words decoding to 403.
 | `.per` file | `0x7F1` bytes (new format) / `0x799` bytes (old format) | A DPS file format, built from the 640 bytes; not a radio region |
 
 The `.net`, `.per` and `.rad` file formats (a repeating 7-byte XOR key
-`5D 29 EA 64 B3 7F 1C`) and the field offsets are documented separately in the Motorola RE
-project (`docs/DPS_EMEA_600SERIES_R00.03.02/FILE_FORMAT.md` and `FIELD_MAP.md`).
+`5D 29 EA 64 B3 7F 1C`; `.per` saved plaintext) and their field offsets: [DPS_FILES.md](DPS_FILES.md).
 
 ## Confirmed on a GM600
 

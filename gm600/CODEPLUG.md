@@ -15,7 +15,7 @@ are radio addresses. Ground truth: a live DPS "Read Radio" of serial `807IYA0903
 | Range | Block | R/W | Contents |
 |---|---|---|---|
 | `0x0D80`–`0x0E12` | Radio / alignment | **read-only** (never rewritten) | serial `807IYA0903CG` (ASCII @ `0x0D88`), band-cal / tuning-grid words (@ `0x0DDA`), softpot |
-| `0x0E13`–`~0x0F07` | Network (MPT1327) | read-write | trunking/network parameters — **field set fully enumerated, byte-offsets partly bound** (Control Channel List `0x0E5F`, Channel Frequency Plan `0x0EB0`) |
+| `0x0E13`–`~0x0F07` | Network (MPT1327) | read-write | trunking/network parameters — **field set fully enumerated, byte-offsets partly bound** (Control Channel List `0x0E5D`, Channel Frequency Plan `0x0EB0`) |
 | `~0x0F08`–`0x0FF4` | Personality | read-write | MPT numbers incl. own-number, timers, power (`0x0F08`–`0x0F2A`); Own Group list (`0x0F2B`–`0x0F66`); channel table (`0x0F67`–`0x0F82`); Shortform Dialling (`0x0F83`–`0x0F99`); undecoded rest; checksum byte `0x0FF4` |
 | `0x0FF5`–`0x0FFB` | Factory field | blanked by DPS | see "DPS clears a 7-byte trailing field" |
 | `0x0FFC`–`0x0FFF` | — | untouched | never written by DPS |
@@ -42,8 +42,8 @@ end-marker (a coincidence that breaks as soon as a dial string grows).
 | +6 | options | bitfield (see table below): bit0 Data, bits2:1 Inhibit, bit3 Power, bit4 Monitor | bound |
 
 Frequency formula detail and per-channel proof: [FREQ_ENCODING.md](FREQ_ENCODING.md). PL/TPL tone
-index table: the `pl_tone` enum in [gm600_codeplug.ksy](gm600_codeplug.ksy) (source: motorola-cps
-`docs/.../FIELD_HELP_REFERENCE.md`).
+index table: the `pl_tone` enum in [gm600_codeplug.ksy](gm600_codeplug.ksy). The DPS file
+equivalents of these fields: [DPS_FILES.md](DPS_FILES.md).
 
 This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`. `0x0F83` onward is the Shortform buffer: its
 `FF` padding reads like a `0xFFFF` Tx word, but it is not a channel terminator.
@@ -146,35 +146,32 @@ rejected unless Tx PL is set (so bit2 pairs with a tone).
 - Conventional channel programming (freq, PL, channel table, identity, timeout, per-channel option
   bits): **~90–95 %** — the meaningful programmable surface, byte-bound.
 - **MPT1327 trunking network block (`0x0E13`–`0x0F07`): out of scope.** Its fields are fully
-  *enumerated* (see `FIELD_DICTIONARY.md`) and a few offsets are correlated (Control Channel List
-  `0x0E5F`, Channel Frequency Plan `0x0EB0`), but per-byte binding was intentionally skipped — it
-  needs a live write-contrast sweep and isn't needed for conventional use.
+  *enumerated* (motorola-cps `FIELD_DICTIONARY.md`). The Control Channel List at `0x0E5D` is confirmed
+  against a DPS `.rad` of this radio [HW]. The DPS "single fields" pack in order into
+  `0x0E13`–`0x0E36`, but their names aren't bound ([DPS_FILES.md](DPS_FILES.md)). The Channel
+  Frequency Plan at `0x0EB0` is correlated only. Not needed for conventional use.
 - Factory alignment/softpot region (`0x0D80`–`0x0E12`): read-only, enumerated, not byte-bound.
 
-## Radio-wide flags — "Radio Config Byte1" (packed, in the network block)
+## Radio-wide flags (Registration on power-up, De/Pre-emphasis, Conventional Mode)
 
-Three radio-wide settings — **Registration On Power Up**, **De/Pre-emphasis** (RX/TX audio path),
-and **Conventional Mode** — are *view-only* in the Dealer Programmer (WDPS_DP); they are authored in
-the Network Programmer (WDPS_NP) and packed into a **"Radio Config Byte1"** that lives in the network
-block (`0x0E13`–`0x0F07`). Decoded by a live WDPS_NP `.net` write-contrast (change one flag → Save →
-XOR-decode the `.net` → diff; the byte sits at decoded `.net` offset `0x4A0`, `0xE7` in the sample):
+These three flags are *view-only* in the Dealer Programmer (WDPS_DP) and authored in the Network
+Programmer (WDPS_NP). A WDPS_NP `.net` edit-contrast bound them to `.net` dwords #46 / #48 / #51
+[DPS]. Where they land in the radio's network block (`0x0E13`–`0x0F07`) is **not known**.
 
-| field | Radio Config Byte1 bit | values |
-|---|---|---|
-| Registration On Power Up | bit7 `0x80` (inverted: 1 = disabled) | on / off |
-| Conventional Mode | bits[6:5] `0x60` | 0 Inhibit, 1 Dealer, 2 All, 3 RegioNet43 |
-| De/Pre-emphasis (audio path) | bit4 `0x10` | 0 MPT1327, 1 PAA1382 |
-| bits[3:0] | Short Addr PABX / Tx Timer Clear Down / Ignore LAB / Synch Pattern | not individually bound |
+An earlier decode put them as bits of a packed "Radio Config Byte1" (`.net` offset `0x4A0`). That
+decode is **contradicted** by the files themselves ([DPS_FILES.md](DPS_FILES.md)): `DPS.NET`'s bits
+don't match its own dwords, and neither does `rad1.rad`'s.
 
-The byte's exact offset *within the radio network block* needs the `.net`→radio merge transform
-(out of scope). Note: for repeater **flat audio** you don't need this flag at all — the accessory
-connector carries flat TX (pin 5) and discriminator RX (pin 11) directly; see [HARDWARE.md](HARDWARE.md).
+For repeater **flat audio** you don't need any of these flags: the accessory connector carries flat TX
+(pin 5) and discriminator RX (pin 11) directly; see [HARDWARE.md](HARDWARE.md).
 
 ## Cross-reference
 
 - **This repo:** [`gm600_codeplug.ksy`](gm600_codeplug.ksy) — runnable Kaitai spec for the 640-byte
   dump (open it + a dump in ide.kaitai.io); [HARDWARE.md](HARDWARE.md) — accessory-connector pinout
   + repeater tap points (COR/PL/flat audio); [FIRMWARE.md](FIRMWARE.md) — CPU/flash/SBEP dispatch.
-- **Motorola CPS RE project** `docs/DPS_EMEA_600SERIES_R00.03.02/` — full write-ups: `CODEPLUG_BITMAP.md`,
+- **DPS vendor files** (`.net`/`.per`/`.rad`) — container, XOR, field offsets, re-verified against the
+  radio: [DPS_FILES.md](DPS_FILES.md).
+- **Motorola CPS RE project** `docs/DPS_EMEA_600SERIES_R00.03.02/` (static analysis, not proven) — `CODEPLUG_BITMAP.md`,
   `FIELD_MAP.md` (incl. the Radio Flags `.net` decode), `FIELD_DICTIONARY.md`, `GUI_DIALOG_MAP.md`,
   `FIELD_HELP_REFERENCE.md`, `FILE_FORMAT.md`, `ACCESSORY_CONNECTOR.md`, `LIVE_CAPTURE.md`.

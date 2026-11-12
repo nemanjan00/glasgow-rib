@@ -233,6 +233,11 @@ state from RAM (§4) rather than eyeballing LEDs. Coax + attenuators beat over-t
   exists (read back and compared); (3) a recovery route is known and available (e.g. off-board
   programmer + golden image). The GM600 brick came from exactly one unchecked assumption ("this sector
   is erased") before an irreversible write.
+- **Docs ported from another project start as [INF]**, however confident they read. Re-check each
+  claim against files or hardware you have. Porting the DPS file-format notes
+  ([gm600/DPS_FILES.md](gm600/DPS_FILES.md)) confirmed the container on 5/5 files and the conventional
+  table against the EEPROM, but disproved a "packed config byte" decode and the claim that `.per` is
+  encrypted.
 
 ## 10. Working with the owner and the tools
 

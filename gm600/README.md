@@ -43,6 +43,7 @@ the applet, under QEMU.
 | [PROTOCOL.md](PROTOCOL.md) | SBEP framing and commands, timings, and the DPS read/write sequence captured from a real radio |
 | [CODEPLUG.md](CODEPLUG.md) | The 640-byte codeplug: block map, channel table, PL tones, identity, option bits, checksums |
 | [DPS_GUI_MAP.md](DPS_GUI_MAP.md) | The vendor Dealer Programmer's full menu tree: which dialogs edit radio data, which are view-only / password-gated, reference-radio values |
+| [DPS_FILES.md](DPS_FILES.md) | The vendor tool's `.net`/`.per`/`.rad` files: container, XOR, checksums, field offsets — each claim tagged by how it was verified |
 | [gm600_codeplug.ksy](gm600_codeplug.ksy) | Kaitai Struct spec for the codeplug, with editor write support |
 | [FREQ_ENCODING.md](FREQ_ENCODING.md) | Stored word ↔ frequency: `375 MHz + (v & 0x7FFF) × (bit 15 ? 6.25 : 5 kHz)`, and its pitfalls |
 | [DUMP_SEQUENCE.md](DUMP_SEQUENCE.md) | How to dump, the probe methods used to find the codeplug, and DPS binary references for reversing |
