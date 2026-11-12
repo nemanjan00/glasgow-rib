@@ -508,3 +508,25 @@ arm flags were moved to external RAM (`0x3FF0`–`0x3FF2`) so an override can't 
 **Live web panel for the real radio — `tools/gm600_live.py`.** The VM UI's page, backed by SBEP: screen
 from the display struct cached at `0x3495`, LEDs `0x34AE`, RX flags; keys through `keyevt.S` (tap /
 mouse-hold). Survives mode-switch resets (re-uploads the stub, retries the release).
+
+## Free RAM 0x3D80–0x3FFF — who owns which bytes
+
+The only RAM the tools use. It reads zero in every RAM dump, nothing in the firmware references it,
+and the boot RAM test clears it (so nothing here survives a reset). `0x2000` is the firmware's live
+message-buffer pool — never load there. Internal RAM `0x0000`–`0x02FF` is retained across power-off —
+don't park flags there either. Halting stubs end with a power-cycle, so their overlap with each other
+is harmless; anything that runs **alongside the firmware** (marked *live*) must not overlap anything
+else that can be present at the same time.
+
+| Range | Owner | Notes |
+|--|--|--|
+| `0x3D80`–`0x3DB8` | `keyevt.S` code (*live*) | non-halting; the live panel / `keyhold.py` keep it resident |
+| `0x3D80`–`0x3F47` | halting stubs' code: `ramdump.S`, `flashtool.S`, `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S` — fine, a halting stub ends with a power-cycle |
+| `0x3E40`–`0x3F59` | `lcd_raw.S` code (halting) | |
+| `0x3F00`–`0x3F01` | `keyevt.S` parameters EVT, STATE (*live*) | written by the host before each `0x26` |
+| `0x3F80`–`0x3F8C` | `lcd_raw.S` / `lcd_text.S` buffers (halting) | |
+| `0x3FF0`–`0x3FF2` | keypad patch FORCE_EN / FORCE_VAL / FORCE_M2 (*live*, only if that patch is flashed) | cleared at boot by design |
+| ↓ from `0x3FFF` | stack of halting stubs that `lds #$3FFF` | grows down over `0x3FF0`–; harmless (firmware is halted, power-cycle follows) |
+
+`flashtool.S` additionally uses `0x2280`–`0x2286` and a 256-byte buffer at `0x2300` (inside the
+buffer pool, on purpose: only touched after launch, when the firmware is halted for good).

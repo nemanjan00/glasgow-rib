@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sbep
 
 MODE_A, MODE_B = 0x0085, 0x0089
+MODES = {"conv": True, "conventional": True, "trunk": False, "trunked": False}
 
 
 def read_mode(r):
@@ -38,7 +39,9 @@ def read_mode(r):
 def set_mode(r, want, wait=12.0):
     """``want`` = "conventional" / "conv" or "trunked" / "trunk". Writes the two bytes, resets the
     radio with 0x10 and waits ``wait`` s for it to come back. Returns the mode it reports then."""
-    conv = want.startswith("conv")
+    if want not in MODES:
+        raise ValueError(f"mode must be one of {sorted(MODES)}, not {want!r}")
+    conv = MODES[want]
     b = r.read_block(MODE_B, 1)[0]
     for addr, val in ((MODE_A, 0xFF if conv else 0x01),
                       (MODE_B, (b & ~0x06 & 0xFF) | (0x02 if conv else 0x04))):
@@ -57,6 +60,8 @@ def main():
         if len(sys.argv) < 2:
             print(read_mode(r), "- display", r.read_block(0x34BD, 3))
             return
+        if sys.argv[1] not in MODES:
+            sys.exit(f"usage: gm600_mode.py [{'|'.join(MODES)}]  (got {sys.argv[1]!r})")
         print("now:", set_mode(r, sys.argv[1]), "- display", r.read_block(0x34BD, 3))
 
 
