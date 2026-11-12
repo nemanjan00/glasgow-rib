@@ -8,11 +8,13 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
 unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
 
-- **Radio: ON, conventional, channel `  4`** (last read 2026-11-12 19:50) [HW], live panel running (without `--pl-out`) on the
-  lab PC as the systemd user unit `gm600live` (`python3 -m gm600py.ui.live` from `~/glasgow-rib/gm600`,
-  `http://127.0.0.1:8600/` there; logs `journalctl --user -u gm600live`). It holds the single SBEP
-  slot — `systemctl --user stop gm600live` before other SBEP tools. Long-running lab processes must be
-  `systemd-run --user` units. Power off: MP305 `output_off()`.
+- **Radio: OFF** (MP305 output off, 2026-11-12 evening) [HW]; it boots back conventional ch 4. Live panel
+  stopped. To resume: MP305 `output_on()`, then `systemd-run --user --unit=gm600live
+  --working-directory=$HOME/glasgow-rib/gm600 python3 -m gm600py.ui.live` on the lab PC (`http://127.0.0.1:8600/`).
+- **Next session (owner at the bench): the real `pl_patch` write** — FLASH_WRITE.md "pl_patch — real-write
+  procedure". Owner provides: 12 V for pin 12 (connected only after boot, on request), the T48 + TSOP-32
+  adapter + `motofix.BIN` on its PC, eyes on the display after the reboot. Golden image on the lab PC:
+  `~/.local/share/gm600/motofix.BIN`. Rigol DM858 on pin 4/7 (`10.69.2.52:5025`).
 - **Code layout:** `gm600/gm600py/` package; `tools/*.py` are compatibility shims; tests in
   `gm600/tests/`. Backups → `~/.local/share/gm600/` (or `$GM600_BACKUP_DIR`). Deploy to the lab PC with
   git (push here, `git pull --ff-only` in `~/glasgow-rib` there).
