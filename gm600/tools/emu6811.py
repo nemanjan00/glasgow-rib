@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.firmware.emu6811. Keeps `python3 tools/emu6811.py ...` and `import emu6811` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.firmware.emu6811` from gm600/).
+
+The code lives in gm600py.firmware.emu6811; `python3 tools/emu6811.py ...` and `import emu6811` keep working for now."""
 import importlib
 import os
 import runpy

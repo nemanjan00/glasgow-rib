@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.ui.remote. Keeps `python3 tools/gm600_remote.py ...` and `import gm600_remote` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.ui.remote` from gm600/).
+
+The code lives in gm600py.ui.remote; `python3 tools/gm600_remote.py ...` and `import gm600_remote` keep working for now."""
 import importlib
 import os
 import runpy

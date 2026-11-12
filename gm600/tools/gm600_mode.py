@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.radio.mode. Keeps `python3 tools/gm600_mode.py ...` and `import gm600_mode` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.radio.mode` from gm600/).
+
+The code lives in gm600py.radio.mode; `python3 tools/gm600_mode.py ...` and `import gm600_mode` keep working for now."""
 import importlib
 import os
 import runpy

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.dpsvm.mouse_ctl. Keeps `python3 tools/mouse_ctl.py ...` and `import mouse_ctl` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.dpsvm.mouse_ctl` from gm600/).
+
+The code lives in gm600py.dpsvm.mouse_ctl; `python3 tools/mouse_ctl.py ...` and `import mouse_ctl` keep working for now."""
 import importlib
 import os
 import runpy

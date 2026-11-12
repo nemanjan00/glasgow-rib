@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.radio.keyhold. Keeps `python3 tools/keyhold.py ...` and `import keyhold` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.radio.keyhold` from gm600/).
+
+The code lives in gm600py.radio.keyhold; `python3 tools/keyhold.py ...` and `import keyhold` keep working for now."""
 import importlib
 import os
 import runpy

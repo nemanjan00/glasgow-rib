@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.link.mock_radio. Keeps `python3 tools/mock_radio.py ...` and `import mock_radio` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.link.mock_radio` from gm600/).
+
+The code lives in gm600py.link.mock_radio; `python3 tools/mock_radio.py ...` and `import mock_radio` keep working for now."""
 import importlib
 import os
 import runpy

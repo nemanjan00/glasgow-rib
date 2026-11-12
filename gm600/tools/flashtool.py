@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.stubs.flashtool. Keeps `python3 tools/flashtool.py ...` and `import flashtool` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.stubs.flashtool` from gm600/).
+
+The code lives in gm600py.stubs.flashtool; `python3 tools/flashtool.py ...` and `import flashtool` keep working for now."""
 import importlib
 import os
 import runpy

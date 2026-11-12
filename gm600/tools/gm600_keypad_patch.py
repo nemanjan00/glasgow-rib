@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.firmware.keypad_patch. Keeps `python3 tools/gm600_keypad_patch.py ...` and `import gm600_keypad_patch` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.firmware.keypad_patch` from gm600/).
+
+The code lives in gm600py.firmware.keypad_patch; `python3 tools/gm600_keypad_patch.py ...` and `import gm600_keypad_patch` keep working for now."""
 import importlib
 import os
 import runpy

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.radio.setpl. Keeps `python3 tools/setpl.py ...` and `import setpl` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.radio.setpl` from gm600/).
+
+The code lives in gm600py.radio.setpl; `python3 tools/setpl.py ...` and `import setpl` keep working for now."""
 import importlib
 import os
 import runpy

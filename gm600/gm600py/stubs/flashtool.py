@@ -109,14 +109,13 @@ def read_sector(radio, dev_addr):
     return _cmd(radio, bytes([ord("R"), page, wh, wl]), SECTOR, timeout=4.0)
 
 
-BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools", "flash_backups")
 
 
 def _backup_live(base, data):
     """Save a live sector's before-image to disk so any write is recoverable. The lack of this is
     exactly why the mis-banked 0xC000 write could not be undone in-circuit (see ../RECOVERY.md)."""
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    fn = os.path.join(BACKUP_DIR, f"sector_{base:05X}_{time.strftime('%Y%m%d_%H%M%S')}.bin")
+    import gm600py.paths as paths
+    fn = os.path.join(paths.backup_dir("flash"), f"sector_{base:05X}_{time.strftime('%Y%m%d_%H%M%S')}.bin")
     with open(fn, "wb") as f:
         f.write(data)
     print(f"  backed up live sector 0x{base:05X} -> {fn}")

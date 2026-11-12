@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.codeplug.dump_codeplug. Keeps `python3 tools/dump_codeplug.py ...` and `import dump_codeplug` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.codeplug.dump_codeplug` from gm600/).
+
+The code lives in gm600py.codeplug.dump_codeplug; `python3 tools/dump_codeplug.py ...` and `import dump_codeplug` keep working for now."""
 import importlib
 import os
 import runpy

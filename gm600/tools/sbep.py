@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.link.sbep. Keeps `python3 tools/sbep.py ...` and `import sbep` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.link.sbep` from gm600/).
+
+The code lives in gm600py.link.sbep; `python3 tools/sbep.py ...` and `import sbep` keep working for now."""
 import importlib
 import os
 import runpy

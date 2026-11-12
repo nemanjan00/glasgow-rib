@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.stubs.lcd_photos. Keeps `python3 tools/lcd_photos.py ...` and `import lcd_photos` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.stubs.lcd_photos` from gm600/).
+
+The code lives in gm600py.stubs.lcd_photos; `python3 tools/lcd_photos.py ...` and `import lcd_photos` keep working for now."""
 import importlib
 import os
 import runpy

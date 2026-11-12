@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.rf.ctcss_tx. Keeps `python3 tools/ctcss_tx.py ...` and `import ctcss_tx` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.rf.ctcss_tx` from gm600/).
+
+The code lives in gm600py.rf.ctcss_tx; `python3 tools/ctcss_tx.py ...` and `import ctcss_tx` keep working for now."""
 import importlib
 import os
 import runpy

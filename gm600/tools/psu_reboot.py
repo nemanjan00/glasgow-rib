@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.radio.psu_reboot. Keeps `python3 tools/psu_reboot.py ...` and `import psu_reboot` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.radio.psu_reboot` from gm600/).
+
+The code lives in gm600py.radio.psu_reboot; `python3 tools/psu_reboot.py ...` and `import psu_reboot` keep working for now."""
 import importlib
 import os
 import runpy

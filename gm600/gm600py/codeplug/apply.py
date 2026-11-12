@@ -8,16 +8,18 @@ apply(): re-reads the live image, refuses if its checksums are already bad (some
 make it worse), saves a timestamped backup, fixes the block checksums of ``new``, writes ONLY the
 32-byte chunks that differ (0x17, each must answer 0x84), reads the whole image back and compares, then
 resets the radio (0x10) so it reloads the codeplug. Returns (backup_path, [chunk addresses written]).
+Backups go to gm600py.paths.backup_dir("codeplug"): $GM600_BACKUP_DIR/codeplug or
+~/.local/share/gm600/codeplug.
 """
 import os
 import time
 
 import gm600py.link.sbep as sbep
+import gm600py.paths as paths
 from gm600py.codeplug.checksum import RADIO_BASE, fix_checksums, verify_checksums
 
 SIZE = 0x280                    # 640 bytes, 0x0D80-0x0FFF
 CHUNK = 32                      # DPS-sized write/read blocks
-BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools", "codeplug_backups")
 
 
 class ApplyError(Exception):
@@ -34,13 +36,14 @@ def changed_chunks(old, new):
     return sorted({(RADIO_BASE + i) // CHUNK * CHUNK for i in range(SIZE) if old[i] != new[i]})
 
 
-def apply(r, new, backup_dir=BACKUP_DIR, reset=True):
+def apply(r, new, backup_dir=None, reset=True):
     new = bytearray(new)
     if len(new) != SIZE:
         raise ApplyError(f"image must be {SIZE} bytes, not {len(new)}")
     old = read_image(r)
     if verify_checksums(bytes(old)):
         raise ApplyError("the radio's codeplug already has bad checksums - not writing")
+    backup_dir = backup_dir or paths.backup_dir("codeplug")       # $GM600_BACKUP_DIR or ~/.local/share/gm600
     os.makedirs(backup_dir, exist_ok=True)
     backup = os.path.join(backup_dir, f"codeplug-{time.strftime('%Y%m%d-%H%M%S')}.bin")
     with open(backup, "wb") as f:

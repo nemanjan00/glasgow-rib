@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.ui.vm_bridge. Keeps `python3 tools/gm600_vm_bridge.py ...` and `import gm600_vm_bridge` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.ui.vm_bridge` from gm600/).
+
+The code lives in gm600py.ui.vm_bridge; `python3 tools/gm600_vm_bridge.py ...` and `import gm600_vm_bridge` keep working for now."""
 import importlib
 import os
 import runpy

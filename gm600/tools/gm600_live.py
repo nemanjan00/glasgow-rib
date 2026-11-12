@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.ui.live. Keeps `python3 tools/gm600_live.py ...` and `import gm600_live` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.ui.live` from gm600/).
+
+The code lives in gm600py.ui.live; `python3 tools/gm600_live.py ...` and `import gm600_live` keep working for now."""
 import importlib
 import os
 import runpy

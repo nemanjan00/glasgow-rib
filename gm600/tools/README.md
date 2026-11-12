@@ -24,8 +24,12 @@ commands below (`python3 tools/<name>.py ...`) and `import <name>` from this fol
 | `gm600py.rf` | HackRF CTCSS TX + squelch test | `ctcss_tx`, `squelch_test` |
 | `gm600py.dpsvm` | DPS Win3.1 VM helpers | `mouse_ctl`, `typestr` |
 
-Tests: `python3 -m unittest discover -s gm600/tests -t gm600/tests` (repo root). New codeplug-editing
-tools should build on `gm600py.codeplug.apply` (see `radio/setpl.py`, `radio/setunit.py`).
+Preferred: `python3 -m gm600py.<package>.<module>` from `gm600/` (e.g. `python3 -m gm600py.radio.setpl 4 rx
+123.0`, `python3 -m gm600py.ui.live`); the shims here are kept for compatibility and can go once
+nothing uses them. Tests: `python3 -m unittest discover -s gm600/tests -t gm600/tests` (repo root).
+New codeplug-editing tools should build on `gm600py.codeplug.apply` (see `radio/setpl.py`,
+`radio/setunit.py`). **Backups** (codeplugs before every write, flash sectors before a program) go
+to `$GM600_BACKUP_DIR` or `~/.local/share/gm600/` (`codeplug/`, `flash/`), never into the source tree.
 ## `sbep.py` — shared framing and client
 
 The SBEP codec from [../PROTOCOL.md](../PROTOCOL.md) (`encode`, `decode`, `frame_length`,
@@ -313,8 +317,8 @@ FM-demodulating it (`CtcssTxTest`). Put the radio on the conventional channel fi
 ## `gm600_live.py` — live web front panel for the REAL radio
 
 ```
-systemd-run --user --unit=gm600live --working-directory=$HOME/glasgow-rib/gm600/tools \
-    python3 gm600_live.py                  # on the lab PC (a plain nohup dies with the ssh session)
+systemd-run --user --unit=gm600live --working-directory=$HOME/glasgow-rib/gm600 \
+    python3 -m gm600py.ui.live             # on the lab PC (a plain nohup dies with the ssh session)
 ssh -L 8608:127.0.0.1:8600 <lab>           # then open http://127.0.0.1:8608/ locally
 systemctl --user stop gm600live            # frees the single SBEP slot for other tools
 python3 gm600_live.py --host 0.0.0.0       # or listen on the LAN

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.stubs.flash_write_test. Keeps `python3 tools/flash_write_test.py ...` and `import flash_write_test` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.stubs.flash_write_test` from gm600/).
+
+The code lives in gm600py.stubs.flash_write_test; `python3 tools/flash_write_test.py ...` and `import flash_write_test` keep working for now."""
 import importlib
 import os
 import runpy

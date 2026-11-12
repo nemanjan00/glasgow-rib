@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.codeplug.sbep_write. Keeps `python3 tools/sbep_write.py ...` and `import sbep_write` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.codeplug.sbep_write` from gm600/).
+
+The code lives in gm600py.codeplug.sbep_write; `python3 tools/sbep_write.py ...` and `import sbep_write` keep working for now."""
 import importlib
 import os
 import runpy

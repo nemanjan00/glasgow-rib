@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.radio.setunit. Keeps `python3 tools/setunit.py ...` and `import setunit` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.radio.setunit` from gm600/).
+
+The code lives in gm600py.radio.setunit; `python3 tools/setunit.py ...` and `import setunit` keep working for now."""
 import importlib
 import os
 import runpy

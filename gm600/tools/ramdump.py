@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Shim: the code lives in gm600py.stubs.ramdump. Keeps `python3 tools/ramdump.py ...` and `import ramdump` working."""
+"""Compatibility shim (kept for existing commands; prefer `python3 -m gm600py.stubs.ramdump` from gm600/).
+
+The code lives in gm600py.stubs.ramdump; `python3 tools/ramdump.py ...` and `import ramdump` keep working for now."""
 import importlib
 import os
 import runpy
