@@ -166,15 +166,20 @@ Before:
 Write:
 4. `python3 -m gm600py.stubs.flashtool patch pl ~/.local/share/gm600/motofix.BIN` — probe, then the cave
    sector, then the hook sector, each checked against golden/patched first, backed up, written, and
-   read back through the bank window.
+   read back through the bank window. A failed sector is retried once in the same session.
 5. Only if both sectors say "verified": remove the 12 V from pin 12, then power-cycle (`psu_reboot.py`).
-   If a read-back failed: **don't power-cycle**; the stub session is still open, re-run or `revert pl`.
+   If it stops with VERIFY FAILED: **don't power-cycle** — the stub is still running (the firmware is
+   halted, so a plain re-run can't upload anything). Continue with
+   `flashtool.py --attach patch pl …` (re-run) or `flashtool.py --attach revert pl …` (undo). `--attach`
+   skips the upload and starts with a no-flash echo; the stub drops any command cut off mid-transfer
+   after ~1 s, so a reconnect can't be taken as sector data. If the link is gone for good: T48.
 
-After the reboot (plan these before step 5):
-6. `flashtool.py check pl …` → **PATCHED in both views** (the firmware's own fixed-region view sees the
-   new code), then power-cycle again to leave the halted stub.
-7. The display shows the normal idle number, **not `- 1`**. If it shows `- 1`: don't power-cycle again —
-   SBEP writes are refused in that state [VM], so this is the T48 case, by design.
+After the reboot, in this order:
+6. **Look at the display first**: the normal idle number, **not `- 1`**. If it shows `- 1`: stop, don't
+   power-cycle again — SBEP writes are refused in that state [VM], so `check pl` can't run either; this
+   is the T48 case, by design.
+7. `flashtool.py check pl …` → **PATCHED in both views** (the firmware's own fixed-region view sees the
+   new code). It leaves the radio halted in the stub → power-cycle again.
 8. Pin 4 with no host attached: ~12 V at idle, ~0.6 V while the HackRF sends 123.0 Hz PL on ch 004,
    unchanged on a carrier without PL.
 

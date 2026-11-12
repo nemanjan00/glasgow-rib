@@ -16,6 +16,9 @@
 ;                      Whitelist: pages 0, 12, 13 (window 0x40-0x7F), and exactly two fixed-region
 ;                      sectors for pl_patch: page 14 window 0x4F00 (dev 0x38F00) and page 15 window
 ;                      0x5E00 (dev 0x3DE00). Anything else -> 0x85, nothing programmed.
+;   After a 'W' or 'E' command byte every further byte must arrive within ~1 s, else the command is
+;   dropped (nothing programmed) and the stub returns to its loop — so a host that reconnects to a
+;   still-running stub (flashtool.py --attach) can't have its bytes taken as the tail of a cut-off W.
 ;   'E' (0x45) ECHO  : host sends 256 bytes; the stub stores them in BUF exactly as 'W' does and sends
 ;                      them back. No flash access, PA6 untouched -> proves the 256-byte host->stub
 ;                      transfer on the radio with no 12 V and no risk.
@@ -98,6 +101,19 @@ rxb:    jsr     cop             ; wait for a received byte -> B (host->radio, no
         anda    #$20            ; RDRF
         beq     rxb
         ldab    SCDR
+        rts
+
+rxt:    ldx     #0              ; like rxb, but give up after ~65536 polls (~1 s): C=1 on timeout.
+rxtl:   jsr     cop             ; Used for everything after a 'W'/'E' command byte, so a command
+        ldaa    SCSR            ; cut off by a dropped link can't later swallow a reconnecting host's
+        anda    #$20            ; bytes as sector data (and program garbage). Clobbers X.
+        bne     rxtok
+        dex
+        bne     rxtl
+        sec
+        rts
+rxtok:  ldab    SCDR
+        clc
         rts
 
 txb:    ldaa    SCSR            ; send B, then swallow our own single-wire echo
@@ -194,18 +210,23 @@ rdlp:   stx     CNT16
 
 ; ------------------------------------------------------------------ 'W' program sector
 do_write:
-        jsr     rxb             ; page
+        jsr     rxt             ; page
+        bcs     wtmo
         stab    PAGE
-        jsr     rxb             ; window hi
+        jsr     rxt             ; window hi
+        bcs     wtmo
         stab    WINPTR
-        jsr     rxb             ; window lo
+        jsr     rxt             ; window lo
+        bcs     wtmo
         stab    WINLO
         ldx     #BUF            ; receive 256 data bytes into BUF (consume the whole command first)
         stx     BUFPTR
         ldx     #256
 wrxlp:  stx     CNT16
-        jsr     rxb
-        ldx     BUFPTR
+        jsr     rxt
+        bcc     wrxok
+wtmo:   jmp     loop            ; timed out: drop the command, program nothing
+wrxok:  ldx     BUFPTR
         stab    0,x
         inx
         stx     BUFPTR
@@ -288,8 +309,10 @@ do_echo:
         stx     BUFPTR
         ldx     #256
 erxlp:  stx     CNT16
-        jsr     rxb
-        ldx     BUFPTR
+        jsr     rxt
+        bcc     erxok
+        jmp     loop            ; timed out: drop the command
+erxok:  ldx     BUFPTR
         stab    0,x
         inx
         stx     BUFPTR

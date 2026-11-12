@@ -655,7 +655,7 @@ else that can be present at the same time.
 | Range | Owner | Notes |
 |--|--|--|
 | `0x3D80`–`0x3DB8` | `keyevt.S` code (*live*) | non-halting; the live panel / `keyhold.py` keep it resident |
-| `0x3D80`–`0x3FAB` | halting stubs' code: `ramdump.S`, `flashtool.S` (to `0x3FAB`), `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S`/`asfic_push.S` — fine, a halting stub ends with a power-cycle |
+| `0x3D80`–`0x3FD2` | halting stubs' code: `ramdump.S`, `flashtool.S` (to `0x3FD2`), `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S`/`asfic_push.S` — fine, a halting stub ends with a power-cycle |
 | `0x3DC0`–`0x3E08` | `asfic_push.S` code (*live*) | non-halting; `pl_out` / live panel `--pl-out` keep it resident next to `keyevt.S` |
 | `0x3E40`–`0x3F59` | `lcd_raw.S` code (halting) | |
 | `0x3F00`–`0x3F01` | `keyevt.S` parameters EVT, STATE (*live*) | written by the host before each `0x26` |

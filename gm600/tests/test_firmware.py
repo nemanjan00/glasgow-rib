@@ -313,6 +313,17 @@ class FlashStubIntegrationTest(unittest.TestCase):
         self.assertEqual(bytes(self.m.flash), pl_patch.patch_image(self.flash))
 
 
+    def test_cut_off_write_times_out_and_attach_is_safe(self):
+        # a 'W' cut off mid-data (dropped link) must not swallow a reconnecting host's bytes as data
+        before = bytes(self.m.flash)
+        self.m.sci_out.clear()
+        self.m.feed_rx(bytes([ord("W"), 15, 0x5E, 0x00]) + bytes(range(100)))   # a pl_patch sector, cut off
+        self.c.run(max_insns=4_000_000, cop_timeout=0)                         # > the ~1 s receive timeout
+        pat = bytes((i * 37 + 11) & 0xFF for i in range(256))
+        self.assertEqual(self._cmd([ord("E")] + list(pat), 256), pat)            # what --attach sends first
+        self.assertEqual(bytes(self.m.flash), before)                           # nothing was programmed
+
+
 class BootFaultInjectionTest(unittest.TestCase):
     """Reproduce the real-radio brick in the VM: corrupting page 3 (device 0xC000 — boot-path code)
     makes the firmware execute garbage, hit an SWI, vector to the 0x8EE4 'BRA *' fault spin, and

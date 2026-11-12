@@ -14,6 +14,10 @@ the keypad-remote firmware patch (see ../FIRMWARE.md and ../FLASH_WRITE.md).
     python3 flashtool.py patch [keypad|pl] flash.bin   # apply a patch (keypad = default)
     python3 flashtool.py revert [keypad|pl] flash.bin  # restore the original bytes of its sectors
 
+    --attach (any command but check): don't upload/launch — talk to a flashtool stub that is STILL
+    RUNNING from an earlier session (the firmware is halted then, so SBEP can't upload anything). Use it
+    to re-run or revert after a failed write, before any power-cycle. Liveness = an 'E' echo first.
+
     keypad: the read_adc override (page 0, 3 sectors). pl: accessory pin 4 = "speaker unmuted"
     (gm600py.firmware.pl_patch; 2 fixed-region sectors 0x38F00 + 0x3DE00). flash.bin = the golden image;
     for pl every live sector must equal the golden's (or already the patched) bytes before a write.
@@ -184,12 +188,25 @@ def _apply_pl(radio, revert, golden):
         if cur not in (orig, new):
             sys.exit(f"ABORT: live sector 0x{base:05X} is neither the golden original nor the patched "
                      f"version (starts {cur[:8].hex()}); not writing.")
-        print(f"sector 0x{base:05X}: programming...")
-        write_sector(radio, base, want)
-        back = read_sector(radio, base)
-        if back != want:
-            sys.exit(f"VERIFY FAILED @0x{base:05X}: read back {back[:8].hex()}...; the radio may be "
-                     "partly written — re-run after fixing the cause (the T48 + golden image recover it).")
+        for attempt in (1, 2):                        # one in-session retry
+            print(f"sector 0x{base:05X}: programming (attempt {attempt})...")
+            try:
+                write_sector(radio, base, want)
+                back = read_sector(radio, base)
+            except sbep.SBEPError as e:
+                back = None
+                print(f"  link error: {e}")
+                time.sleep(1.5)                       # > the stub's ~1 s receive timeout: it drops
+                radio.drain()                         # a cut-off command and is back in its loop
+            if back == want:
+                break
+            print(f"  read-back {'mismatch' if back is not None else 'missing'}")
+        else:
+            verb = "revert" if revert else "patch"
+            sys.exit(f"VERIFY FAILED @0x{base:05X} twice. DO NOT power-cycle: the stub is still running. "
+                     f"Retry with `flashtool.py --attach {verb} pl <golden>`, or undo with "
+                     f"`flashtool.py --attach {'patch' if revert else 'revert'} pl <golden>`; "
+                     "if the link is gone for good, the T48 + golden image recover it.")
         print(f"sector 0x{base:05X}: verified.")
     print("done ('revert')." if revert else "done — pl patch applied; power-cycle (12 V off first).")
 
@@ -233,6 +250,10 @@ def _apply(radio, revert):
 
 
 def main(argv):
+    attach = "--attach" in argv
+    argv = [a for a in argv if a != "--attach"]
+    if attach and len(argv) > 1 and argv[1] == "check":
+        sys.exit("check needs the running firmware (SBEP 0x11 reads); it can't --attach")
     if len(argv) < 2 or argv[1] not in ("probe", "read", "echo", "check", "patch", "revert"):
         sys.exit(__doc__)
     which, golden = "keypad", None
@@ -254,8 +275,16 @@ def main(argv):
             for base, _, _ in pl_patch.patch_diff(golden):
                 cpu = 0x8000 + (base - 0x38000)
                 fixed[base] = b"".join(radio.read_block(cpu + o, 64) for o in range(0, SECTOR, 64))
-        print(f"serial {radio.id_string(1)}; uploading {len(stub)}-byte stub, launching...")
-        upload_and_launch(radio, org, stub)
+        if attach:
+            time.sleep(1.5)                           # let a cut-off command time out in the stub
+            radio.drain()
+            sent, got = echo_test(radio)              # liveness, no flash access
+            if got != sent:
+                sys.exit("--attach: the stub didn't echo 256 bytes back; not continuing")
+            print("attached to the running flashtool stub (echo OK)")
+        else:
+            print(f"serial {radio.id_string(1)}; uploading {len(stub)}-byte stub, launching...")
+            upload_and_launch(radio, org, stub)
         cmd = argv[1]
         if cmd == "probe":
             mfr, dev, lo, up = probe(radio)

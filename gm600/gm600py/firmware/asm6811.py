@@ -20,7 +20,7 @@ from collections import namedtuple
 #   REL   8-bit relative branch
 INSTR = {
     "sei": {"INH": 0x0F}, "cli": {"INH": 0x0E}, "nop": {"INH": 0x01},
-    "tpa": {"INH": 0x07}, "tap": {"INH": 0x06},
+    "tpa": {"INH": 0x07}, "tap": {"INH": 0x06}, "sec": {"INH": 0x0D}, "clc": {"INH": 0x0C},
     "inx": {"INH": 0x08}, "dex": {"INH": 0x09},
     "clra": {"INH": 0x4F}, "clrb": {"INH": 0x5F}, "inca": {"INH": 0x4C}, "incb": {"INH": 0x5C},
     "deca": {"INH": 0x4A}, "decb": {"INH": 0x5A}, "tsta": {"INH": 0x4D}, "tstb": {"INH": 0x5D},
