@@ -31,9 +31,10 @@ Every network/system dialog is **view-only** in WDPS_DP (authored in WDPS_NP); e
 dialog is service-password-gated. Nothing else editable exists in the tree.
 
 **The three "ham" fields** (Registration On Power Up, De/Pre-emphasis, Conventional Mode) live only
-in the **view-only** View → Network → Radio Flags dialog, packed into **Radio Config Byte1/Byte2**
-(both `0x00` on this radio) in the network block — so they are NOT bindable by the WDPS_DP
-write-contrast method. See the Radio Flags entry below. (Switching trunked ↔ conventional itself is
+in the **view-only** View → Network → Radio Flags dialog, so they are NOT bindable by the WDPS_DP
+write-contrast method. Where they land in the radio's network block is unknown. (An earlier decode
+packed them into "Radio Config Byte1"; the DPS files contradict it, see [DPS_FILES.md](DPS_FILES.md).
+The dialog's Radio Config Byte1/Byte2 read `0x00` on this radio, meaning unknown.) See the Radio Flags entry below. (Switching trunked ↔ conventional itself is
 not a codeplug field at all: it's two bytes of retained internal RAM, `0x0085`/`0x0089` — see
 [FIRMWARE.md](FIRMWARE.md) and `tools/gm600_mode.py`.)
 
@@ -87,7 +88,7 @@ Current M08RHF4CK3; selectable table of PTX600/GP600 variants (AZP93VJ*, 146-174
   Voting Timer=10 min; RSSI margins LM1=6, LM2=6, LM3=0, LM4=0.
 - **Radio Flags:** Registration On Power Up=off; Short Addressing PABX Calls=on; Tx Timer Clear
   Down=off; Ignore LAB Subfield=on; Synch. Pattern Type=MPT 1327; **De/Pre-emphasis=MPT 1327**;
-  **Conventional Mode=All**; Radio Config Byte1=0x00, Byte2=0x00. ← the three "ham" fields pack here.
+  **Conventional Mode=All**; Radio Config Byte1=0x00, Byte2=0x00 (meaning unknown; the old "the three ham fields pack here" decode is retracted, see [DPS_FILES.md](DPS_FILES.md)).
 - **Preferential NDD Data:** NDD Sample Duration=1 s; [Entry|Priority|Field Length|Sub-field] = 1|1|9|5.
 - **Access Authorisation:** [#|Identity|Class] = 1|000000000|Zone (Identity range 0-31).
 - **Control Channel List:** [Entry|Channel|Time-shared|Home]: 1:12, 2:9, 3:5, 4:11, 5:3, 6:7, 7:2, …

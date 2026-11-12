@@ -59,15 +59,18 @@ conventional channel stops the hunt.
 ## Does the long-hold write anything to the codeplug?
 
 No — confirmed on the radio: a 640-byte codeplug dump in conventional mode is byte-identical to the
-trunked one. The mode lives in RAM that survives power-off (see above). In the emulator, which now boots
-like the real radio: Holding A latches conventional channel
-`  1` with **no EEPROM write**: the firmware's EEPROM-write routine (page 0 `0x5259`–`0x5293`) never
-runs, during the hold or for 5 M instructions after it. Booting with every value of the
-Conventional Mode field (`0x0E45` bits 6:5 — Inhibit/Dealer/All/RegioNet43, checksums fixed) still
-comes up trunked (`322`). So the mode is RAM state; the emulator starts with cleared RAM, which is
-why it always boots trunked. [RECOVERY.md](RECOVERY.md) attributes a 3-byte EEPROM difference to the
-mode switch, but its addresses were never recorded; to settle it on hardware, dump the codeplug
-(`dump_codeplug.py`) in trunked mode, long-hold A, dump again, and diff.
+trunked one. The mode lives in two bytes of internal RAM that survive power-off (see above),
+`0x0085` and `0x0089` [HW]. In the emulator, holding A latches conventional channel `  1` with **no
+EEPROM write**: the firmware's EEPROM-write routine (page 0 `0x5259`–`0x5293`) never runs, during the
+hold or for 5 M instructions after it [VM].
+
+An older emulator run booted with every value of `0x0E45` bits 6:5 and always came up trunked. That
+experiment assumed the retracted "Radio Config Byte1" bit layout ([DPS_FILES.md](DPS_FILES.md)), so it
+only shows those particular bits don't select the mode [VM]. It says nothing about the DPS
+"Conventional Mode" field (Inhibit/Dealer/All/RegioNet43), whose location in the radio is unknown
+[INF]. That field most likely only permits conventional operation and doesn't select it [INF].
+[RECOVERY.md](RECOVERY.md)'s 3-byte EEPROM difference is not the mode switch: the dumps above are
+byte-identical across modes [HW].
 
 ## How do I tell, over SBEP, that the radio is receiving?
 
