@@ -11,9 +11,14 @@ Read first: `README.md` (the applet, generic). Everything radio-specific lives i
 
 ## Repo conventions
 
-- Commit on `main` and push with `git push origin main`. Don't switch branches.
-- The remote uses the owner's per-project SSH deploy-key alias (set up on their machine; see
-  their global notes). Don't change it to plain `git@github.com:` or HTTPS: those fail.
+- Commit on the current branch and push to `main`; don't switch branches. The local branch may be
+  `master` tracking `origin/main` (this workstation, the lab PC uses `main`): then push with
+  `git push origin master:main`. Before pushing, `git log origin/main..` — you may also be publishing
+  another session's commits; check them for serials/PII.
+- Don't touch the remote or git config. Some hosts use the owner's per-project SSH deploy-key alias;
+  where the remote is plain `git@github.com:…` and works, leave it. HTTPS fails (stale credential).
+- **Before reverse-engineering work, read [METHODOLOGY.md](METHODOLOGY.md)** (order of work, evidence
+  rules) **and the radio's `SHARP_EDGES.md`** (rig/tool gotchas) — they record what cost days before.
 - `docs/` is gitignored and holds local reference material only (see below).
 - JavaScript work (e.g. in `motorola-cps`) goes through the `/implement-js` skill.
 

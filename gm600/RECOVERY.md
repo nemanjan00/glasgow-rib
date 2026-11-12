@@ -104,8 +104,9 @@ clean recovery and a correct fix:
 
 1. **Firmware is byte-perfect.** An in-circuit `ramdump.py --with-eeprom` was diffed against golden:
    **0 bytes differ in the 256 KB flash**; both former corruption sites (`0x2800`, `0xC000`) match
-   golden. (The only NV difference is 3 bytes in the 640 B EEPROM codeplug — the trunking→conventional
-   mode switch — which is not in the flash; `motofix.BIN` is a flash-only *trunking* dump.)
+   golden. (A 3-byte EEPROM difference noted at the time was attributed to the trunking→conventional switch;
+   that attribution is **wrong** — the mode lives in retained internal RAM (`0x0085`/`0x0089`) and a
+   codeplug dump is byte-identical in both modes. Which 3 bytes differed wasn't recorded.)
 2. **The `page<<2` bank fix works in-circuit.** `flash_write_test.py` (with 12 V on pin 12): probe
    `1F DA FE FE` → write a pattern to page 13 (`0x34000`) → read-back matches → **`0xC000` (page 3)
    unchanged** → restore `0x34000` to FF. A "page 13" write now lands at page 13, not page 3. The old

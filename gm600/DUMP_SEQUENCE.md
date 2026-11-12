@@ -53,6 +53,9 @@ binary references used to find it, for future reversing of this and other radios
    is mapped at `0x4000` at the time ([FIRMWARE.md](FIRMWARE.md) has the map). It takes about
    2 minutes at 9600 baud.
 
+   > **Caveat (2026-11-12):** observed while the flash had a bad joint (`0x23` was also dead then);
+   > re-verify on the repaired radio before relying on it.
+   >
    > **Read the full image in _normal_ mode — do not send the step-1 `0x10` first.** Verified
    > in-circuit on `807IYA0903` (2026-11-06): once the radio is in programming mode (`0x10`) it
    > answers only codeplug-region reads (`0x0D80`–`0x0FFF`); `0x11` reads of `0x8000`, `0x4000`,

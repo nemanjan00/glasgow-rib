@@ -2,7 +2,9 @@
 """Remote-control a GM600: read its screen (and press buttons) over the serial link.
 
 The point is the REAL radio. The control head is a multiplexed segment LCD the firmware renders
-into a 21-byte shadow buffer in RAM at 0x37AC (three 7-segment digits + status icons), with an LED
+into a 21-byte shadow buffer in RAM at 0x37AC (the ICON controller only - the three 7-segment digits
+are a separate controller whose struct is cached at 0x3495; see FIRMWARE.md "7-seg digits").
+SUPERSEDED for the real radio by gm600py.ui.live (decodes digits + icons + LEDs + RX state). With an LED
 shadow at 0x34AE. SBEP `0x11` reads any 24-bit address on a running radio, so we can read that live
 buffer over the wire while the radio operates normally -- a true screen mirror, no prog mode, no
 hardware mods. This is what the emulator work was *for*: it found these addresses so we could point
@@ -28,21 +30,21 @@ import os
 import time
 
 
-LCD_ADDR, LCD_LEN = 0x37AC, 21          # LCD segment shadow buffer (3 digits + icons)
+LCD_ADDR, LCD_LEN = 0x37AC, 21          # icon-controller shadow buffer (NOT the digits)
 LED_ADDR, LED_LEN = 0x34AE, 3           # LED shadow
 
 # LCD buffer layout, reversed by diffing captured states (splash / idle "322" / flashing):
 #   bytes 0,1,2,8,19 = status icons / flashing indicators (scanning, the flashing LED, A/B/C marks)
-#   bytes 3,5,6,12,13,14,16,17,18,20 = the three 7-segment digits (multiplexed across COM lines)
+#   bytes 3,5,6,12,13,14,16,17,18,20 were once taken for the digits (an early emulator guess) - WRONG:
+#   they're icon/framing/state bytes; 0x37AC never changes with the displayed number.
 #   bytes 4,7,9,10,11,15 = constant framing
 ICON_BYTES = (0, 1, 2, 8, 19)
-DIGIT_BYTES = (3, 5, 6, 12, 13, 14, 16, 17, 18, 20)
+OTHER_BYTES = (3, 5, 6, 12, 13, 14, 16, 17, 18, 20)   # formerly mislabelled DIGIT_BYTES
 
 
 def fmt_screen(lcd, led):
-    digits = "".join("%02x" % lcd[i] for i in DIGIT_BYTES)
     icons = "".join("%02x" % lcd[i] for i in ICON_BYTES)
-    return "LCD %s  (digits %s / icons %s)  LED %s" % (lcd.hex(), digits, icons, led.hex())
+    return "icon buffer %s  (icons %s)  LED %s   [digits: use gm600_live]" % (lcd.hex(), icons, led.hex())
 
 
 class RadioBackend:

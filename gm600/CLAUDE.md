@@ -3,6 +3,10 @@
 GM600-only facts. Generic applet notes are in the top-level `CLAUDE.md`. Start with `README.md`
 in this folder; it indexes the docs and has the current status.
 
+**Read first:** [STATE.md](STATE.md) (live state), [SHARP_EDGES.md](SHARP_EDGES.md) (rig/link/emulator/
+tool gotchas, power/link triage table) and [../METHODOLOGY.md](../METHODOLOGY.md) (order of work,
+evidence rules: positive controls, no "888" proofs, lost ACK ≠ not written, emulator-negative ≠ fact).
+
 ## Lab rig — what you have at your disposal (READ THIS FIRST after a compaction)
 
 Everything runs on a lab host reached over SSH (its address, login and this repo's path there are in
