@@ -485,7 +485,8 @@ Why `0x37AC` is the ASFIC image:
   - Limits: it needs the host connected (SBEP), and latency is one poll plus a push (~0.1–0.3 s on top
     of the radio's squelch timing).
   - A standalone version needs a firmware-side hook (copy NOT GCB0 → GCB1 where byte 8 is built).
-- **Standalone pin-4 output: flash patch designed, VM-verified, not flashed** (`gm600py/firmware/pl_patch.py`,
+- **Standalone pin-4 output: flash patch — FLASHED and working on the bench radio 2026-11-13 [HW]** (pin 4
+  0.618 V while PL decoded, no host; FLASH_WRITE.md "Done") (`gm600py/firmware/pl_patch.py`,
   cave source `gm600py/stubs/pl_patch.S`):
   - **Hook:** the start of entry 8 (CPU `0x8F7F`, `ldab #21; ldx #$37AC`) becomes `jsr $DE00; brn k`
     (`BD DE 00 21 C4`). BRN is a 2-byte no-op whose operand is chosen so the hook sector's flash XOR is

@@ -8,13 +8,10 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
 unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
 
-- **Radio: OFF** (MP305 output off, 2026-11-12 evening) [HW]; it boots back conventional ch 4. Live panel
-  stopped. To resume: MP305 `output_on()`, then `systemd-run --user --unit=gm600live
-  --working-directory=$HOME/glasgow-rib/gm600 python3 -m gm600py.ui.live` on the lab PC (`http://127.0.0.1:8600/`).
-- **Next session (owner at the bench): the real `pl_patch` write** — FLASH_WRITE.md "pl_patch — real-write
-  procedure". Owner provides: 12 V for pin 12 (connected only after boot, on request), the T48 + TSOP-32
-  adapter + `motofix.BIN` on its PC, eyes on the display after the reboot. Golden image on the lab PC:
-  `~/.local/share/gm600/motofix.BIN`. Rigol DM858 on pin 4/7 (`10.69.2.52:5025`).
+- **Radio: ON, conventional, channel `  4`, running the `pl_patch` firmware** (2026-11-13) [HW]: accessory pin 4
+  = PL-decoded output, standalone (0.618 V while 123.0 Hz PL decoded, ~12 V otherwise; carrier without PL
+  ignored). Flash = golden + pl_patch (FLASH_WRITE.md "Done"); full pre-write backup on the lab PC. Live panel
+  running (`gm600live`, `http://127.0.0.1:8600/`). 12 V is OFF pin 12.
 - **Code layout:** `gm600/gm600py/` package; `tools/*.py` are compatibility shims; tests in
   `gm600/tests/`. Backups → `~/.local/share/gm600/` (or `$GM600_BACKUP_DIR`). Deploy to the lab PC with
   git (push here, `git pull --ff-only` in `~/glasgow-rib` there).
@@ -39,14 +36,9 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
   - a channel once stepped by itself during real PMR traffic [HW observation; RF into the keypad ladders
     is a hypothesis, INF — test by logging AN0–AN2 while keying a transmitter nearby];
   - coax + attenuators for the RF link.
-  - **PL-decoded output on accessory pin 4 — host-polled prototype WORKS [HW]:** `python3 -m gm600py.radio.pl_out`
-    or live panel `--pl-out`; pin 4 0.615 V while PL decoded, 11.99 V otherwise, carrier-without-PL ignored.
-    Pin 4 = ASFIC GCB1 = byte 8 bit 1 of the `0x37AC` image. Standalone: flash patch `pl_patch` (hook entry 8,
-    GCB1 = NOT GCB0) VM-verified, NOT flashed. Flash path ready: exact-sector whitelist, safe order (cave then
-    hook), each sector XOR-neutral; **256-byte transfer proven on the radio** (`flashtool.py echo`, 256/256,
-    2026-11-12) [HW]; pages 14/15 through the bank window read identical to the fixed region and golden
-    (`flashtool.py check pl`) [HW]. Remaining: the real write — owner at the bench; checklist incl. post-reboot checks in
-    FLASH_WRITE.md "pl_patch — real-write procedure". Image bits 1:2 and 4:1 reset the radio.
+  - **PL-decoded output on accessory pin 4 — DONE, flashed, standalone [HW, 2026-11-13].** Pin 4 = ASFIC GCB1 =
+    NOT GCB0 (speaker unmuted) via `pl_patch`. Note: Monitor / a carrier-squelch channel also unmute → pin 4 on.
+    Possible follow-up: PL-strict variant. Image bits 1:2 and 4:1 reset the radio.
 
 ## Invariants (never violate)
 - **Irreversible steps have a hard gate** (flash write, EEPROM write outside `codeplug.apply`, hot air,

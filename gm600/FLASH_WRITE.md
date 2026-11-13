@@ -131,7 +131,7 @@ writes [VM], so keep the stub session open until the final state verifies.
 | Patch | Sectors | Status |
 |--|--|--|
 | keypad override (`keypad_patch`) | page 0 `0x01000`, `0x01E00` | VM-verified; now with boot-XOR compensation |
-| pin 4 = unmuted (`pl_patch`) | fixed region `0x3DE00` (cave) then `0x38F00` (hook) | VM-verified (`PlPatchTest`, flash-write model); every partial state boots |
+| pin 4 = unmuted (`pl_patch`) | fixed region `0x3DE00` (cave) then `0x38F00` (hook) | **FLASHED on the bench radio 2026-11-13** [HW] — see below |
 
 - `flashtool.S` whitelist: pages 0/12/13 through the bank window, plus **exactly** the two
   `pl_patch` sectors (page 14 window `0x4F00` = `0x38F00`, page 15 window `0x5E00` = `0x3DE00`). Every
@@ -187,3 +187,28 @@ After the reboot, in this order:
    unchanged on a carrier without PL.
 
 Revert: `flashtool.py revert pl …` (hook first, then the cave), same gate.
+
+### Done — 2026-11-13 [HW]
+
+- Radio booted, then 12 V on pin 12. `flashtool.py patch pl … --full-backup`:
+  - probe `1F DA FE FE`;
+  - full-chip read in the same stub session equal to the golden image (305 s; saved as
+    `~/.local/share/gm600/flash/full_20261113_122826.bin` on the lab PC);
+  - cave `0x3DE00` then hook `0x38F00`, each verified on the first attempt.
+- 12 V removed, PSU power cycle → normal boot: display `4`, boot-check bits clear (`0x3480` = `02`).
+- `check pl` → **PATCHED in both views** (fixed region via SBEP `0x11` and bank window). Power cycle,
+  clean boot again.
+- Pin 4, **no host software running**, HackRF on ch 004 (RX PL 123.0), Rigol logging every 0.3 s:
+
+  | Phase | Pin 4 |
+  |--|--|
+  | idle | 11.99 V |
+  | carrier + 123.0 Hz PL | **0.618 V**, 0.77 s after the HackRF was started |
+  | TX off | 12.01 V, 0.63 s later |
+  | carrier without PL | no change |
+
+  Faster than the host-polled prototype (1.4 s / 1.27 s), because the pin changes in the same push
+  that unmutes the speaker.
+- Revert, if ever wanted: `flashtool.py revert pl ~/.local/share/gm600/motofix.BIN` (12 V on pin 12
+  after boot; hook first, then the cave). **The radio's flash is no longer the golden image**: golden +
+  `pl_patch` = SHA-256 of `pl_patch.patch_image(golden)`.
