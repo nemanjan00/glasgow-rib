@@ -698,6 +698,43 @@ class ConvPatchTest(unittest.TestCase):
             self.assertEqual(m.ram[0x85], mode)
             self.assertEqual(m.ram[0x89], (0xAA + sum(m.ram[0x84:0x89])) & 0xFF)
 
+    def test_compensation_bra_never_executes(self):
+        # The compensation byte is the operand of the dead `bra` at page 9 0x4D30 (20 FC -> 20 02, which
+        # would land mid-function). Prove it's dead: cold boot, long-hold A both ways, every key, a warm
+        # reset — the PC must never be at 0x4D30/0x4D31 with page 9 banked in.
+        import emu6811
+        import gm600_display
+        from gm600py.firmware import conv_patch
+        cp = os.environ.get("GM600_CP")
+        if not cp:
+            self.skipTest("set GM600_CP=<640-byte codeplug> to run this")
+        with open(cp, "rb") as f:
+            m = emu6811.Mem(conv_patch.patch_image(self._flash()), f.read())
+        c = emu6811.CPU(m)
+        hits = []
+
+        def watch(cpu):
+            if cpu.PC in (0x4D30, 0x4D31) and cpu.m.reg[0x58] >> 2 == 9:
+                hits.append(cpu.PC)
+
+        def run(n=3_000_000):
+            c.run(max_insns=n, cop_timeout=150000, trace=watch)
+
+        def hold(key, n):
+            m.adc = gm600_display.adc_for(gm600_display.BUTTONS[key])
+            run(n)
+            m.adc = list(emu6811.IDLE_ADC)
+            run(1_500_000)
+        c.reset(); run()
+        hold("A", 2_000_000)
+        self.assertEqual(m.ram[0x85], 0x01)                                  # long-hold A -> trunked
+        hold("A", 2_000_000)
+        self.assertEqual(m.ram[0x85], 0xFF)                                  # and back
+        for k in gm600_display.BUTTONS:
+            hold(k, 300_000)
+        c.reset(); run()
+        self.assertEqual(hits, [])
+
     def test_retained_trunked_mode_still_wins(self):
         from gm600py.firmware import conv_patch
         state = [0x90, 0x01, 0x00, 0x00, 0x00]                               # a valid retained "trunked"

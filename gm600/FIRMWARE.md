@@ -635,7 +635,15 @@ Setters `0x46E8` (conventional) / `0x46EF` (trunked) are reached only through th
 immediate at file `0x24D9A` `01`→`FF`, plus the operand of the dead `bra` at `0x4D30` (`FC`→`02`) so the
 sector stays XOR-neutral for the boot flash check. One sector (`0x24D00`, page 9 window `0x4D00`); same
 offsets and bytes in R03.03.21 and R03.03.10. VM: cold boot shows `  1` (stock: `322`), a valid
-retained trunked block still boots trunked (`ConvPatchTest`, both images). Flash with
+retained trunked block still boots trunked (`ConvPatchTest`, both images).
+The compensation byte is only safe if the `bra` at `0x4D30` never runs (patched it is `20 02`, into the
+middle of the next function). Evidence, both images: (1) every `4D 30`/`4D 31` byte pair in flash
+decodes as something else — `bcs`/`bra` offsets, `ldd`/`addd #$004D`, `jsr $564D`, `stab $3D4D` — except
+page 8's `jsr $4D30`, which runs from page 8 and lands on page 8's own `ldab $3AB8`. There is no table
+entry (the fixed region holds none), and nothing ends at `0x4D2F` that could push it as a return address.
+(2) VM PC watch, page 9 banked: 0 hits in 174 M instructions over the whole test suite (75 tests,
+R03.03.21) and in a cold / hold-A both ways / all keys / warm reset / SBEP `0x11`+`0x17`+`0x10` / cold
+scenario on both R03.03.21 and R03.03.10, stock and patched (`test_compensation_bra_never_executes`). Flash with
 `flashtool.py patch conv <this radio's own full dump>`.
 
 Consequence for anything parked in internal RAM: it survives power-off — e.g. the keypad patch's
