@@ -14,6 +14,7 @@ unverified. Untagged = process or tooling, not a claim about the radio. Keep tag
   running (`gm600live`, `http://127.0.0.1:8600/`). 12 V is OFF pin 12.
 - **Channels (2026-11-13, `setchan.py`) [HW, read back]:** ch 1 = **RU726** RX 439.075 / TX 431.475, PL 123.0 TX+RX;
   ch 2 446.13125, ch 3 446.09375 (PMR, no PL); ch 4 438.625 / 431.025 PL 123.0 (HackRF test channel).
+  Ch 1 HackRF-tested on 439.075 [HW]: carrier alone = busy only; +123.0 Hz = PL decoded + pin 4 0.614 V; off = 12 V.
 - **Code layout:** `gm600/gm600py/` package; `tools/*.py` are compatibility shims; tests in
   `gm600/tests/`. Backups → `~/.local/share/gm600/` (or `$GM600_BACKUP_DIR`). Deploy to the lab PC with
   git (push here, `git pull --ff-only` in `~/glasgow-rib` there).
