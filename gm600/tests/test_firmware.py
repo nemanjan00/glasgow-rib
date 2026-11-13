@@ -145,6 +145,22 @@ class KeypadPatchTest(unittest.TestCase):
         self.assertEqual(bytes(rev), img)
 
 
+class SetChanTest(unittest.TestCase):
+    """setchan frequency encoder: reproduces the words DPS wrote into the bench codeplug."""
+
+    def test_freq_words_match_dps(self):
+        from gm600py.radio.setchan import freq_word
+        self.assertEqual(freq_word(446.06875), 0xAC6B)     # ch 1, 6.25 kHz grid (DPS-written)
+        self.assertEqual(freq_word(438.625), 0x31B5)       # ch 4 RX, 5 kHz grid preferred
+        self.assertEqual(freq_word(431.025), 0x2BC5)       # ch 4 TX
+        self.assertEqual(freq_word(439.075), 0x320F)       # RU726 output
+        self.assertEqual(freq_word(431.475), 0x2C1F)       # RU726 input
+        with self.assertRaises(ValueError):
+            freq_word(439.0761)                             # off-grid
+        with self.assertRaises(ValueError):
+            freq_word(146.5)                                # out of band
+
+
 class FlashToolTest(unittest.TestCase):
     """flashtool: the resident AT29C020 stub assembles, and the address mapping is right."""
 
