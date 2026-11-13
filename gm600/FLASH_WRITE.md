@@ -132,10 +132,12 @@ writes [VM], so keep the stub session open until the final state verifies.
 |--|--|--|
 | keypad override (`keypad_patch`) | page 0 `0x01000`, `0x01E00` | VM-verified; now with boot-XOR compensation |
 | pin 4 = unmuted (`pl_patch`) | fixed region `0x3DE00` (cave) then `0x38F00` (hook) | **FLASHED on the bench radio 2026-11-13** [HW] — see below |
+| cold start = conventional (`conv_patch`) | page 9 `0x24D00` (one sector, bank window `0x4D00`) | VM-verified on R03.03.21 and R03.03.10; not flashed yet |
 
 - `flashtool.S` whitelist: pages 0/12/13 through the bank window, plus **exactly** the two
-  `pl_patch` sectors (page 14 window `0x4F00` = `0x38F00`, page 15 window `0x5E00` = `0x3DE00`). Every
-  other page-14/15 sector, including the vectors and the upper boot block, gets `0x85` [VM-tested].
+  `pl_patch` sectors (page 14 window `0x4F00` = `0x38F00`, page 15 window `0x5E00` = `0x3DE00`) and
+  the one `conv_patch` sector (page 9 window `0x4D00` = `0x24D00`). Every other page-9/14/15 sector,
+  including the vectors and the upper boot block, gets `0x85` [VM-tested].
 - **Transport:** the host already sends in 32-byte chunks and drains each echo. `flashtool.py echo`
   (stub command `E`) sends 256 bytes into the stub's sector buffer and gets them back, with no flash
   access and no 12 V. It's the hardware proof of the transfer before any write; afterwards the radio

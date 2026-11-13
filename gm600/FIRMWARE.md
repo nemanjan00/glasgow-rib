@@ -622,6 +622,22 @@ Switching mode re-runs the self-test.
 warm reset): **`0x0085`** = `FF` conventional / `01` trunked, and **`0x0089`** bit 1 = conventional /
 bit 2 = trunked (other bits untouched). Both are needed. The firmware reads them at boot, so two `0x17`
 writes + a `0x10` reset switch the mode (`tools/gm600_mode.py`, ~10 s, both ways on the radio).
+**Mode block and its check byte (page 9, `0x4D32`–`0x4DDF`) [VM + disassembly, both R03.03.21 and
+R03.03.10].** `0x0084`–`0x0088` = state (`0x85` mode, `0x86` conventional channel index), `0x0089` =
+`0xAA + Σ(0x84..0x88)`. (The "bit 1 / bit 2" above is just that sum moving by 2 between `FF` and `01`.)
+At boot (page 9 `0x4106`: `jsr 0x4DAA`) a bad check byte loads the defaults at `0x4D95`: `0x84`=`0x90`,
+**`0x85`=`01` (trunked)**, `0x86`=0 (channel 1), `0x87/88`=0. That is why a radio comes up trunked
+after a long power-off (standby supply exhausted) [HW] and after a DPS write (block clobbered — [INF]).
+Setters `0x46E8` (conventional) / `0x46EF` (trunked) are reached only through the event-handler table
+(fixed region `0xDA02`), i.e. the user's long-hold A.
+
+**`conv_patch` — cold start = conventional channel 1** (`gm600py/firmware/conv_patch.py`): the default
+immediate at file `0x24D9A` `01`→`FF`, plus the operand of the dead `bra` at `0x4D30` (`FC`→`02`) so the
+sector stays XOR-neutral for the boot flash check. One sector (`0x24D00`, page 9 window `0x4D00`); same
+offsets and bytes in R03.03.21 and R03.03.10. VM: cold boot shows `  1` (stock: `322`), a valid
+retained trunked block still boots trunked (`ConvPatchTest`, both images). Flash with
+`flashtool.py patch conv <this radio's own full dump>`.
+
 Consequence for anything parked in internal RAM: it survives power-off — e.g. the keypad patch's
 arm flags were moved to external RAM (`0x3FF0`–`0x3FF2`) so an override can't outlive a reset.
 
@@ -656,7 +672,7 @@ else that can be present at the same time.
 | Range | Owner | Notes |
 |--|--|--|
 | `0x3D80`–`0x3DB8` | `keyevt.S` code (*live*) | non-halting; the live panel / `keyhold.py` keep it resident |
-| `0x3D80`–`0x3FD2` | halting stubs' code: `ramdump.S`, `flashtool.S` (to `0x3FD2`), `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S`/`asfic_push.S` — fine, a halting stub ends with a power-cycle |
+| `0x3D80`–`0x3FDF` | halting stubs' code: `ramdump.S`, `flashtool.S` (to `0x3FDF`), `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S`/`asfic_push.S` — fine, a halting stub ends with a power-cycle |
 | `0x3DC0`–`0x3E08` | `asfic_push.S` code (*live*) | non-halting; `pl_out` / live panel `--pl-out` keep it resident next to `keyevt.S` |
 | `0x3E40`–`0x3F59` | `lcd_raw.S` code (halting) | |
 | `0x3F00`–`0x3F01` | `keyevt.S` parameters EVT, STATE (*live*) | written by the host before each `0x26` |

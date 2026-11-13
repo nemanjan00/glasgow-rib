@@ -329,6 +329,20 @@ class FlashStubIntegrationTest(unittest.TestCase):
         self.assertEqual(bytes(self.m.flash), pl_patch.patch_image(self.flash))
 
 
+    def test_conv_patch_sector_only_on_page_9(self):
+        from gm600py.firmware import conv_patch
+        before = bytes(self.m.flash)
+        for wh in (0x4C, 0x4E, 0x40, 0x7F):                                  # the rest of page 9: refused
+            self.assertEqual(self._cmd([ord("W"), 9, wh, 0] + [0xAA] * 256, 1), b"\x85")
+        self.assertEqual(bytes(self.m.flash), before)
+        (base, orig, new), = conv_patch.patch_diff(self.flash)
+        w = 0x4000 | (base & 0x3FFF); p, wh, wl = base >> 14, w >> 8, w & 0xFF
+        self.assertEqual((p, wh, wl), (9, 0x4D, 0x00))
+        self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), orig)
+        self.assertEqual(self._cmd([ord("W"), p, wh, wl] + list(new), 1), b"\x84")
+        self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), new)
+        self.assertEqual(bytes(self.m.flash), conv_patch.patch_image(self.flash))
+
     def test_cut_off_write_times_out_and_attach_is_safe(self):
         # a 'W' cut off mid-data (dropped link) must not swallow a reconnecting host's bytes as data
         before = bytes(self.m.flash)
@@ -635,6 +649,62 @@ class PlPatchTest(unittest.TestCase):
             self.assertEqual(bool(p[8] & 0x02), not p[8] & 0x01)           # GCB1 = NOT GCB0
             self.assertTrue(p[8] & 0x04)                                    # power latch untouched (on)
         self.assertTrue(any(not p[8] & 0x01 for p in pushes))              # an unmuted push was seen
+
+
+class ConvPatchTest(unittest.TestCase):
+    """conv_patch: a cold start (mode block check fails) defaults to conventional channel 1."""
+
+    def _flash(self):
+        fw = os.environ.get("GM600_FW")
+        if not fw:
+            self.skipTest("set GM600_FW=motofix.BIN to run this")
+        with open(fw, "rb") as f:
+            return f.read()
+
+    def _boot(self, img, ram=None):
+        import emu6811
+        cp = os.environ.get("GM600_CP")
+        if not cp:
+            self.skipTest("set GM600_CP=<640-byte codeplug> to run this")
+        with open(cp, "rb") as f:
+            m = emu6811.Mem(img, f.read())
+        for a, v in (ram or {}).items():
+            m.ram[a] = v
+        c = emu6811.CPU(m)
+        c.reset()
+        c.run(max_insns=3_000_000, cop_timeout=150000)
+        return m
+
+    def test_one_xor_neutral_sector(self):
+        from gm600py.firmware import conv_patch, pl_patch
+        g = self._flash()
+        self.assertEqual(conv_patch.state(g), "original")
+        self.assertEqual([s for s, _, _ in conv_patch.patch_diff(g)], [0x24D00])
+        p = conv_patch.patch_image(g)
+        self.assertEqual(conv_patch.state(p), "patched")
+        self.assertEqual([i for i in range(len(g)) if g[i] != p[i]], [0x24D31, 0x24D9A])
+        self.assertEqual(pl_patch.flash_xor(p), 0xFF)
+        self.assertEqual(pl_patch.flash_xor(conv_patch.patch_image(pl_patch.patch_image(g))), 0xFF)
+        with self.assertRaises(ValueError):
+            conv_patch.patch_image(p)                                        # refuses a patched image
+
+    def test_cold_boot_is_conventional_in_vm(self):
+        from gm600py.firmware import conv_patch, pl_patch
+        g = self._flash()
+        for img, want, mode in ((g, b"322", 0x01),
+                                (conv_patch.patch_image(pl_patch.patch_image(g)), b"  1", 0xFF)):
+            m = self._boot(img)                                              # internal RAM zero: check fails
+            self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), want)
+            self.assertEqual(m.ram[0x85], mode)
+            self.assertEqual(m.ram[0x89], (0xAA + sum(m.ram[0x84:0x89])) & 0xFF)
+
+    def test_retained_trunked_mode_still_wins(self):
+        from gm600py.firmware import conv_patch
+        state = [0x90, 0x01, 0x00, 0x00, 0x00]                               # a valid retained "trunked"
+        ram = dict(zip(range(0x84, 0x89), state))
+        ram[0x89] = (0xAA + sum(state)) & 0xFF
+        m = self._boot(conv_patch.patch_image(self._flash()), ram)
+        self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")
 
 
 if __name__ == "__main__":

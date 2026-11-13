@@ -13,6 +13,8 @@ the keypad-remote firmware patch (see ../FIRMWARE.md and ../FLASH_WRITE.md).
                                                     #   region (SBEP 0x11) AND the bank window (stub 'R')
     python3 flashtool.py patch [keypad|pl] flash.bin   # apply a patch (keypad = default)
     python3 flashtool.py revert [keypad|pl] flash.bin  # restore the original bytes of its sectors
+    python3 flashtool.py check|patch|revert conv ref.bin  # cold start = conventional (1 page-9 sector);
+                                                    #   ref.bin = THIS radio's own full flash dump
 
     --full-backup (patch/revert pl): after the probe, read + save the whole chip in the same stub session
     and abort unless it equals the golden image — the fresh backup without an extra power cycle.
@@ -24,6 +26,9 @@ the keypad-remote firmware patch (see ../FIRMWARE.md and ../FLASH_WRITE.md).
     keypad: the read_adc override (page 0, 3 sectors). pl: accessory pin 4 = "speaker unmuted"
     (gm600py.firmware.pl_patch; 2 fixed-region sectors 0x38F00 + 0x3DE00). flash.bin = the golden image;
     for pl every live sector must equal the golden's (or already the patched) bytes before a write.
+    conv: gm600py.firmware.conv_patch, sector 0x24D00; works on R03.03.21 (0903, ref = motofix.BIN —
+    pl_patch doesn't touch page 9) and R03.03.10 (0298, ref = its own full dump). With --full-backup the
+    live chip must equal ref except sectors that are a known patch's original-or-patched version.
 
 DANGER — UNTESTED on hardware. No flash write has been done on this radio. `probe` is read-only and
 safe; `read` only reads; `patch`/`revert` ERASE AND PROGRAM flash sectors. `patch`/`revert` first
@@ -39,6 +44,7 @@ import time
 import gm600py.firmware.asm6811 as asm6811
 import gm600py.link.sbep as sbep
 from gm600py.firmware.keypad_patch import patch_diff, STUB_SITE
+import gm600py.firmware.conv_patch as conv_patch
 import gm600py.firmware.pl_patch as pl_patch
 
 STUB_S = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flashtool.S")
@@ -169,9 +175,10 @@ def _require_writable(radio):
     print("lower boot block is programmable.")
 
 
-def full_backup(radio, golden=None):
+def full_backup(radio, golden=None, tolerate=None):
     """Read the whole 256 KB chip through the bank window (1024 sector reads), save it to the backup
-    dir, and return it. With golden given, abort unless it matches byte for byte."""
+    dir, and return it. With golden given, abort unless it matches byte for byte — except sectors in
+    tolerate ({base: set of acceptable 256-byte contents})."""
     import gm600py.paths as paths
     img = bytearray()
     t0 = time.time()
@@ -183,25 +190,44 @@ def full_backup(radio, golden=None):
     with open(fn, "wb") as f:
         f.write(img)
     print(f"full chip backup -> {fn}")
-    if golden is not None and bytes(img) != golden:
-        bad = [b for b in range(0, 0x40000, SECTOR) if img[b:b + SECTOR] != golden[b:b + SECTOR]]
+    tolerate = tolerate or {}
+    bad = [] if golden is None else [b for b in range(0, 0x40000, SECTOR)
+                                     if img[b:b + SECTOR] != golden[b:b + SECTOR]
+                                     and bytes(img[b:b + SECTOR]) not in tolerate.get(b, ())]
+    if bad:
         sys.exit(f"ABORT: the live flash differs from the golden image in {len(bad)} sector(s), first "
                  f"0x{bad[0]:05X}; not writing. Backup kept: {fn}")
     return bytes(img)
 
 
-def _apply_pl(radio, revert, golden, backup_first=False):
-    """Apply (or revert) pl_patch: whole-sector writes, cave sector first on apply, jsr sector first on
-    revert. Refuses unless each live sector is exactly the golden original or the patched version.
-    backup_first: read + save the whole chip and require it to equal golden before writing."""
+def _known_patch_sectors(ref):
+    """{sector base: {original, patched}} for every patch that fits ref — what a live chip may differ
+    from ref by in a --full-backup comparison (e.g. 0903 = golden + pl_patch)."""
+    tol = {}
+    for mod in (pl_patch, conv_patch):
+        try:
+            diff = mod.patch_diff(ref)
+        except ValueError:
+            continue
+        for base, orig, new in diff:
+            tol.setdefault(base, set()).update((orig, new))
+    return tol
+
+
+def _apply_pl(radio, revert, golden, backup_first=False, mod=pl_patch):
+    """Apply (or revert) a sector patch (pl_patch, or conv_patch with mod=): whole-sector writes in
+    the module's safe order (pl: cave sector first on apply, jsr sector first on revert). Refuses
+    unless each live sector is exactly the reference original or the patched version.
+    backup_first: read + save the whole chip and require it to equal the reference first (sectors of
+    other known patches may be in either state)."""
     mfr, dev, lo, up = probe(radio)
     print(f"probe: mfr={mfr:02X} device={dev:02X} lower-lockout={lo:02X} upper-lockout={up:02X}")
     if (mfr, dev) != (0x1F, 0xDA):
         sys.exit(f"ABORT: not an AT29C020 (expected 1F/DA, got {mfr:02X}/{dev:02X}) — is the 12 V on "
                  "pin 12 effective?")
     if backup_first:
-        full_backup(radio, golden)
-    steps = pl_patch.patch_diff(golden)               # safe apply order (cave, then hook)
+        full_backup(radio, golden, _known_patch_sectors(golden))
+    steps = mod.patch_diff(golden)                    # safe apply order (pl: cave, then hook)
     if revert:
         steps = steps[::-1]                           # revert: hook first, then the cave
     diff = {base: (orig, new) for base, orig, new in steps}
@@ -231,12 +257,13 @@ def _apply_pl(radio, revert, golden, backup_first=False):
             print(f"  read-back {'mismatch' if back is not None else 'missing'}")
         else:
             verb = "revert" if revert else "patch"
+            name = mod.__name__.rsplit(".", 1)[-1].replace("_patch", "")
             sys.exit(f"VERIFY FAILED @0x{base:05X} twice. DO NOT power-cycle: the stub is still running. "
-                     f"Retry with `flashtool.py --attach {verb} pl <golden>`, or undo with "
-                     f"`flashtool.py --attach {'patch' if revert else 'revert'} pl <golden>`; "
+                     f"Retry with `flashtool.py --attach {verb} {name} <ref>`, or undo with "
+                     f"`flashtool.py --attach {'patch' if revert else 'revert'} {name} <ref>`; "
                      "if the link is gone for good, the T48 + golden image recover it.")
         print(f"sector 0x{base:05X}: verified.")
-    print("done ('revert')." if revert else "done — pl patch applied; power-cycle (12 V off first).")
+    print("done ('revert')." if revert else "done — patch applied; power-cycle (12 V off first).")
 
 
 def _apply(radio, revert):
@@ -288,7 +315,7 @@ def main(argv):
     which, golden = "keypad", None
     if argv[1] in ("patch", "revert", "check"):
         rest = argv[2:]
-        if rest and rest[0] in ("keypad", "pl"):
+        if rest and rest[0] in ("keypad", "pl", "conv"):
             which, rest = rest[0], rest[1:]
         if which == "pl":
             if not rest:
@@ -297,10 +324,24 @@ def main(argv):
             golden = open(rest[0], "rb").read()
             if hashlib.sha256(golden).hexdigest() != pl_patch.GOLDEN_SHA256:
                 sys.exit("ABORT: the image given is not the golden motofix.BIN (SHA-256 mismatch).")
+        if which == "conv":
+            if not rest:
+                sys.exit("usage: flashtool.py check|patch|revert conv <this radio's full flash dump>")
+            import hashlib
+            golden = open(rest[0], "rb").read()
+            h = hashlib.sha256(golden).hexdigest()
+            if not any(h.startswith(k) for k in conv_patch.KNOWN):
+                sys.exit("ABORT: the reference image is not one conv_patch was checked against "
+                         f"({', '.join(conv_patch.KNOWN.values())}).")
+            try:
+                if conv_patch.state(golden) != "original":
+                    sys.exit("ABORT: the reference image is already patched; give the unpatched dump.")
+            except ValueError as e:
+                sys.exit(f"ABORT: {e}")
     org, stub = build_stub()
     with sbep.Radio() as radio:
         fixed = {}
-        if argv[1] == "check":                       # fixed-region view, while the firmware still runs
+        if argv[1] == "check" and which == "pl":    # fixed-region view, while the firmware still runs
             for base, _, _ in pl_patch.patch_diff(golden):
                 cpu = 0x8000 + (base - 0x38000)
                 fixed[base] = b"".join(radio.read_block(cpu + o, 64) for o in range(0, SECTOR, 64))
@@ -327,6 +368,13 @@ def main(argv):
                   + (f"; first mismatch at {bad[0]}: sent {sent[bad[0]]:02X} got {got[bad[0]]:02X}" if bad else ""))
             if bad:
                 raise SystemExit(1)
+        elif cmd == "check" and which == "conv":
+            (base, orig, new), = conv_patch.patch_diff(golden)
+            win = read_sector(radio, base)
+            st = "unpatched (ref original)" if win == orig else "PATCHED" if win == new else "UNEXPECTED"
+            print(f"sector 0x{base:05X}: bank window page {base >> 14} (stub R) = {st}")
+            if st == "UNEXPECTED":
+                raise SystemExit(1)
         elif cmd == "check":
             ok = True
             for base, orig, new in pl_patch.patch_diff(golden):
@@ -347,6 +395,9 @@ def main(argv):
             print(f"read sector 0x{addr & ~0xFF:05X} ({SECTOR} B) -> {argv[3]}")
         elif which == "pl":
             _apply_pl(radio, revert=(cmd == "revert"), golden=golden, backup_first=backup_first)
+        elif which == "conv":
+            _apply_pl(radio, revert=(cmd == "revert"), golden=golden, backup_first=backup_first,
+                      mod=conv_patch)
         else:
             _apply(radio, revert=(cmd == "revert"))
     print("power-cycle the radio now (the stub left it halted).")

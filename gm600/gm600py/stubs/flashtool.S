@@ -13,7 +13,8 @@
 ;                      replies the 256 bytes of that sector.
 ;   'W' (0x57) WRITE : host sends page, winhi, winlo, then 256 data bytes; the stub issues the SDP
 ;                      program prefix, loads the sector, waits tWC, and replies status byte 0x84.
-;                      Whitelist: pages 0, 12, 13 (window 0x40-0x7F), and exactly two fixed-region
+;                      Whitelist: pages 0, 12, 13 (window 0x40-0x7F), exactly one page-9 sector for
+;                      conv_patch (window 0x4D00 = dev 0x24D00), and exactly two fixed-region
 ;                      sectors for pl_patch: page 14 window 0x4F00 (dev 0x38F00) and page 15 window
 ;                      0x5E00 (dev 0x3DE00). Anything else -> 0x85, nothing programmed.
 ;   After a 'W' or 'E' command byte every further byte must arrive within ~0.7 s, else the command is
@@ -243,7 +244,13 @@ wrxok:  ldx     BUFPTR
         beq     wpg
         cmpb    #13
         beq     wpg
-        cmpb    #14             ; page 14: ONLY the pl_patch jsr sector (window 0x4F00 = dev 0x38F00)
+        cmpb    #9              ; page 9: ONLY the conv_patch sector (window 0x4D00 = dev 0x24D00)
+        bne     wp14
+        ldab    WINPTR
+        cmpb    #$4D
+        bne     wrej
+        bra     wpg
+wp14:   cmpb    #14             ; page 14: ONLY the pl_patch jsr sector (window 0x4F00 = dev 0x38F00)
         bne     wp15
         ldab    WINPTR
         cmpb    #$4F
