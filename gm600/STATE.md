@@ -15,6 +15,7 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
   R03.03.21+pl_patch keeping its EEPROM (needs a whitelist unlock in flashtool — not built yet).
   The 0903 notes below describe the radio that is now OFF the bench.
 - **Repeater pair (2026-11-13) [HW]:** both radios ch 1 = RX 431.475 / TX 439.075, PL 123.0 TX+RX (repeater side of RU726). 0903 = RX station (pl_patch, pin 4 -> PTT), 0298 = TX station. 0298 TX timeout 10 -> 90 s via DPS (`0x0F29`). Both radios come up TRUNKED after a long power-off (~hours) and after a DPS write; seconds-long PSU cycles keep conventional.
+- **Repeater WORKS end to end (2026-11-13) [HW]:** HackRF 431.475 + 123.0 Hz voice -> 0903 decodes -> pin 4 keys 0298 (pin 3) -> 0298 transmits 439.075 with the audio. Audio path: 0903 pin 16 (speaker +, 6.2 V DC) -> 10 uF (+ to pin 16) -> pot -> 0298 pin 2. 0903 ch 1 Data = No (Data = Yes makes pin 11 live but keeps the speaker amp muted, so the pl_patch pin 4 never switches). Open: CW ID, UPS / conventional-at-boot (both come up trunked after long power loss), optional PL-flag-driven pin 4 so Data = Yes + flat pin 11 can be used.
 Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
 unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
 
