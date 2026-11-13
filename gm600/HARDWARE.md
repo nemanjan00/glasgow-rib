@@ -17,7 +17,7 @@ inline** — notably **pin 8 is unpopulated on the GM600** (see its row and CONN
 | 8 | GP3 (**NU on GM600**) | — | **GM600: NOT FITTED** — serial-data driver Q0421 + pull-up R0428 are unpopulated, so pin 8 is **dead; leave open** (confirmed by CONNECTION.md + a floating measurement). The "GP3 / shared serial-data-out" function is a generic GM350/900 feature, absent here. |
 | 9 | GP4 | Digital I/P | codeplug-assignable; **grounding forces radio ON** (usually emergency) |
 | 10 | Ignition Sense | Digital I/P | ignition auto-on; R0423 (4.7k, not fitted) = permanent-on |
-| 11 | **RX Audio** | Analog O/P | **continuous discriminator (flat/unfiltered) RX audio, 330 mVRMS = 60% dev, 600 Ω** |
+| 11 | **RX Audio** | Analog O/P | **continuous discriminator (flat/unfiltered) RX audio, 330 mVRMS = 60% dev, 600 Ω**. **GM600: only live on a channel with DPS "Data" = Yes (options bit 0)** [HW 2026-11-13, 0903: Data=No → 0 V, no audio; Data=Yes → speech + PL, ~100 mVRMS for ~0.5 kHz dev voice, 0 V DC] |
 | 12 | GP5 | Digital I/O | codeplug-assignable; **GM600: output-only** (read-back Q0431 NU), driven by ASFIC GCB3 via Q0432; same net as the VPP/bootstrap 12 V — see "Firmware-driven outputs" |
 | 13 | SW B+ Sense | Analog O/P | solder-link configurable (SWB+ default); R0455=0 Ω, max 300 mA — fuse it |
 | **14** | **Hook** | Digital I/P | 0=on-hook,1=off-hook; pull-up to +5 V. (Rig note: ~9 V here enables programming mode.) |
@@ -39,6 +39,9 @@ Microphone connector (8-pin): 3=Mic Hook, 4=GND, 5=Mic Audio, 6=Mic PTT, 7=**BUS
   **Pin 5 = Flat TX Audio** (unfiltered TX inject, bypasses pre-emphasis/processing) and
   **Pin 11 = RX discriminator** (continuous, de-emphasis-free RX). A repeater/data setup can use these
   directly regardless of the De/Pre-emphasis codeplug bit (which is the *internal* path selector).
+  **Correction [HW 2026-11-13]:** on the GM600, pin 11 is dead unless the channel's DPS **Data** option is
+  Yes ("audio is routed to external port"; options byte bit 0). Pin 16 (speaker +, 6.2 V DC bias, bridged)
+  carries squelched audio regardless.
 - **Flash write-enable on accessory pin-12 (confirmed on the radio).** The firmware flash (U0102
   AT29C020) is read-only in stock operation; its control lines (Y08 schematic + bench):
     - `/WE` = CPU `PG7_R_W` (U0101 pin 33), shared with the SRAM;
