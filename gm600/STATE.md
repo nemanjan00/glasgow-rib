@@ -5,6 +5,15 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 `CLAUDE.local.md`.
 
 ## Now
+- **2026-11-13 16:30: BENCH RADIO SWAPPED → 807IYA0298, firmware R03.03.10 (stock, NOT pl_patch; not the
+  R03.03.21 all addresses/stubs were built for — no returning stubs / live panel on it).** [HW] Backed up before
+  anything: EEPROM, full 256 KB flash (`full_0298_R03.03.10_20261113_164210.bin`, sha256 `4250be5f…`, matches an
+  independent 0x11 fixed-region dump), CONFIG D9 / INIT2 00 / BPROT 40 / HPRIO 26 (same as 0903). Codeplug
+  version 02.03 (same). Ch 1 programmed = RU726 (439.075/431.475, PL 123.0 TX+RX, options 0x08) [HW, read back];
+  ch 4 = 438.625/431.025 TX PL 123.0. Booted in trunk mode. Purpose: find which of 0903/0298 has a broken TX
+  (the good-TX one becomes the repeater TX radio, which needs no pl_patch). Optional later: update 0298 to
+  R03.03.21+pl_patch keeping its EEPROM (needs a whitelist unlock in flashtool — not built yet).
+  The 0903 notes below describe the radio that is now OFF the bench.
 Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
 unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
 
