@@ -14,6 +14,9 @@ the keypad-remote firmware patch (see ../FIRMWARE.md and ../FLASH_WRITE.md).
     python3 flashtool.py patch [keypad|pl] flash.bin   # apply a patch (keypad = default)
     python3 flashtool.py revert [keypad|pl] flash.bin  # restore the original bytes of its sectors
 
+    --full-backup (patch/revert pl): after the probe, read + save the whole chip in the same stub session
+    and abort unless it equals the golden image — the fresh backup without an extra power cycle.
+
     --attach (any command but check): don't upload/launch — talk to a flashtool stub that is STILL
     RUNNING from an earlier session (the firmware is halted then, so SBEP can't upload anything). Use it
     to re-run or revert after a failed write, before any power-cycle. Liveness = an 'E' echo first.
@@ -166,13 +169,38 @@ def _require_writable(radio):
     print("lower boot block is programmable.")
 
 
-def _apply_pl(radio, revert, golden):
+def full_backup(radio, golden=None):
+    """Read the whole 256 KB chip through the bank window (1024 sector reads), save it to the backup
+    dir, and return it. With golden given, abort unless it matches byte for byte."""
+    import gm600py.paths as paths
+    img = bytearray()
+    t0 = time.time()
+    for base in range(0, 0x40000, SECTOR):
+        img += read_sector(radio, base)
+        if base % 0x4000 == 0x3F00:
+            print(f"  page {base >> 14:2d} read ({time.time() - t0:5.0f} s)", flush=True)
+    fn = os.path.join(paths.backup_dir("flash"), f"full_{time.strftime('%Y%m%d_%H%M%S')}.bin")
+    with open(fn, "wb") as f:
+        f.write(img)
+    print(f"full chip backup -> {fn}")
+    if golden is not None and bytes(img) != golden:
+        bad = [b for b in range(0, 0x40000, SECTOR) if img[b:b + SECTOR] != golden[b:b + SECTOR]]
+        sys.exit(f"ABORT: the live flash differs from the golden image in {len(bad)} sector(s), first "
+                 f"0x{bad[0]:05X}; not writing. Backup kept: {fn}")
+    return bytes(img)
+
+
+def _apply_pl(radio, revert, golden, backup_first=False):
     """Apply (or revert) pl_patch: whole-sector writes, cave sector first on apply, jsr sector first on
-    revert. Refuses unless each live sector is exactly the golden original or the patched version."""
+    revert. Refuses unless each live sector is exactly the golden original or the patched version.
+    backup_first: read + save the whole chip and require it to equal golden before writing."""
     mfr, dev, lo, up = probe(radio)
     print(f"probe: mfr={mfr:02X} device={dev:02X} lower-lockout={lo:02X} upper-lockout={up:02X}")
     if (mfr, dev) != (0x1F, 0xDA):
-        sys.exit(f"ABORT: not an AT29C020 (expected 1F/DA, got {mfr:02X}/{dev:02X}).")
+        sys.exit(f"ABORT: not an AT29C020 (expected 1F/DA, got {mfr:02X}/{dev:02X}) — is the 12 V on "
+                 "pin 12 effective?")
+    if backup_first:
+        full_backup(radio, golden)
     steps = pl_patch.patch_diff(golden)               # safe apply order (cave, then hook)
     if revert:
         steps = steps[::-1]                           # revert: hook first, then the cave
@@ -251,7 +279,8 @@ def _apply(radio, revert):
 
 def main(argv):
     attach = "--attach" in argv
-    argv = [a for a in argv if a != "--attach"]
+    backup_first = "--full-backup" in argv
+    argv = [a for a in argv if a not in ("--attach", "--full-backup")]
     if attach and len(argv) > 1 and argv[1] == "check":
         sys.exit("check needs the running firmware (SBEP 0x11 reads); it can't --attach")
     if len(argv) < 2 or argv[1] not in ("probe", "read", "echo", "check", "patch", "revert"):
@@ -317,7 +346,7 @@ def main(argv):
             open(argv[3], "wb").write(data)
             print(f"read sector 0x{addr & ~0xFF:05X} ({SECTOR} B) -> {argv[3]}")
         elif which == "pl":
-            _apply_pl(radio, revert=(cmd == "revert"), golden=golden)
+            _apply_pl(radio, revert=(cmd == "revert"), golden=golden, backup_first=backup_first)
         else:
             _apply(radio, revert=(cmd == "revert"))
     print("power-cycle the radio now (the stub left it halted).")
