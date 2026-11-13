@@ -8,10 +8,12 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
 Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
 unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
 
-- **Radio: ON, conventional, channel `  4`, running the `pl_patch` firmware** (2026-11-13) [HW]: accessory pin 4
+- **Radio: ON, conventional, channel `  1` = RU726, running the `pl_patch` firmware** (2026-11-13) [HW]: accessory pin 4
   = PL-decoded output, standalone (0.618 V while 123.0 Hz PL decoded, ~12 V otherwise; carrier without PL
   ignored). Flash = golden + pl_patch (FLASH_WRITE.md "Done"); full pre-write backup on the lab PC. Live panel
   running (`gm600live`, `http://127.0.0.1:8600/`). 12 V is OFF pin 12.
+- **Channels (2026-11-13, `setchan.py`) [HW, read back]:** ch 1 = **RU726** RX 439.075 / TX 431.475, PL 123.0 TX+RX;
+  ch 2 446.13125, ch 3 446.09375 (PMR, no PL); ch 4 438.625 / 431.025 PL 123.0 (HackRF test channel).
 - **Code layout:** `gm600/gm600py/` package; `tools/*.py` are compatibility shims; tests in
   `gm600/tests/`. Backups → `~/.local/share/gm600/` (or `$GM600_BACKUP_DIR`). Deploy to the lab PC with
   git (push here, `git pull --ff-only` in `~/glasgow-rib` there).
