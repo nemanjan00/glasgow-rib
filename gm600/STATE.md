@@ -14,6 +14,7 @@ Durable rig/tool details are in `CLAUDE.md`; host-specific access is in the git-
   (the good-TX one becomes the repeater TX radio, which needs no pl_patch). Optional later: update 0298 to
   R03.03.21+pl_patch keeping its EEPROM (needs a whitelist unlock in flashtool — not built yet).
   The 0903 notes below describe the radio that is now OFF the bench.
+- **Repeater pair (2026-11-13) [HW]:** both radios ch 1 = RX 431.475 / TX 439.075, PL 123.0 TX+RX (repeater side of RU726). 0903 = RX station (pl_patch, pin 4 -> PTT), 0298 = TX station. 0298 TX timeout 10 -> 90 s via DPS (`0x0F29`). Both radios come up TRUNKED after a long power-off (~hours) and after a DPS write; seconds-long PSU cycles keep conventional.
 Evidence tags: **[HW]** measured on the radio · **[VM]** seen in the emulator only · **[INF]** inferred /
 unverified. Untagged = process or tooling, not a claim about the radio. Keep tagging new claims.
 

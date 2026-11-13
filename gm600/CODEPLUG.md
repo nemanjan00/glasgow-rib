@@ -52,7 +52,7 @@ This radio: 4 channels at `0x0F67/0x6E/0x75/0x7C`. `0x0F83` onward is the Shortf
 
 - **MPT own-number (identity):** BE16 at `0x0F0B` = `0x0142` = **322** (field `MPT1327_OWN_IDENT`).
 - **Serial:** ASCII `807IYA0903CG` at `0x0D88` (also returned by `23 01`).
-- **Transmit timeout:** enabled + duration 10 s (GUI), stored in the personality block.
+- **Transmit timeout duration: `0x0F29`, u8, plain seconds (DPS range 1-255)** [HW, DPS write-contrast 2026-11-13 on 807IYA0298: Duration 10 -> 90 changed only `0x0F29` `0A->5A` + personality checksum `0x0FF4`]. Radio behaviour at 10 s [HW]: short warning beep at half the duration, TX cut + continuous beep at the full duration until PTT is released. The enable bit is not bound yet (both radios: on).
 
 ## Complete field inventory (static)
 
