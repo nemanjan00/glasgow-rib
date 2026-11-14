@@ -15,6 +15,14 @@ the keypad-remote firmware patch (see ../FIRMWARE.md and ../FLASH_WRITE.md).
     python3 flashtool.py revert [keypad|pl] flash.bin  # restore the original bytes of its sectors
     python3 flashtool.py check|patch|revert conv ref.bin  # cold start = conventional (1 page-9 sector);
                                                     #   ref.bin = THIS radio's own full flash dump
+    python3 flashtool.py update motofix.BIN ref.bin [--pl] [--conv]   # FULL-CHIP update to golden
+                                                    #   R03.03.21 (+ patches), keeping the EEPROM; ref.bin =
+                                                    #   THIS radio's own full dump (e.g. 0298 R03.03.10)
+
+    update: full backup (must equal ref), stub unlock 'U', every differing sector (vectors last) programmed
+    and read back, then the WHOLE chip read back against the target. Needs both boot blocks unlocked
+    (FE/FE). A cut link: `--attach update ...` resumes (only ref-or-target sectors are touched). Power
+    loss mid-way = T48 with the target image.
 
     --full-backup (patch/revert pl): after the probe, read + save the whole chip in the same stub session
     and abort unless it equals the golden image — the fresh backup without an extra power cycle.
@@ -148,11 +156,13 @@ def _backup_live(base, data):
     print(f"  backed up live sector 0x{base:05X} -> {fn}")
 
 
-def write_sector(radio, dev_addr, data, *, require_erased=False):
+def write_sector(radio, dev_addr, data, *, require_erased=False, backup=True):
+    """backup=False only for update, which saved the whole chip before its first write."""
     assert len(data) == SECTOR
     base = dev_addr & ~0xFF
-    live = read_sector(radio, base)          # ALWAYS read + back up the before-image first
-    _backup_live(base, live)
+    live = read_sector(radio, base)          # ALWAYS read (+ back up) the before-image first
+    if backup:
+        _backup_live(base, live)
     if require_erased and live != b"\xff" * SECTOR:
         raise sbep.SBEPError(
             f"refusing test write @0x{base:05X}: the LIVE sector is NOT erased "
@@ -214,6 +224,96 @@ def _known_patch_sectors(ref):
     return tol
 
 
+def _program_verified(radio, base, want, retry_hint, backup=True, quiet=False):
+    """Program one sector and read it back; one in-session retry. Exits (stub left running) if both
+    attempts fail."""
+    for attempt in (1, 2):
+        if not quiet or attempt > 1:
+            print(f"sector 0x{base:05X}: programming (attempt {attempt})...")
+        try:
+            write_sector(radio, base, want, backup=backup)
+            back = read_sector(radio, base)
+        except sbep.SBEPError as e:
+            back = None
+            print(f"  link error: {e}")
+            time.sleep(1.5)                           # > the stub's ~0.7 s receive timeout: it drops
+            radio.drain()                             # a cut-off command and is back in its loop
+        if back == want:
+            return
+        print(f"  sector 0x{base:05X} read-back {'mismatch' if back is not None else 'missing'}")
+    sys.exit(f"VERIFY FAILED @0x{base:05X} twice. DO NOT power-cycle: the stub is still running. "
+             f"{retry_hint}; if the link is gone for good, the T48 + the target image recover it.")
+
+
+VECTOR_SECTOR = 0x3FF00                               # reset/interrupt vectors (CPU 0xFF00-0xFFFF)
+
+
+def build_update_target(golden, pl=False, conv=False):
+    """The only images update writes: golden motofix.BIN (SHA-checked) plus the chosen known patches."""
+    import hashlib
+    if hashlib.sha256(golden).hexdigest() != pl_patch.GOLDEN_SHA256:
+        raise ValueError("the base image is not the golden motofix.BIN (SHA-256 mismatch)")
+    img = golden
+    if pl:
+        img = pl_patch.patch_image(img)
+    if conv:
+        img = conv_patch.patch_image(img)
+    return img
+
+
+def plan_update(ref, target):
+    """Sectors that differ, ascending, with the vector sector last."""
+    plan = [b for b in range(0, 0x40000, SECTOR) if ref[b:b + SECTOR] != target[b:b + SECTOR]]
+    if VECTOR_SECTOR in plan:
+        plan.remove(VECTOR_SECTOR)
+        plan.append(VECTOR_SECTOR)
+    return plan
+
+
+def _update(radio, ref, target, attach):
+    """Rewrite the whole chip from ref (this radio's own dump) to target, firmware halted throughout.
+    Every live sector must be ref's or target's version before it is touched (so a resumed --attach
+    run just carries on); the final full read-back must equal target before a power-cycle."""
+    mfr, dev, lo, up = probe(radio)
+    print(f"probe: mfr={mfr:02X} device={dev:02X} lower-lockout={lo:02X} upper-lockout={up:02X}")
+    if (mfr, dev) != (0x1F, 0xDA):
+        sys.exit(f"ABORT: not an AT29C020 (expected 1F/DA, got {mfr:02X}/{dev:02X}) — is the 12 V on "
+                 "pin 12 effective?")
+    if (lo, up) != (0xFE, 0xFE):
+        sys.exit("ABORT: a boot block is LOCKED; a full update writes both. Use the T48.")
+    tol = _known_patch_sectors(ref)
+    if not attach:
+        full_backup(radio, ref, tol)                  # live must be ref (known patch sectors either way)
+    plan = plan_update(ref, target)
+    print(f"{len(plan)} sector(s) to program")
+    if _cmd(radio, b"U\x5A\xA5", 1) != b"\x84":
+        sys.exit("ABORT: the stub refused the unlock; nothing written.")
+    t0 = time.time()
+    for n, base in enumerate(plan, 1):
+        want = target[base:base + SECTOR]
+        cur = read_sector(radio, base)
+        if cur == want:
+            continue
+        if cur != ref[base:base + SECTOR] and cur not in tol.get(base, ()):
+            sys.exit(f"ABORT at 0x{base:05X}: the live sector is neither this radio's original nor the "
+                     f"target (starts {cur[:8].hex()}). DO NOT power-cycle; the stub is still running.")
+        _program_verified(radio, base, want,
+                          "Resume with `flashtool.py --attach update <golden> <ref> [--pl] [--conv]`",
+                          backup=False, quiet=True)
+        if n % 16 == 0 or n == len(plan):
+            el = time.time() - t0
+            print(f"  {n}/{len(plan)} sectors ({el:4.0f} s, ~{el / n * (len(plan) - n):4.0f} s left)", flush=True)
+    print("final read-back of the whole chip...")
+    bad = []
+    for base in range(0, 0x40000, SECTOR):
+        if read_sector(radio, base) != target[base:base + SECTOR]:
+            bad.append(base)
+    if bad:
+        sys.exit(f"FINAL VERIFY FAILED in {len(bad)} sector(s), first 0x{bad[0]:05X}. DO NOT power-cycle; "
+                 "re-run with --attach update ... to fix them.")
+    print("whole chip == target. Remove the 12 V from pin 12, then power-cycle.")
+
+
 def _apply_pl(radio, revert, golden, backup_first=False, mod=pl_patch):
     """Apply (or revert) a sector patch (pl_patch, or conv_patch with mod=): whole-sector writes in
     the module's safe order (pl: cave sector first on apply, jsr sector first on revert). Refuses
@@ -242,26 +342,11 @@ def _apply_pl(radio, revert, golden, backup_first=False, mod=pl_patch):
         if cur not in (orig, new):
             sys.exit(f"ABORT: live sector 0x{base:05X} is neither the golden original nor the patched "
                      f"version (starts {cur[:8].hex()}); not writing.")
-        for attempt in (1, 2):                        # one in-session retry
-            print(f"sector 0x{base:05X}: programming (attempt {attempt})...")
-            try:
-                write_sector(radio, base, want)
-                back = read_sector(radio, base)
-            except sbep.SBEPError as e:
-                back = None
-                print(f"  link error: {e}")
-                time.sleep(1.5)                       # > the stub's ~0.7 s receive timeout: it drops
-                radio.drain()                         # a cut-off command and is back in its loop
-            if back == want:
-                break
-            print(f"  read-back {'mismatch' if back is not None else 'missing'}")
-        else:
-            verb = "revert" if revert else "patch"
-            name = mod.__name__.rsplit(".", 1)[-1].replace("_patch", "")
-            sys.exit(f"VERIFY FAILED @0x{base:05X} twice. DO NOT power-cycle: the stub is still running. "
-                     f"Retry with `flashtool.py --attach {verb} {name} <ref>`, or undo with "
-                     f"`flashtool.py --attach {'patch' if revert else 'revert'} {name} <ref>`; "
-                     "if the link is gone for good, the T48 + golden image recover it.")
+        verb = "revert" if revert else "patch"
+        name = mod.__name__.rsplit(".", 1)[-1].replace("_patch", "")
+        _program_verified(radio, base, want,
+                          f"Retry with `flashtool.py --attach {verb} {name} <ref>`, or undo with "
+                          f"`flashtool.py --attach {'patch' if revert else 'revert'} {name} <ref>`")
         print(f"sector 0x{base:05X}: verified.")
     print("done ('revert')." if revert else "done — patch applied; power-cycle (12 V off first).")
 
@@ -307,11 +392,24 @@ def _apply(radio, revert):
 def main(argv):
     attach = "--attach" in argv
     backup_first = "--full-backup" in argv
-    argv = [a for a in argv if a not in ("--attach", "--full-backup")]
+    upd_pl, upd_conv = "--pl" in argv, "--conv" in argv
+    argv = [a for a in argv if a not in ("--attach", "--full-backup", "--pl", "--conv")]
     if attach and len(argv) > 1 and argv[1] == "check":
         sys.exit("check needs the running firmware (SBEP 0x11 reads); it can't --attach")
-    if len(argv) < 2 or argv[1] not in ("probe", "read", "echo", "check", "patch", "revert"):
+    if len(argv) < 2 or argv[1] not in ("probe", "read", "echo", "check", "patch", "revert", "update"):
         sys.exit(__doc__)
+    if argv[1] == "update":
+        if len(argv) != 4:
+            sys.exit("usage: flashtool.py [--attach] update <golden motofix.BIN> <this radio's dump> [--pl] [--conv]")
+        try:
+            upd_target = build_update_target(open(argv[2], "rb").read(), upd_pl, upd_conv)
+        except ValueError as e:
+            sys.exit(f"ABORT: {e}")
+        upd_ref = open(argv[3], "rb").read()
+        if len(upd_ref) != 0x40000:
+            sys.exit("ABORT: the reference dump is not 256 KB")
+        print(f"update: {len(plan_update(upd_ref, upd_target))} sectors differ "
+              f"(target = golden{' + pl' if upd_pl else ''}{' + conv' if upd_conv else ''})")
     which, golden = "keypad", None
     if argv[1] in ("patch", "revert", "check"):
         rest = argv[2:]
@@ -395,6 +493,8 @@ def main(argv):
             print(f"read sector 0x{addr & ~0xFF:05X} ({SECTOR} B) -> {argv[3]}")
         elif which == "pl":
             _apply_pl(radio, revert=(cmd == "revert"), golden=golden, backup_first=backup_first)
+        elif cmd == "update":
+            _update(radio, upd_ref, upd_target, attach)
         elif which == "conv":
             _apply_pl(radio, revert=(cmd == "revert"), golden=golden, backup_first=backup_first,
                       mod=conv_patch)

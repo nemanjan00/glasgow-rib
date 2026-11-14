@@ -680,7 +680,7 @@ else that can be present at the same time.
 | Range | Owner | Notes |
 |--|--|--|
 | `0x3D80`–`0x3DB8` | `keyevt.S` code (*live*) | non-halting; the live panel / `keyhold.py` keep it resident |
-| `0x3D80`–`0x3FDF` | halting stubs' code: `ramdump.S`, `flashtool.S` (to `0x3FDF`), `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S`/`asfic_push.S` — fine, a halting stub ends with a power-cycle |
+| `0x3D80`–`0x3FFB` | halting stubs' code: `ramdump.S`, `flashtool.S` (to `0x3FFB`; 4 bytes left), `lcd_text.S`, `led_cmd.S` | one at a time; overlap `keyevt.S`/`asfic_push.S` — fine, a halting stub ends with a power-cycle |
 | `0x3DC0`–`0x3E08` | `asfic_push.S` code (*live*) | non-halting; `pl_out` / live panel `--pl-out` keep it resident next to `keyevt.S` |
 | `0x3E40`–`0x3F59` | `lcd_raw.S` code (halting) | |
 | `0x3F00`–`0x3F01` | `keyevt.S` parameters EVT, STATE (*live*) | written by the host before each `0x26` |
@@ -689,5 +689,5 @@ else that can be present at the same time.
 | `0x3FF0`–`0x3FF2` | keypad patch FORCE_EN / FORCE_VAL / FORCE_M2 (*live*, only if that patch is flashed) | cleared at boot by design |
 | ↓ from `0x3FFF` | stack of halting stubs that `lds #$3FFF` | grows down over `0x3FF0`–; harmless (firmware is halted, power-cycle follows) |
 
-`flashtool.S` additionally uses `0x2280`–`0x2286` and a 256-byte buffer at `0x2300` (inside the
+`flashtool.S` additionally uses `0x2280`–`0x2287` (`0x2287` = ARMED, the `U` unlock) and a 256-byte buffer at `0x2300` (inside the
 buffer pool, on purpose: only touched after launch, when the firmware is halted for good).

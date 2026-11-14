@@ -78,6 +78,8 @@ class Mem:
         self._fl_id = False                  # AT29C020 software product-ID mode
         self._fl_load = None                 # pending sector program: {byte_offset: value}
         self._fl_sector = None               # base chip address of the sector being loaded
+        self._fl_last = 0                    # E-cycle count of the last sector-load write
+        self.cycles = 0                      # E cycles (approx., 4 per instruction via tick)
         # Snapshot the power-on register file so an MCU reset can restore I/O defaults (below).
         self._reg_poweron = bytes(self.reg)
 
@@ -93,6 +95,9 @@ class Mem:
 
     def tick(self, n=4):
         self.tcnt = (self.tcnt + n) & 0xFFFF
+        self.cycles += n
+        if self._fl_load is not None:
+            self._fl_commit_if_idle()
 
     def feed_rx(self, data):
         """Queue a BUS+ frame for the SCI receiver.
@@ -205,6 +210,7 @@ class Mem:
         # (the AA/55/A0 program prefix, or ID entry/exit); a bare write with no prefix is ignored.
         # The chip's factory SDP state is unknown, but the stub always sends the prefix, which works
         # either way, and leaves SDP on. (No sdp_enabled=False path is modelled.)
+        self._fl_commit_if_idle()
         ca = chip & 0x7FFF                               # AT29C020 commands decode only A0-A14
         self._fl_seq.append((ca, v)); self._fl_seq = self._fl_seq[-3:]
         s = self._fl_seq
@@ -223,14 +229,27 @@ class Mem:
                 self._fl_sector = chip & ~0xFF
             if (chip & ~0xFF) == self._fl_sector:
                 self._fl_load[chip & 0xFF] = v
+                self._fl_last = self.cycles
+
+    # tBLC: the chip ends the byte-load window by itself when no write comes for 150 us (~550 E cycles
+    # at 3.6864 MHz) and programs the sector — no read needed. Back-to-back sector writes rely on it.
+    BLC_CYCLES = 550
+
+    def _fl_commit_if_idle(self):
+        if self._fl_load is not None and self._fl_sector is not None \
+                and self.cycles - self._fl_last > self.BLC_CYCLES:
+            self._fl_commit()
+
+    def _fl_commit(self):
+        sect = bytearray(b"\xFF" * 0x100)                # sector auto-erases, then loaded bytes program
+        for off, val in self._fl_load.items():
+            sect[off] = val
+        self.flash[self._fl_sector:self._fl_sector + 0x100] = sect
+        self._fl_load = None; self._fl_sector = None
 
     def _flash_read(self, chip):
         if self._fl_load is not None and self._fl_sector is not None:
-            sect = bytearray(b"\xFF" * 0x100)            # sector auto-erases, then loaded bytes program
-            for off, val in self._fl_load.items():
-                sect[off] = val
-            self.flash[self._fl_sector:self._fl_sector + 0x100] = sect
-            self._fl_load = None; self._fl_sector = None
+            self._fl_commit()
         if self._fl_id:
             if chip in (0x0002, 0x3FFF2):
                 return 0xFE                              # boot-block lockout: both unlocked

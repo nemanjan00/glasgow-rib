@@ -343,6 +343,20 @@ class FlashStubIntegrationTest(unittest.TestCase):
         self.assertEqual(self._cmd([ord("R"), p, wh, wl], 256), new)
         self.assertEqual(bytes(self.m.flash), conv_patch.patch_image(self.flash))
 
+    def test_unlock_lifts_the_whitelist_only_with_the_magic(self):
+        before = bytes(self.m.flash)
+        p3 = [ord("W"), 3, 0x40, 0x00] + [0xAA] * 256                      # page 3: refused while locked
+        self.assertEqual(self._cmd(p3, 1), b"\x85")
+        self.assertEqual(self._cmd([ord("U"), 0x5A, 0x5A], 1), b"\x85")     # bad magic: still locked
+        self.assertEqual(self._cmd(p3, 1), b"\x85")
+        self.assertEqual(bytes(self.m.flash), before)
+        self.assertEqual(self._cmd([ord("U"), 0x5A, 0xA5], 1), b"\x84")
+        self.assertEqual(self._cmd([ord("W"), 0, 0xD5, 0x00] + [0xAA] * 256, 1), b"\x85")  # window only
+        self.assertEqual(self._cmd([ord("W"), 3, 0x40, 0x10] + [0xAA] * 256, 1), b"\x85")  # aligned only
+        self.assertEqual(bytes(self.m.flash), before)
+        self.assertEqual(self._cmd(p3, 1), b"\x84")
+        self.assertEqual(bytes(self.m.flash[0xC000:0xC100]), b"\xAA" * 256)
+
     def test_cut_off_write_times_out_and_attach_is_safe(self):
         # a 'W' cut off mid-data (dropped link) must not swallow a reconnecting host's bytes as data
         before = bytes(self.m.flash)
@@ -742,6 +756,60 @@ class ConvPatchTest(unittest.TestCase):
         ram[0x89] = (0xAA + sum(state)) & 0xFF
         m = self._boot(conv_patch.patch_image(self._flash()), ram)
         self.assertEqual(bytes(m.ram[0x34BD:0x34C0]), b"322")
+
+
+class FullUpdateTest(unittest.TestCase):
+    """flashtool update: R03.03.10 (0298) -> golden R03.03.21 + pl + conv through the stub in the VM,
+    then the result boots on 0298's own EEPROM, conventional ch 1."""
+
+    def test_update_plan_and_target(self):
+        from gm600py.stubs import flashtool
+        fw = os.environ.get("GM600_FW")
+        if not fw:
+            self.skipTest("set GM600_FW=motofix.BIN to run this")
+        g = open(fw, "rb").read()
+        with self.assertRaises(ValueError):
+            flashtool.build_update_target(g[:-1] + b"\x00")
+        t = flashtool.build_update_target(g, pl=True, conv=True)
+        ref = bytearray(g)
+        ref[0x3FFF0] ^= 1; ref[0x00010] ^= 1; ref[0x24D9A] = 0x01
+        plan = flashtool.plan_update(bytes(ref), t)
+        self.assertEqual(plan[-1], flashtool.VECTOR_SECTOR)                  # vectors last
+        self.assertEqual(plan[:-1], sorted(plan[:-1]))
+        self.assertIn(0x00000, plan)
+
+    def test_full_update_0298_in_vm(self):
+        import emu6811, asm6811
+        from gm600py.stubs import flashtool
+        fw, ref_p, cp = (os.environ.get(k) for k in ("GM600_FW", "GM600_REF0298", "GM600_CP0298"))
+        if not (fw and ref_p and cp):
+            self.skipTest("set GM600_FW=motofix.BIN, GM600_REF0298=<0298 full dump>, GM600_CP0298=<0298 EEPROM>")
+        ref, code = open(ref_p, "rb").read(), open(cp, "rb").read()
+        target = flashtool.build_update_target(open(fw, "rb").read(), pl=True, conv=True)
+        a = asm6811.assemble_file(os.path.join(STUBS, "flashtool.S"))
+        m = emu6811.Mem(ref, code)
+        c = emu6811.CPU(m)
+        c.reset(); c.run(max_insns=3_000_000, cop_timeout=150000)
+        m.ram[a.org:a.org + len(a.code)] = a.code
+        c.PC = a.org; c.sf(emu6811.I, True); c.SP = 0x01FF
+        m.pin12_12v = True
+        c.run(max_insns=100_000, stop_pc=a.symbols["loop"])
+
+        def cmd(payload, n, budget=3_000_000):
+            m.sci_out.clear(); m.feed_rx(bytes(payload))
+            c.run(max_insns=budget, cop_timeout=0)
+            return bytes(m.sci_out[:n])
+        self.assertEqual(cmd(b"I", 4, 500_000), bytes([0x1F, 0xDA, 0xFE, 0xFE]))
+        self.assertEqual(cmd(b"U\x5A\xA5", 1), b"\x84")
+        for base in flashtool.plan_update(ref, target):
+            w = 0x4000 | (base & 0x3FFF)
+            self.assertEqual(cmd([ord("W"), base >> 14, w >> 8, 0] + list(target[base:base + 256]), 1), b"\x84",
+                             hex(base))
+        self.assertEqual(bytes(m.flash), target)
+        m2 = emu6811.Mem(bytes(m.flash), code)                                 # power-cycle: cold boot
+        c2 = emu6811.CPU(m2)
+        c2.reset(); c2.run(max_insns=3_000_000, cop_timeout=150000)
+        self.assertEqual(bytes(m2.ram[0x34BD:0x34C0]), b"  1")
 
 
 if __name__ == "__main__":

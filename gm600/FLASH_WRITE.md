@@ -133,6 +133,35 @@ writes [VM], so keep the stub session open until the final state verifies.
 | keypad override (`keypad_patch`) | page 0 `0x01000`, `0x01E00` | VM-verified; now with boot-XOR compensation |
 | pin 4 = unmuted (`pl_patch`) | fixed region `0x3DE00` (cave) then `0x38F00` (hook) | **FLASHED on the bench radio 2026-11-13** [HW] — see below |
 | cold start = conventional (`conv_patch`) | page 9 `0x24D00` (one sector, bank window `0x4D00`) | VM-verified on R03.03.21 and R03.03.10; not flashed yet |
+| full-chip update (`flashtool.py update`) | every sector that differs (645 for 0298 R03.03.10 → R03.03.21 + pl + conv) | VM-verified end to end; not run on hardware |
+
+### Full-chip update (`flashtool.py update`) — e.g. 0298 R03.03.10 → R03.03.21
+
+Puts golden R03.03.21 (optionally + `pl_patch` / `conv_patch`) on a radio running other firmware,
+keeping its EEPROM (serial, alignment, codeplug: all in the CPU, untouched). VM evidence: R03.03.21
+(+ both patches) boots on 0298's own EEPROM, conventional ch 1, both mode directions; both versions
+reference the same EEPROM addresses.
+
+- **Stub:** command `U` + magic `5A A5` lifts the page whitelist for this launch only (`ARMED` =
+  `0x2287`, cleared at every launch). The window (`0x40`–`0x7F`) and alignment checks stay, so pages
+  14/15 are written through the bank window as for `pl_patch`. VM-tested: bad magic stays locked.
+- **Host:** probe must read `1F DA FE FE` (both boot blocks are rewritten) → full backup, which must
+  equal the given reference dump → unlock → each differing sector, ascending, **vectors (`0x3FF00`)
+  last**, programmed and read back (one retry) → the **whole chip read back** against the target. Only
+  then: 12 V off, power-cycle. Each sector is touched only if it holds the reference's or the
+  target's bytes, so `--attach update …` resumes after a cut link.
+- **Risk:** from the first write until the final read-back the flash holds a mix and won't boot.
+  The stub runs from RAM, so a cut link is recoverable with `--attach`. **Power loss in that window
+  = T48** with the target image. Use a solid supply. About 645 sectors at ~1 s each, plus two full
+  reads (backup, final verify).
+
+```
+# 0298: radio booted, 12 V on pin 12 (after boot), bridge killed
+python3 -m gm600py.stubs.flashtool update ~/.local/share/gm600/motofix.BIN \
+    ~/.local/share/gm600/flash/full_20261113_164210.bin --pl --conv   # 0298 dump, sha 4250be5f…
+# 12 V off, psu_reboot; then check pl / check conv with motofix.BIN, cold-start test
+```
+
 
 - `flashtool.S` whitelist: pages 0/12/13 through the bank window, plus **exactly** the two
   `pl_patch` sectors (page 14 window `0x4F00` = `0x38F00`, page 15 window `0x5E00` = `0x3DE00`) and

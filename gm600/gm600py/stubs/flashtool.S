@@ -20,6 +20,9 @@
 ;   After a 'W' or 'E' command byte every further byte must arrive within ~0.7 s, else the command is
 ;   dropped (nothing programmed) and the stub returns to its loop — so a host that reconnects to a
 ;   still-running stub (flashtool.py --attach) can't have its bytes taken as the tail of a cut-off W.
+;   'U' (0x55) UNLOCK: host sends 0x5A, 0xA5; reply 0x84 (unlocked) or 0x85 (bad magic / timeout).
+;                      Unlocked, 'W' accepts ANY page (window 0x40-0x7F, sector-aligned) — the full-chip
+;                      update (flashtool.py update). Cleared at every launch: the default is the whitelist.
 ;   'E' (0x45) ECHO  : host sends 256 bytes; the stub stores them in BUF exactly as 'W' does and sends
 ;                      them back. No flash access, PA6 untouched -> proves the 256-byte host->stub
 ;                      transfer on the radio with no 12 V and no risk.
@@ -48,6 +51,7 @@ WINPTR  = $2282         ; working window pointer (hi)
 WINLO   = $2283         ; working window pointer (lo)
 BUFPTR  = $2284         ; working buffer pointer
 PAGE    = $2286         ; target page of a 'W' command (whitelist-checked)
+ARMED   = $2287         ; $A5 = whitelist off ('U'); cleared at launch
 BUF     = $2300         ; 256-byte sector buffer. Inside the firmware's 0x2000 buffer pool on purpose:
 ;                         stub (~450 B) + buffer (256 B) don't fit in the free 0x3D80-0x3FFF, and the
 ;                         buffer is only touched after the 0x26 launch, when the firmware is halted
@@ -74,6 +78,8 @@ damaged: bra    damaged         ; no COP kick -> watchdog reset -> the radio reb
 selfok:
         ldaa    SCSR            ; drop any stale received byte (e.g. the echo of the radio's own 0x26
         ldab    SCDR            ; launch ACK): reading SCSR then SCDR clears RDRF and overrun
+        clrb                    ; every launch starts with the whitelist ON
+        stab    ARMED
         jsr     we_setup        ; free PA6 from OC2, make it an output, start in read mode (/OE low)
 loop:   jsr     cop
         jsr     rxb             ; B = command byte
@@ -87,8 +93,24 @@ n2:     cmpb    #$57            ; 'W'
         bne     n3
         jmp     do_write
 n3:     cmpb    #$45            ; 'E'
-        bne     loop
+        bne     n4
         jmp     do_echo
+n4:     cmpb    #$55            ; 'U'
+        bne     loop
+        jsr     rxt             ; magic 1
+        bcs     ulfail
+        cmpb    #$5A
+        bne     ulfail
+        jsr     rxt             ; magic 2
+        bcs     ulfail
+        cmpb    #$A5
+        bne     ulfail
+        stab    ARMED           ; = $A5
+        ldab    #$84
+        bra     ulrep
+ulfail: ldab    #$85
+ulrep:  jsr     txb
+        jmp     loop
 
 ; ------------------------------------------------------------------ helpers
 cop:    ldaa    #$55            ; COP watchdog kick
@@ -223,20 +245,12 @@ do_write:
         jsr     rxt             ; window lo
         bcs     wtmo
         stab    WINLO
-        ldx     #BUF            ; receive 256 data bytes into BUF (consume the whole command first)
-        stx     BUFPTR
-        ldx     #256
-wrxlp:  stx     CNT16
-        jsr     rxt
+        jsr     rxbuf           ; receive 256 data bytes into BUF (consume the whole command first)
         bcc     wrxok
 wtmo:   jmp     loop            ; timed out: drop the command, program nothing
-wrxok:  ldx     BUFPTR
-        stab    0,x
-        inx
-        stx     BUFPTR
-        ldx     CNT16
-        dex
-        bne     wrxlp
+wrxok:  ldab    ARMED           ; unlocked ('U'): any page, still window 0x40-0x7F + aligned
+        cmpb    #$A5
+        beq     wpg
         ldab    PAGE            ; WHITELIST page: 0 (patch) or 12/13 (erased test pages). Checked
         cmpb    #0              ; BEFORE the <<2 encode. Page 3 is LIVE boot code — never writable.
         beq     wpg
@@ -314,22 +328,27 @@ wdi:    dex
         jmp     loop
 
 ; ------------------------------------------------------------------ 'E' echo 256 bytes (transport test)
-do_echo:
-        ldx     #BUF            ; receive exactly like 'W' (same buffer, same per-byte loop)
+rxbuf:  ldx     #BUF            ; receive 256 bytes into BUF with the per-byte timeout; C=1 = timed out
         stx     BUFPTR
         ldx     #256
-erxlp:  stx     CNT16
+rbl:    stx     CNT16
         jsr     rxt
-        bcc     erxok
-        jmp     loop            ; timed out: drop the command
-erxok:  ldx     BUFPTR
+        bcs     rbx
+        ldx     BUFPTR
         stab    0,x
         inx
         stx     BUFPTR
         ldx     CNT16
         dex
-        bne     erxlp
-        ldx     #BUF            ; then send the buffer back
+        bne     rbl
+        clc
+rbx:    rts
+
+do_echo:
+        jsr     rxbuf           ; receive exactly like 'W' (same routine, same buffer)
+        bcc     erxok
+        jmp     loop            ; timed out: drop the command
+erxok:  ldx     #BUF            ; then send the buffer back
         stx     BUFPTR
         ldx     #256
 etxlp:  stx     CNT16
